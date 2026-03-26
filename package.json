@@ -1,0 +1,16 @@
+{
+  "name": "kmbl",
+  "private": true,
+  "packageManager": "npm@10.9.2",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "control-plane": "npm run dev --workspace=@kmbl/control-plane"
+  },
+  "overrides": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
+}

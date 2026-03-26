@@ -1,0 +1,41 @@
+"""Generator raw output → build_candidate record (docs/07 §4.4, §1.9)."""
+
+from __future__ import annotations
+
+from typing import Any
+from uuid import UUID, uuid4
+
+from kmbl_orchestrator.domain import BuildCandidateRecord
+
+
+def normalize_generator_output(
+    raw: dict[str, Any],
+    *,
+    thread_id: UUID,
+    graph_run_id: UUID,
+    generator_invocation_id: UUID,
+    build_spec_id: UUID,
+) -> BuildCandidateRecord:
+    """Map KiloClaw generator JSON into persisted build_candidate columns."""
+    candidate_id = uuid4()
+    patch = raw.get("updated_state") or raw.get("proposed_changes")
+    if not isinstance(patch, dict):
+        patch = {}
+    artifacts = raw.get("artifact_outputs")
+    if not isinstance(artifacts, list):
+        artifacts = [] if artifacts is None else [artifacts]
+    sandbox = raw.get("sandbox_ref")
+    preview = raw.get("preview_url")
+    return BuildCandidateRecord(
+        build_candidate_id=candidate_id,
+        thread_id=thread_id,
+        graph_run_id=graph_run_id,
+        generator_invocation_id=generator_invocation_id,
+        build_spec_id=build_spec_id,
+        candidate_kind="habitat",
+        working_state_patch_json=patch,
+        artifact_refs_json=artifacts,
+        sandbox_ref=str(sandbox) if sandbox is not None else None,
+        preview_url=str(preview) if preview is not None else None,
+        status="generated",
+    )

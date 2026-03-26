@@ -15,13 +15,15 @@ from langgraph.graph import END, START, StateGraph
 
 from kmbl_orchestrator.config import Settings, get_settings
 from kmbl_orchestrator.domain import CheckpointRecord, GraphRunRecord
+from kmbl_orchestrator.errors import RoleInvocationFailed
 from kmbl_orchestrator.graph.state import GraphState
 from kmbl_orchestrator.normalize import (
     normalize_evaluator_output,
     normalize_generator_output,
     normalize_planner_output,
 )
-from kmbl_orchestrator.persistence.repository import InMemoryRepository
+from kmbl_orchestrator.domain import ThreadRecord
+from kmbl_orchestrator.persistence.repository import Repository
 from kmbl_orchestrator.roles.invoke import DefaultRoleInvoker
 
 
@@ -34,7 +36,7 @@ class GraphContext:
 
     def __init__(
         self,
-        repo: InMemoryRepository,
+        repo: Repository,
         invoker: DefaultRoleInvoker,
         settings: Settings,
     ) -> None:
@@ -62,6 +64,7 @@ def build_compiled_graph(ctx: GraphContext):
         cp = CheckpointRecord(
             checkpoint_id=uuid4(),
             thread_id=UUID(state["thread_id"]),
+            graph_run_id=UUID(state["graph_run_id"]),
             checkpoint_kind="pre_role",
             state_json=dict(state),
             context_compaction_json=None,
@@ -88,12 +91,20 @@ def build_compiled_graph(ctx: GraphContext):
             iteration_index=state.get("iteration_index", 0),
         )
         ctx.repo.save_role_invocation(inv)
+        if inv.status == "failed":
+            raise RoleInvocationFailed(
+                phase="planner",
+                graph_run_id=gid,
+                thread_id=tid,
+                detail=raw,
+            )
         spec = normalize_planner_output(
             raw,
             thread_id=tid,
             graph_run_id=gid,
             planner_invocation_id=inv.role_invocation_id,
         )
+        spec = spec.model_copy(update={"raw_payload_json": raw})
         ctx.repo.save_build_spec(spec)
         return {
             "build_spec": raw.get("build_spec"),
@@ -125,6 +136,13 @@ def build_compiled_graph(ctx: GraphContext):
             iteration_index=iteration,
         )
         ctx.repo.save_role_invocation(inv)
+        if inv.status == "failed":
+            raise RoleInvocationFailed(
+                phase="generator",
+                graph_run_id=gid,
+                thread_id=tid,
+                detail=raw,
+            )
         cand = normalize_generator_output(
             raw,
             thread_id=tid,
@@ -132,6 +150,7 @@ def build_compiled_graph(ctx: GraphContext):
             generator_invocation_id=inv.role_invocation_id,
             build_spec_id=UUID(bsid),
         )
+        cand = cand.model_copy(update={"raw_payload_json": raw})
         ctx.repo.save_build_candidate(cand)
         return {
             "build_candidate": {
@@ -171,6 +190,13 @@ def build_compiled_graph(ctx: GraphContext):
             iteration_index=int(state.get("iteration_index", 0)),
         )
         ctx.repo.save_role_invocation(inv)
+        if inv.status == "failed":
+            raise RoleInvocationFailed(
+                phase="evaluator",
+                graph_run_id=gid,
+                thread_id=tid,
+                detail=raw,
+            )
         report = normalize_evaluator_output(
             raw,
             thread_id=tid,
@@ -178,6 +204,7 @@ def build_compiled_graph(ctx: GraphContext):
             evaluator_invocation_id=inv.role_invocation_id,
             build_candidate_id=UUID(bcid),
         )
+        report = report.model_copy(update={"raw_payload_json": raw})
         ctx.repo.save_evaluation_report(report)
         return {
             "evaluation_report": {
@@ -265,12 +292,21 @@ def build_compiled_graph(ctx: GraphContext):
 
 def run_graph(
     *,
-    repo: InMemoryRepository,
+    repo: Repository,
     invoker: DefaultRoleInvoker | None = None,
     settings: Settings | None = None,
     initial: GraphState | None = None,
 ) -> GraphState:
-    """Compile and invoke graph (single-threaded run)."""
+    """
+    Compile and invoke the LangGraph runtime (single-threaded).
+
+    **Invariant:** the ``graph_run_id`` (and thread) must already exist in the
+    repository. Call :func:`persist_graph_run_start` first. The public
+    ``POST /orchestrator/runs/start`` handler does this in order — do not call
+    ``run_graph`` with arbitrary IDs or you will hit FK errors / the guard below.
+
+    Checkpoint ``state_json`` can grow; compaction/splitting is a later concern.
+    """
     settings = settings or get_settings()
     invoker = invoker or DefaultRoleInvoker(settings=settings)
     ctx = GraphContext(repo, invoker, settings)
@@ -283,10 +319,37 @@ def run_graph(
     }
     if initial:
         base.update(initial)
-    final = app.invoke(base)
+    gid0 = base.get("graph_run_id")
+    if gid0 and repo.get_graph_run(UUID(str(gid0))) is None:
+        raise RuntimeError(
+            "graph_run not found — call persist_graph_run_start() before run_graph() "
+            "so thread and graph_run rows exist."
+        )
+    try:
+        final = app.invoke(base)
+    except RoleInvocationFailed:
+        if gid0:
+            repo.update_graph_run_status(
+                UUID(str(gid0)),
+                "failed",
+                datetime.now(timezone.utc).isoformat(),
+            )
+        raise
     assert isinstance(final, dict)
     gid = final.get("graph_run_id")
     if gid:
+        tid_s = final.get("thread_id")
+        if tid_s:
+            post = CheckpointRecord(
+                checkpoint_id=uuid4(),
+                thread_id=UUID(tid_s),
+                graph_run_id=UUID(gid),
+                checkpoint_kind="post_role",
+                state_json=dict(final),
+                context_compaction_json=None,
+            )
+            repo.save_checkpoint(post)
+            repo.update_thread_current_checkpoint(UUID(tid_s), post.checkpoint_id)
         ended = datetime.now(timezone.utc).isoformat()
         repo.update_graph_run_status(UUID(gid), "completed", ended)
         repo.attach_run_snapshot(UUID(gid), dict(final))
@@ -294,7 +357,7 @@ def run_graph(
 
 
 def persist_graph_run_start(
-    repo: InMemoryRepository,
+    repo: Repository,
     *,
     thread_id: str | None,
     graph_run_id: str | None,
@@ -302,18 +365,26 @@ def persist_graph_run_start(
     trigger_type: str,
     event_input: dict[str, Any],
 ) -> tuple[str, str]:
-    """Create graph_run row and return (thread_id, graph_run_id)."""
+    """Ensure thread + graph_run rows exist; return (thread_id, graph_run_id)."""
     tid = thread_id or _uuid()
     gid = graph_run_id or _uuid()
+    tid_u = UUID(tid)
+    repo.ensure_thread(
+        ThreadRecord(
+            thread_id=tid_u,
+            identity_id=UUID(identity_id) if identity_id else None,
+            thread_kind="build",
+            status="active",
+        )
+    )
     gr = GraphRunRecord(
         graph_run_id=UUID(gid),
-        thread_id=UUID(tid),
+        thread_id=tid_u,
         trigger_type=cast(
             Literal["prompt", "resume", "schedule", "system"], trigger_type
         ),
         status="running",
     )
     repo.save_graph_run(gr)
-    _ = identity_id  # TODO: link thread.identity_id when thread table exists
     _ = event_input
     return tid, gid

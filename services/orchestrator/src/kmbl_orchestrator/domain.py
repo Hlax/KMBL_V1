@@ -13,6 +13,16 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+class ThreadRecord(BaseModel):
+    """thread table — continuity container (docs/07 §1.4)."""
+
+    thread_id: UUID
+    identity_id: UUID | None = None
+    thread_kind: str = "build"
+    status: str = "active"
+    current_checkpoint_id: UUID | None = None
+
+
 class RoleInvocationRecord(BaseModel):
     role_invocation_id: UUID
     graph_run_id: UUID
@@ -40,6 +50,7 @@ class GraphRunRecord(BaseModel):
 class CheckpointRecord(BaseModel):
     checkpoint_id: UUID
     thread_id: UUID
+    graph_run_id: UUID
     checkpoint_kind: Literal["pre_role", "post_role", "interrupt", "manual"]
     state_json: dict[str, Any]
     context_compaction_json: dict[str, Any] | None = None
@@ -55,6 +66,7 @@ class BuildSpecRecord(BaseModel):
     constraints_json: dict[str, Any] = Field(default_factory=dict)
     success_criteria_json: list[Any] = Field(default_factory=list)
     evaluation_targets_json: list[Any] = Field(default_factory=list)
+    raw_payload_json: dict[str, Any] | None = None
     status: Literal["active", "superseded", "accepted"] = "active"
     created_at: str = Field(default_factory=_utc_now_iso)
 
@@ -68,6 +80,7 @@ class BuildCandidateRecord(BaseModel):
     candidate_kind: Literal["habitat", "content", "full_app"]
     working_state_patch_json: dict[str, Any] = Field(default_factory=dict)
     artifact_refs_json: list[Any] = Field(default_factory=list)
+    raw_payload_json: dict[str, Any] | None = None
     sandbox_ref: str | None = None
     preview_url: str | None = None
     status: Literal[
@@ -91,4 +104,5 @@ class EvaluationReportRecord(BaseModel):
     issues_json: list[Any] = Field(default_factory=list)
     metrics_json: dict[str, Any] = Field(default_factory=dict)
     artifacts_json: list[Any] = Field(default_factory=list)
+    raw_payload_json: dict[str, Any] | None = None
     created_at: str = Field(default_factory=_utc_now_iso)

@@ -65,6 +65,16 @@ Keep **`NEXT_PUBLIC_ORCHESTRATOR_URL`** in [`apps/control-plane/.env.local`](app
 
 **Supabase credentials:** pull from the Supabase dashboard (Project Settings → API / Database) into repo root `.env` or `.env.local`; the Cursor Supabase extension can help discover values, but the source of truth remains your project. Do not commit secrets.
 
+**Persistence:** If both `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are set (non-empty), the API uses **`SupabaseRepository`** (Phase 1 tables via supabase-py). If either is missing, it falls back to **`InMemoryRepository`** (same process only). Restart the orchestrator after changing env.
+
+**Graph run invariant:** `persist_graph_run_start()` must run before `run_graph()` (the `POST /orchestrator/runs/start` handler does this). Calling `run_graph` with a `graph_run_id` that is not in the repository raises a clear error.
+
+**Thread pointer:** After each completed run, `thread.current_checkpoint_id` is set to the post-run checkpoint (resume / thread loading). Env changes still require a process restart; tests can call `reset_repository_singleton_for_tests()`.
+
+**Raw JSON columns:** `raw_payload_json` on build_spec / build_candidate / evaluation_report stays null until real KiloClaw payloads are stored — normalized JSON columns remain the source of truth for product logic.
+
+**Checkpoint payloads:** Full `state_json` per checkpoint is intentional for v1; compaction or splitting is deferred.
+
 ## Control plane (Next.js)
 
 ```bash
@@ -102,7 +112,7 @@ Open `http://localhost:3000` (home) and `http://localhost:3000/status` (orchestr
 ## What is intentionally thin
 
 - KiloClaw calls are stubbed; real HTTP/MCP wiring is TODO in `services/orchestrator`.
-- Persistence is in-memory; Supabase tables and client implementation are TODO in `packages/storage` and the orchestrator persistence layer.
+- The orchestrator can persist to Supabase when env is set; `packages/storage` remains a TS stub for future app-side use.
 - No auth, no elaborate UI, no deployment manifests beyond run commands above.
 
 ## Next implementation steps

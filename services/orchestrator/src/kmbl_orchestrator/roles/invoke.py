@@ -8,7 +8,11 @@ from uuid import UUID, uuid4
 
 from kmbl_orchestrator.config import Settings, get_settings
 from kmbl_orchestrator.domain import RoleInvocationRecord
-from kmbl_orchestrator.providers.kiloclaw import KiloClawClient, KiloClawStubClient
+from kmbl_orchestrator.providers.kiloclaw import (
+    KiloClawClient,
+    KiloClawInvocationError,
+    get_kiloclaw_client,
+)
 
 
 class RoleInvoker(Protocol):
@@ -34,8 +38,8 @@ class DefaultRoleInvoker:
         client: KiloClawClient | None = None,
         settings: Settings | None = None,
     ) -> None:
-        self._client = client or KiloClawStubClient(settings=settings or get_settings())
-        self._settings = settings or get_settings()
+        s = settings or get_settings()
+        self._client = client or get_kiloclaw_client(s)
 
     def invoke(
         self,
@@ -64,7 +68,18 @@ class DefaultRoleInvoker:
             iteration_index=iteration_index,
         )
 
-        raw_out = self._client.invoke_role(rt, input_payload)
+        try:
+            raw_out = self._client.invoke_role(rt, provider_config_key, input_payload)
+        except KiloClawInvocationError as e:
+            ended = datetime.now(timezone.utc).isoformat()
+            failed = invocation.model_copy(
+                update={
+                    "output_payload_json": e.normalized,
+                    "status": "failed",
+                    "ended_at": ended,
+                }
+            )
+            return failed, e.normalized
         ended = datetime.now(timezone.utc).isoformat()
         done = invocation.model_copy(
             update={

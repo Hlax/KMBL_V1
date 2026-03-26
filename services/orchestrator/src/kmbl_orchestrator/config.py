@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     orchestrator_reload: bool = True
 
     kiloclaw_base_url: str = "https://kiloclaw.example.invalid"
+    # Appended to base URL for HTTP invokes (e.g. "/invoke" → POST {base}/invoke).
+    kiloclaw_invoke_path: str = "/invoke"
     kiloclaw_api_key: str = ""
     kiloclaw_planner_config_key: str = "planner"
     kiloclaw_generator_config_key: str = "generator"

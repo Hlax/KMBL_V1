@@ -1,4 +1,4 @@
-"""Placeholder persistence — swap for Supabase/Postgres per docs/07_DATA_MODEL_AND_STACK_MAP.md."""
+"""Persistence — Supabase (production) or in-memory (tests / no credentials)."""
 
 from __future__ import annotations
 
@@ -12,11 +12,19 @@ from kmbl_orchestrator.domain import (
     EvaluationReportRecord,
     GraphRunRecord,
     RoleInvocationRecord,
+    ThreadRecord,
 )
 
 
 class Repository(Protocol):
-    """TODO: implement with supabase-py or SQLAlchemy + Supabase Postgres."""
+    """System of record for runtime entities (docs/07)."""
+
+    def ensure_thread(self, record: ThreadRecord) -> None: ...
+
+    def update_thread_current_checkpoint(
+        self, thread_id: UUID, checkpoint_id: UUID
+    ) -> None:
+        """Set thread.current_checkpoint_id (e.g. after post_role checkpoint)."""
 
     def save_graph_run(self, record: GraphRunRecord) -> None: ...
     def get_graph_run(self, graph_run_id: UUID) -> GraphRunRecord | None: ...
@@ -36,16 +44,16 @@ class Repository(Protocol):
     def save_evaluation_report(self, record: EvaluationReportRecord) -> None: ...
 
     def attach_run_snapshot(self, graph_run_id: UUID, payload: dict[str, Any]) -> None:
-        """Latest denormalized view for GET /orchestrator/runs/{id}."""
-        ...
+        """Deprecated for DB path — post-run checkpoint holds state; kept for API compat."""
 
     def get_run_snapshot(self, graph_run_id: UUID) -> dict[str, Any] | None: ...
 
 
 class InMemoryRepository:
-    """Development-only store."""
+    """Development / unit tests — no external DB."""
 
     def __init__(self) -> None:
+        self._threads: dict[str, ThreadRecord] = {}
         self._graph_runs: dict[str, GraphRunRecord] = {}
         self._checkpoints: list[CheckpointRecord] = []
         self._role_invocations: list[RoleInvocationRecord] = []
@@ -53,6 +61,26 @@ class InMemoryRepository:
         self._build_candidates: dict[str, BuildCandidateRecord] = {}
         self._evaluation_reports: dict[str, EvaluationReportRecord] = {}
         self._run_snapshots: dict[str, dict[str, Any]] = {}
+
+    def ensure_thread(self, record: ThreadRecord) -> None:
+        key = str(record.thread_id)
+        existing = self._threads.get(key)
+        if existing is not None and record.current_checkpoint_id is None:
+            record = record.model_copy(
+                update={"current_checkpoint_id": existing.current_checkpoint_id}
+            )
+        self._threads[key] = record
+
+    def update_thread_current_checkpoint(
+        self, thread_id: UUID, checkpoint_id: UUID
+    ) -> None:
+        key = str(thread_id)
+        t = self._threads.get(key)
+        if t is None:
+            return
+        self._threads[key] = t.model_copy(
+            update={"current_checkpoint_id": checkpoint_id}
+        )
 
     def save_graph_run(self, record: GraphRunRecord) -> None:
         self._graph_runs[str(record.graph_run_id)] = record
@@ -95,4 +123,15 @@ class InMemoryRepository:
         self._run_snapshots[str(graph_run_id)] = payload
 
     def get_run_snapshot(self, graph_run_id: UUID) -> dict[str, Any] | None:
-        return self._run_snapshots.get(str(graph_run_id))
+        gid = str(graph_run_id)
+        if gid in self._run_snapshots:
+            return self._run_snapshots[gid]
+        post = [
+            c
+            for c in self._checkpoints
+            if str(c.graph_run_id) == gid and c.checkpoint_kind == "post_role"
+        ]
+        if not post:
+            return None
+        post.sort(key=lambda c: c.created_at)
+        return post[-1].state_json

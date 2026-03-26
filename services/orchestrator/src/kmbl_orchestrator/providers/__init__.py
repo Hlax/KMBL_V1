@@ -1,3 +1,17 @@
-from kmbl_orchestrator.providers.kiloclaw import KiloClawClient, KiloClawStubClient
+from kmbl_orchestrator.providers.kiloclaw import (
+    KiloClawClient,
+    KiloClawHttpClient,
+    KiloClawInvocationError,
+    KiloClawStubClient,
+    get_kiloclaw_client,
+    provider_failure,
+)
 
-__all__ = ["KiloClawClient", "KiloClawStubClient"]
+__all__ = [
+    "KiloClawClient",
+    "KiloClawHttpClient",
+    "KiloClawInvocationError",
+    "KiloClawStubClient",
+    "get_kiloclaw_client",
+    "provider_failure",
+]

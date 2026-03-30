@@ -1,0 +1,62 @@
+INFO:     Started server process [71560]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8020 (Press CTRL+C to quit)
+INFO:     127.0.0.1:56573 - "GET /health HTTP/1.1" 200 OK
+run_start stage=request_received elapsed_ms=0.0
+run_start stage=event_input_resolved elapsed_ms=0.1
+persist_graph_run_start graph_run_id=d4652c91-ce66-4440-8a38-e7bcce085649 thread_id=7508c33c-1b5c-4bdc-8cae-2eb1e1636a99 stage=thread_resolved elapsed_ms=339.2
+persist_graph_run_start graph_run_id=d4652c91-ce66-4440-8a38-e7bcce085649 thread_id=7508c33c-1b5c-4bdc-8cae-2eb1e1636a99 stage=graph_run_persisted elapsed_ms=573.6
+run_start stage=graph_run_persisted thread_id=7508c33c-1b5c-4bdc-8cae-2eb1e1636a99 graph_run_id=d4652c91-ce66-4440-8a38-e7bcce085649 elapsed_ms=574.6
+run_start stage=response_returning thread_id=7508c33c-1b5c-4bdc-8cae-2eb1e1636a99 graph_run_id=d4652c91-ce66-4440-8a38-e7bcce085649 total_elapsed_ms=574.7
+INFO:     127.0.0.1:57895 - "POST /orchestrator/runs/start HTTP/1.1" 200 OK
+run_start_background graph_run_id=d4652c91-ce66-4440-8a38-e7bcce085649 stage=background_graph_enter elapsed_ms=0.0
+run_graph graph_run_id=d4652c91-ce66-4440-8a38-e7bcce085649 stage=langgraph_invoke_start elapsed_ms=0.0
+graph_run graph_run_id=d4652c91-ce66-4440-8a38-e7bcce085649 stage=planner_invocation_start elapsed_ms=0.0
+kiloclaw_http_outbound start url=http://100.102.80.113:18789/v1/chat/completions path=/v1/chat/completions role_type=planner model=openclaw:kmbl-planner connect_timeout_sec=30.0 read_timeout_sec=300.0 user_content_len=1715 elapsed_ms=0.0
+INFO:     127.0.0.1:57899 - "GET /orchestrator/runs/d4652c91-ce66-4440-8a38-e7bcce085649 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55040 - "GET /orchestrator/runs/d4652c91-ce66-4440-8a38-e7bcce085649 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64603 - "GET /orchestrator/runs/d4652c91-ce66-4440-8a38-e7bcce085649 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57888 - "GET /orchestrator/runs/d4652c91-ce66-4440-8a38-e7bcce085649 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62933 - "GET /orchestrator/runs/d4652c91-ce66-4440-8a38-e7bcce085649 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54054 - "GET /orchestrator/runs/d4652c91-ce66-4440-8a38-e7bcce085649 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54055 - "GET /orchestrator/runs/d4652c91-ce66-4440-8a38-e7bcce085649 HTTP/1.1" 200 OK
+kiloclaw_http_outbound done url=http://100.102.80.113:18789/v1/chat/completions path=/v1/chat/completions role_type=planner http_status=200 elapsed_ms=13240.1
+kiloclaw_http planner returned variation-only JSON; applying gallery-varied synthetic contract
+graph_run graph_run_id=d4652c91-ce66-4440-8a38-e7bcce085649 stage=planner_invocation_finished elapsed_ms=13240.9
+graph_run graph_run_id=d4652c91-ce66-4440-8a38-e7bcce085649 stage=generator_invocation_start elapsed_ms=0.0
+kiloclaw_http_outbound start url=http://100.102.80.113:18789/v1/chat/completions path=/v1/chat/completions role_type=generator model=openclaw:kmbl-generator connect_timeout_sec=30.0 read_timeout_sec=300.0 user_content_len=1896 elapsed_ms=0.0
+INFO:     127.0.0.1:55868 - "GET /orchestrator/runs/d4652c91-ce66-4440-8a38-e7bcce085649 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60343 - "GET /orchestrator/runs/d4652c91-ce66-4440-8a38-e7bcce085649 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56415 - "GET /orchestrator/runs/d4652c91-ce66-4440-8a38-e7bcce085649 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51280 - "GET /orchestrator/runs/d4652c91-ce66-4440-8a38-e7bcce085649 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51281 - "GET /orchestrator/runs/d4652c91-ce66-4440-8a38-e7bcce085649 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52860 - "GET /orchestrator/runs/d4652c91-ce66-4440-8a38-e7bcce085649 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50756 - "GET /orchestrator/runs/d4652c91-ce66-4440-8a38-e7bcce085649 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62860 - "GET /orchestrator/runs/d4652c91-ce66-4440-8a38-e7bcce085649 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56730 - "GET /orchestrator/runs/d4652c91-ce66-4440-8a38-e7bcce085649 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56731 - "GET /orchestrator/runs/d4652c91-ce66-4440-8a38-e7bcce085649 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52296 - "GET /orchestrator/runs/d4652c91-ce66-4440-8a38-e7bcce085649 HTTP/1.1" 200 OK
+kiloclaw_http_outbound done url=http://100.102.80.113:18789/v1/chat/completions path=/v1/chat/completions role_type=generator http_status=200 elapsed_ms=19582.3
+graph_run graph_run_id=d4652c91-ce66-4440-8a38-e7bcce085649 stage=generator_invocation_finished elapsed_ms=19582.6
+graph_run graph_run_id=d4652c91-ce66-4440-8a38-e7bcce085649 stage=evaluator_invocation_start elapsed_ms=0.0
+kiloclaw_http_outbound start url=http://100.102.80.113:18789/v1/chat/completions path=/v1/chat/completions role_type=evaluator model=openclaw:kmbl-evaluator connect_timeout_sec=30.0 read_timeout_sec=300.0 user_content_len=2819 elapsed_ms=0.0
+INFO:     127.0.0.1:51086 - "GET /orchestrator/runs/d4652c91-ce66-4440-8a38-e7bcce085649 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51941 - "GET /orchestrator/runs/d4652c91-ce66-4440-8a38-e7bcce085649 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56281 - "GET /orchestrator/runs/d4652c91-ce66-4440-8a38-e7bcce085649 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64470 - "GET /orchestrator/runs/d4652c91-ce66-4440-8a38-e7bcce085649 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64471 - "GET /orchestrator/runs/d4652c91-ce66-4440-8a38-e7bcce085649 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64668 - "GET /orchestrator/runs/d4652c91-ce66-4440-8a38-e7bcce085649 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61492 - "GET /orchestrator/runs/d4652c91-ce66-4440-8a38-e7bcce085649 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61627 - "GET /orchestrator/runs/d4652c91-ce66-4440-8a38-e7bcce085649 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58179 - "GET /orchestrator/runs/d4652c91-ce66-4440-8a38-e7bcce085649 HTTP/1.1" 200 OK
+kiloclaw_http_outbound done url=http://100.102.80.113:18789/v1/chat/completions path=/v1/chat/completions role_type=evaluator http_status=200 elapsed_ms=16681.3
+graph_run graph_run_id=d4652c91-ce66-4440-8a38-e7bcce085649 stage=evaluator_invocation_finished elapsed_ms=16681.7
+INFO:     127.0.0.1:65335 - "GET /orchestrator/runs/d4652c91-ce66-4440-8a38-e7bcce085649 HTTP/1.1" 200 OK
+graph_run graph_run_id=d4652c91-ce66-4440-8a38-e7bcce085649 stage=staging_snapshot_creation_start elapsed_ms=0.0
+graph_run graph_run_id=d4652c91-ce66-4440-8a38-e7bcce085649 stage=staging_snapshot_creation_done staging_snapshot_id=3dfbb4de-a924-4530-994a-954851aa42a9 elapsed_ms=225.1
+run_graph graph_run_id=d4652c91-ce66-4440-8a38-e7bcce085649 stage=response_returning elapsed_ms=54616.4
+run_start_background graph_run_id=d4652c91-ce66-4440-8a38-e7bcce085649 stage=background_graph_exit_ok elapsed_ms=54728.7
+INFO:     127.0.0.1:49878 - "GET /orchestrator/runs/d4652c91-ce66-4440-8a38-e7bcce085649 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49879 - "GET /orchestrator/runs/d4652c91-ce66-4440-8a38-e7bcce085649/detail HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55260 - "GET /orchestrator/staging/3dfbb4de-a924-4530-994a-954851aa42a9 HTTP/1.1" 200 OK

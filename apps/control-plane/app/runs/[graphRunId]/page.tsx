@@ -1,0 +1,410 @@
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import type { GraphRunDetail } from "@/lib/api-types";
+import { IdentityContextLinks, IdentityNavExtras } from "@/app/components/IdentityNavExtras";
+import { identityOverviewPath } from "@/lib/identity-nav";
+import { scenarioBadgeLabel } from "@/lib/gallery-strip-visibility";
+import { graphRunAttentionBannerClass } from "@/lib/operator-attention";
+import { serverOriginFromHeaders } from "@/lib/server-origin";
+import { RunResumeActions } from "./RunResumeActions";
+
+export const dynamic = "force-dynamic";
+
+function formatWhen(iso: string | null | undefined) {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleString();
+  } catch {
+    return iso;
+  }
+}
+
+function shortId(id: string) {
+  const s = id.replace(/-/g, "");
+  return s.length >= 8 ? `${s.slice(0, 8)}…` : id;
+}
+
+export default async function GraphRunDetailPage({
+  params,
+}: {
+  params: { graphRunId: string };
+}) {
+  const { graphRunId } = params;
+  const origin = serverOriginFromHeaders();
+  const url = `${origin}/api/runs/${encodeURIComponent(graphRunId)}`;
+
+  let res: Response;
+  try {
+    res = await fetch(url, { cache: "no-store" });
+  } catch (e) {
+    return (
+      <>
+        <p className="muted small cp-crumb-line">
+          <Link href="/runs">← Runs</Link>
+          {" · "}
+          <Link href="/review">Review</Link>
+        </p>
+        <h1 className="pub-page-title">Graph run</h1>
+        <div className="pub-empty" role="alert">
+          <p className="pub-empty__title">Could not reach the server</p>
+          <p className="pub-empty__body">
+            {e instanceof Error ? e.message : String(e)}
+          </p>
+        </div>
+      </>
+    );
+  }
+
+  const text = await res.text();
+  let data: GraphRunDetail | null = null;
+  try {
+    data = JSON.parse(text) as GraphRunDetail;
+  } catch {
+    /* handled below */
+  }
+
+  if (res.status === 404) {
+    notFound();
+  }
+
+  if (res.ok && data?.backend_unimplemented) {
+    return (
+      <>
+        <p className="muted small cp-crumb-line">
+          <Link href="/runs">← Runs</Link>
+          {" · "}
+          <Link href="/review">Review</Link>
+        </p>
+        <h1 className="pub-page-title">Graph run</h1>
+        <div className="pub-empty" role="status">
+          <p className="pub-empty__title">Run detail not available on this build</p>
+          <p className="pub-empty__body">
+            {data.message ??
+              "Persisted run detail requires GET /orchestrator/runs/{id}/detail on the orchestrator."}
+          </p>
+        </div>
+      </>
+    );
+  }
+
+  if (!res.ok || !data?.summary) {
+    const err =
+      typeof (data as GraphRunDetail | null)?.error === "string"
+        ? (data as GraphRunDetail).error
+        : text.slice(0, 400);
+    return (
+      <>
+        <p className="muted small" style={{ marginBottom: "0.75rem" }}>
+          <Link href="/runs">← Runs</Link>
+          {" · "}
+          <Link href="/review">Review</Link>
+        </p>
+        <h1 className="pub-page-title">Graph run</h1>
+        <div className="pub-empty" role="alert">
+          <p className="pub-empty__title">Could not load this run</p>
+          <p className="pub-empty__body mono small">
+            HTTP {res.status}. {err}
+          </p>
+        </div>
+      </>
+    );
+  }
+
+  const s = data.summary;
+  const out = data.associated_outputs ?? {};
+  const timeline = data.timeline ?? [];
+  const invocations = data.role_invocations ?? [];
+  const operatorActions = data.operator_actions ?? [];
+  const scen = scenarioBadgeLabel(data.scenario_badge);
+
+  return (
+    <>
+      <p className="muted small cp-crumb-line">
+        <Link href="/runs">← Runs</Link>
+        {" · "}
+        <Link href="/review">Review</Link>
+        {" · "}
+        <Link href="/publication">Publication</Link>
+        {s.identity_id ? (
+          <>
+            {" · "}
+            <IdentityNavExtras identityId={s.identity_id} />
+          </>
+        ) : null}
+      </p>
+
+      <h1 className="pub-page-title">Graph run</h1>
+      <p className="pub-page-id mono">{s.graph_run_id}</p>
+      {scen ? (
+        <p className="muted small" style={{ marginTop: "-0.25rem", marginBottom: "0.5rem" }}>
+          <span className={scen.className} title={data.scenario_tag ?? ""}>
+            {scen.label}
+          </span>
+          {data.scenario_tag ? (
+            <span className="mono small" style={{ marginLeft: "0.5rem" }}>
+              {data.scenario_tag}
+            </span>
+          ) : null}
+        </p>
+      ) : null}
+
+      <p className="op-banner op-banner--neutral">
+        <strong>Persisted execution</strong> — one orchestrator pass as stored rows. Not a live
+        stream; refresh to update. Review surface is staging; canon is publication.
+      </p>
+
+      <section className="pub-hero">
+        <div className="pub-hero__head">
+          <h2 className="op-section-title" style={{ margin: 0 }}>
+            Run at a glance
+          </h2>
+          <span className="pub-hero__timestamp">Started {formatWhen(s.started_at)}</span>
+        </div>
+        <div className="pub-hero__grid">
+          <div>
+            <span className="pub-hero__label">Status</span>
+            <div className="pub-hero__value">
+              <span className="op-badge op-badge--neutral">{s.status}</span>
+            </div>
+          </div>
+          <div>
+            <span className="pub-hero__label">Trigger</span>
+            <div className="pub-hero__value">{s.trigger_type}</div>
+          </div>
+          <div>
+            <span className="pub-hero__label">Iterations (max)</span>
+            <div className="pub-hero__value">{s.max_iteration_index ?? "—"}</div>
+          </div>
+          <div>
+            <span className="pub-hero__label">State hint</span>
+            <div className="pub-hero__value">{s.run_state_hint || "—"}</div>
+          </div>
+          <div>
+            <span className="pub-hero__label">Ended</span>
+            <div className="pub-hero__value">{formatWhen(s.ended_at)}</div>
+          </div>
+          <div>
+            <span className="pub-hero__label">Attention</span>
+            <div className="pub-hero__value">
+              <span className="mono small">{s.attention_state ?? "—"}</span>
+            </div>
+          </div>
+          <div className="pub-hero__span-full">
+            <span className="pub-hero__label">Identity</span>
+            <div className="pub-hero__value">
+              {s.identity_id ? (
+                <>
+                  <Link href={identityOverviewPath(s.identity_id)} title="Identity overview">
+                    {s.identity_id}
+                  </Link>
+                  <span className="muted small"> · </span>
+                  <IdentityContextLinks identityId={s.identity_id} />
+                </>
+              ) : (
+                <span className="muted">No identity on thread</span>
+              )}
+            </div>
+          </div>
+        </div>
+        <div
+          className={graphRunAttentionBannerClass(s.attention_state)}
+          style={{ marginTop: "0.85rem", marginBottom: 0 }}
+        >
+          <strong>Operator attention</strong> — {s.attention_reason ?? "—"}
+        </div>
+      </section>
+
+      {out.staging_snapshot_id ? (
+        <p className="op-run-output-hint">
+          <strong>Preview and artifacts</strong> are on the staging snapshot (not on this run page).{" "}
+          <Link href={`/review/staging/${encodeURIComponent(out.staging_snapshot_id)}`}>
+            Open staging snapshot →
+          </Link>
+        </p>
+      ) : null}
+
+      <RunResumeActions
+        graphRunId={graphRunId}
+        resumeEligible={data.resume_eligible === true}
+        resumeExplanation={data.resume_operator_explanation ?? null}
+        retryDeferredNote={data.retry_deferred_note ?? null}
+      />
+
+      <div className="op-card">
+        <h2 className="op-section-title">Identifiers & checkpoints</h2>
+        <dl className="pub-lineage-dl">
+          <dt>graph_run_id</dt>
+          <dd className="mono">{s.graph_run_id}</dd>
+          <dt>thread_id</dt>
+          <dd className="mono">{s.thread_id}</dd>
+          <dt>latest_checkpoint_id</dt>
+          <dd className="mono small">{s.latest_checkpoint_id ?? "—"}</dd>
+          <dt>Resume count</dt>
+          <dd>{s.resume_count ?? 0}</dd>
+          <dt>Last resumed</dt>
+          <dd>{formatWhen(s.last_resumed_at)}</dd>
+        </dl>
+      </div>
+
+      <div className="op-card">
+        <h2 className="op-section-title">Operator actions</h2>
+        <p className="muted small" style={{ marginBottom: "0.65rem" }}>
+          Persisted <code>graph_run_event</code> rows (resume, etc.). Not inferred from checkpoints.
+        </p>
+        {operatorActions.length === 0 ? (
+          <p className="muted small">No operator-triggered events for this run.</p>
+        ) : (
+          <ul className="op-list op-list--compact">
+            {operatorActions.map((a, i) => (
+              <li key={`${a.kind}-${a.timestamp}-${i}`} className="op-card op-card--compact">
+                <p className="op-card__title" style={{ marginBottom: "0.25rem" }}>
+                  <span className="op-badge op-badge--operator">operator</span>{" "}
+                  <span>{a.label}</span>
+                </p>
+                <p className="muted small">{formatWhen(a.timestamp)}</p>
+                {a.details && Object.keys(a.details).length > 0 ? (
+                  <details className="small" style={{ marginTop: "0.35rem" }}>
+                    <summary className="muted">Details</summary>
+                    <pre className="op-pre small-pre">{JSON.stringify(a.details)}</pre>
+                  </details>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <div className="op-card">
+        <h2 className="op-section-title">Event timeline</h2>
+        <p className="muted small" style={{ marginBottom: "0.65rem" }}>
+          Stored graph_run_event rows only. <span className="op-badge op-badge--operator">operator</span>{" "}
+          matches API-triggered mutations.
+        </p>
+        {timeline.length === 0 ? (
+          <p className="muted small">No events recorded for this run.</p>
+        ) : (
+          <ul className="op-timeline runs-timeline-compact">
+            {timeline.map((it, i) => (
+              <li
+                key={`${it.event_type}-${it.timestamp}-${i}`}
+                className={it.operator_triggered ? "op-timeline__operator" : undefined}
+              >
+                {it.operator_triggered ? (
+                  <span className="op-timeline__operator-badge op-badge op-badge--operator">
+                    operator
+                  </span>
+                ) : null}
+                <span className="op-timeline__label">{it.label}</span>
+                <span className="op-timeline__at">{formatWhen(it.timestamp)}</span>
+                {it.related_id ? (
+                  <span className="op-timeline__at">
+                    {it.kind === "staging_created" ||
+                    it.kind === "staging_approved" ||
+                    it.kind === "staging_unapproved" ||
+                    it.kind === "staging_rejected" ? (
+                      <Link href={`/review/staging/${encodeURIComponent(it.related_id)}`}>
+                        staging {shortId(it.related_id)}
+                      </Link>
+                    ) : it.kind === "publication_created" ? (
+                      <Link href={`/publication/${encodeURIComponent(it.related_id)}`}>
+                        publication {shortId(it.related_id)}
+                      </Link>
+                    ) : (
+                      <span className="mono small">{shortId(it.related_id)}</span>
+                    )}
+                  </span>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <div className="op-card">
+        <h2 className="op-section-title">Role invocations</h2>
+        <p className="muted small" style={{ marginBottom: "0.65rem" }}>
+          Execution order by <code>started_at</code>. No raw payloads.
+        </p>
+        {invocations.length === 0 ? (
+          <p className="muted small">No role invocations recorded.</p>
+        ) : (
+          <div className="op-table-wrap">
+            <table className="op-table">
+              <thead>
+                <tr>
+                  <th>Role</th>
+                  <th>Status</th>
+                  <th>Iter</th>
+                  <th>Provider</th>
+                  <th>Config</th>
+                  <th>Started</th>
+                  <th>Ended</th>
+                </tr>
+              </thead>
+              <tbody>
+                {invocations.map((r) => (
+                  <tr key={r.role_invocation_id}>
+                    <td className="mono">{r.role_type}</td>
+                    <td>
+                      <span className="op-badge op-badge--neutral">{r.status}</span>
+                    </td>
+                    <td>{r.iteration_index}</td>
+                    <td className="mono small">{r.provider}</td>
+                    <td className="mono small">{r.provider_config_key}</td>
+                    <td className="small">{formatWhen(r.started_at)}</td>
+                    <td className="small">{formatWhen(r.ended_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="op-card">
+        <h2 className="op-section-title">Associated outputs</h2>
+        <p className="muted small" style={{ marginBottom: "0.65rem" }}>
+          Linked build/eval rows and staging/publication when present. Publication appears only if a
+          publication row references this <code>graph_run_id</code>.
+        </p>
+        <div className="run-detail-outputs">
+          <dl className="pub-lineage-dl">
+            <dt>build_spec_id</dt>
+            <dd className="mono">{out.build_spec_id ?? "—"}</dd>
+            <dt>build_candidate_id</dt>
+            <dd className="mono">{out.build_candidate_id ?? "—"}</dd>
+            <dt>evaluation_report_id</dt>
+            <dd className="mono">{out.evaluation_report_id ?? "—"}</dd>
+          </dl>
+          <dl className="pub-lineage-dl">
+            <dt>staging_snapshot_id</dt>
+            <dd className="mono">
+              {out.staging_snapshot_id ? (
+                <Link href={`/review/staging/${encodeURIComponent(out.staging_snapshot_id)}`}>
+                  {out.staging_snapshot_id}
+                </Link>
+              ) : (
+                "—"
+              )}
+            </dd>
+            <dt>publication_snapshot_id</dt>
+            <dd className="mono">
+              {out.publication_snapshot_id ? (
+                <Link href={`/publication/${encodeURIComponent(out.publication_snapshot_id)}`}>
+                  {out.publication_snapshot_id}
+                </Link>
+              ) : (
+                "—"
+              )}
+            </dd>
+          </dl>
+        </div>
+      </div>
+
+      <details className="debug-panel" style={{ marginTop: "1.25rem" }}>
+        <summary>Raw JSON (debug)</summary>
+        <pre className="op-pre">{JSON.stringify(data, null, 2)}</pre>
+      </details>
+    </>
+  );
+}

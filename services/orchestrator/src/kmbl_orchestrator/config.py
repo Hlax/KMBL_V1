@@ -31,20 +31,51 @@ class Settings(BaseSettings):
     orchestrator_port: int = 8000
     # Set false on Windows if --reload causes file-watcher issues (e.g. OneDrive paths).
     orchestrator_reload: bool = True
+    # Mark graph_run rows still "running" longer than this as failed (GET + reconciler). 0 disables.
+    orchestrator_running_stale_after_seconds: int = 3600
+    # POST /orchestrator/runs/start: max wall time for synchronous persist (thread + graph_run rows).
+    # 0 disables (wait indefinitely). Local dev default avoids hanging forever on stuck Supabase I/O.
+    orchestrator_run_start_sync_timeout_sec: float = 120.0
+    # If true: background work runs only one planner role + persist (no generator/evaluator/staging).
+    orchestrator_smoke_planner_only: bool = False
 
     kiloclaw_base_url: str = "https://kiloclaw.example.invalid"
-    # Appended to base URL for HTTP invokes (e.g. "/invoke" → POST {base}/invoke).
-    kiloclaw_invoke_path: str = "/invoke"
+    # KiloClaw gateway OpenAI-compatible chat: POST {base}{path} (default /v1/chat/completions).
+    kiloclaw_invoke_path: str = "/v1/chat/completions"
+    # OpenAI `user` field for stable sessions (gateway routing); optional.
+    kiloclaw_chat_completions_user: str = "kmbl-orchestrator"
+    # auto | stub | http | openclaw_cli — auto: use http when KILOCLAW_API_KEY set, else stub.
+    kiloclaw_transport: str = "auto"
     kiloclaw_api_key: str = ""
-    kiloclaw_planner_config_key: str = "planner"
-    kiloclaw_generator_config_key: str = "generator"
-    kiloclaw_evaluator_config_key: str = "evaluator"
+    # OpenClaw CLI (when kiloclaw_transport=openclaw_cli): executable on PATH, e.g. openclaw
+    kiloclaw_openclaw_executable: str = "openclaw"
+    kiloclaw_openclaw_timeout_sec: int = 300
+    # Must match OpenClaw agents.list ids (see root .env.example — kmbl-planner, not "planner").
+    kiloclaw_planner_config_key: str = "kmbl-planner"
+    kiloclaw_generator_config_key: str = "kmbl-generator"
+    kiloclaw_evaluator_config_key: str = "kmbl-evaluator"
+    # httpx client for KILOCLAW_TRANSPORT=http (chat completions POST).
+    kiloclaw_http_connect_timeout_sec: float = 30.0
+    kiloclaw_http_read_timeout_sec: float = 300.0
 
     supabase_url: str = ""
     supabase_service_role_key: str = ""
     supabase_db_url: str = ""
 
+    def effective_kiloclaw_transport(self) -> str:
+        """Resolve auto: http when API key set, else stub; otherwise return configured transport."""
+        t = (self.kiloclaw_transport or "auto").strip().lower()
+        if t in ("auto", ""):
+            if (self.kiloclaw_api_key or "").strip():
+                return "http"
+            return "stub"
+        return t
+
 
 @lru_cache
 def get_settings() -> Settings:
+    """
+    Cached for the process lifetime. After changing ``.env`` / environment variables,
+    **restart the uvicorn process** so settings reload (``/health`` otherwise reflects stale config).
+    """
     return Settings()

@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+export const dynamic = "force-dynamic";
+
 /**
  * Server-side probe of GET ${NEXT_PUBLIC_ORCHESTRATOR_URL}/health
  * so the browser does not need CORS on FastAPI (localhost:3000 → 127.0.0.1:8010).

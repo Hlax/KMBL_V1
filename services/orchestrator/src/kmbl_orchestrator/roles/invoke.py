@@ -6,10 +6,14 @@ from datetime import datetime, timezone
 from typing import Any, Literal, Protocol, cast
 from uuid import UUID, uuid4
 
+from pydantic import ValidationError
+
 from kmbl_orchestrator.config import Settings, get_settings
+from kmbl_orchestrator.contracts.normalized_errors import contract_validation_failure
+from kmbl_orchestrator.contracts.role_inputs import validate_role_input
+from kmbl_orchestrator.contracts.role_provider import RoleProvider
 from kmbl_orchestrator.domain import RoleInvocationRecord
 from kmbl_orchestrator.providers.kiloclaw import (
-    KiloClawClient,
     KiloClawInvocationError,
     get_kiloclaw_client,
 )
@@ -35,11 +39,11 @@ class DefaultRoleInvoker:
 
     def __init__(
         self,
-        client: KiloClawClient | None = None,
+        client: RoleProvider | None = None,
         settings: Settings | None = None,
     ) -> None:
         s = settings or get_settings()
-        self._client = client or get_kiloclaw_client(s)
+        self._client: RoleProvider = client or get_kiloclaw_client(s)
 
     def invoke(
         self,
@@ -69,7 +73,26 @@ class DefaultRoleInvoker:
         )
 
         try:
-            raw_out = self._client.invoke_role(rt, provider_config_key, input_payload)
+            outbound = validate_role_input(rt, input_payload)
+        except ValidationError as e:
+            ended = datetime.now(timezone.utc).isoformat()
+            detail = contract_validation_failure(
+                phase=rt,
+                message="Role request payload failed contract validation",
+                pydantic_errors=e.errors(),
+            )
+            failed = invocation.model_copy(
+                update={
+                    "input_payload_json": input_payload,
+                    "output_payload_json": detail,
+                    "status": "failed",
+                    "ended_at": ended,
+                }
+            )
+            return failed, detail
+
+        try:
+            raw_out = self._client.invoke_role(rt, provider_config_key, outbound)
         except KiloClawInvocationError as e:
             ended = datetime.now(timezone.utc).isoformat()
             failed = invocation.model_copy(

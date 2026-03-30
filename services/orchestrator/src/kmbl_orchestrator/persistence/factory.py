@@ -2,9 +2,23 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from kmbl_orchestrator.config import Settings
 from kmbl_orchestrator.persistence.repository import InMemoryRepository, Repository
 from kmbl_orchestrator.persistence.supabase_repository import SupabaseRepository
+
+
+def repository_backend(settings: Settings) -> Literal["supabase", "in_memory"]:
+    """Which persistence backend would be selected (does not instantiate the singleton)."""
+    url = (settings.supabase_url or "").strip()
+    key = (settings.supabase_service_role_key or "").strip()
+    return "supabase" if (url and key) else "in_memory"
+
+
+def persisted_graph_runs_available(settings: Settings) -> bool:
+    """True when thread/graph_run/role rows can be written to Supabase (not in-memory dev mode)."""
+    return repository_backend(settings) == "supabase"
 
 _repo_singleton: Repository | None = None
 

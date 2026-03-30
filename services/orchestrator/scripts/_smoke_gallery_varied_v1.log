@@ -1,0 +1,105 @@
+INFO:     Started server process [67320]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8012 (Press CTRL+C to quit)
+INFO:     127.0.0.1:64023 - "GET /health HTTP/1.1" 200 OK
+run_start stage=request_received elapsed_ms=0.0
+run_start stage=event_input_resolved elapsed_ms=0.2
+persist_graph_run_start graph_run_id=15d0829f-4374-4028-a8c7-ced792a861dd thread_id=cd42b170-d372-41f8-9301-489ae01ddbf3 stage=thread_resolved elapsed_ms=227.4
+persist_graph_run_start graph_run_id=15d0829f-4374-4028-a8c7-ced792a861dd thread_id=cd42b170-d372-41f8-9301-489ae01ddbf3 stage=graph_run_persisted elapsed_ms=492.3
+run_start stage=graph_run_persisted thread_id=cd42b170-d372-41f8-9301-489ae01ddbf3 graph_run_id=15d0829f-4374-4028-a8c7-ced792a861dd elapsed_ms=493.7
+run_start stage=response_returning thread_id=cd42b170-d372-41f8-9301-489ae01ddbf3 graph_run_id=15d0829f-4374-4028-a8c7-ced792a861dd total_elapsed_ms=493.8
+INFO:     127.0.0.1:64025 - "POST /orchestrator/runs/start HTTP/1.1" 200 OK
+run_start_background graph_run_id=15d0829f-4374-4028-a8c7-ced792a861dd stage=background_graph_enter elapsed_ms=0.0
+run_graph graph_run_id=15d0829f-4374-4028-a8c7-ced792a861dd stage=langgraph_invoke_start elapsed_ms=0.0
+graph_run graph_run_id=15d0829f-4374-4028-a8c7-ced792a861dd stage=planner_invocation_start elapsed_ms=0.0
+kiloclaw_http_outbound start url=http://100.102.80.113:18789/v1/chat/completions path=/v1/chat/completions role_type=planner model=openclaw:kmbl-planner connect_timeout_sec=30.0 read_timeout_sec=300.0 user_content_len=1723 elapsed_ms=0.0
+INFO:     127.0.0.1:55051 - "GET /orchestrator/runs/15d0829f-4374-4028-a8c7-ced792a861dd HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58567 - "GET /orchestrator/runs/15d0829f-4374-4028-a8c7-ced792a861dd HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51128 - "GET /orchestrator/runs/15d0829f-4374-4028-a8c7-ced792a861dd HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59842 - "GET /orchestrator/runs/15d0829f-4374-4028-a8c7-ced792a861dd HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60585 - "GET /orchestrator/runs/15d0829f-4374-4028-a8c7-ced792a861dd HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53409 - "GET /orchestrator/runs/15d0829f-4374-4028-a8c7-ced792a861dd HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53563 - "GET /orchestrator/runs/15d0829f-4374-4028-a8c7-ced792a861dd HTTP/1.1" 200 OK
+kiloclaw_http_outbound done url=http://100.102.80.113:18789/v1/chat/completions path=/v1/chat/completions role_type=planner http_status=200 elapsed_ms=14383.5
+graph_run graph_run_id=15d0829f-4374-4028-a8c7-ced792a861dd stage=planner_invocation_finished elapsed_ms=14383.8
+SupabaseRepository.save_checkpoint retry attempt=1 table=checkpoint err=RemoteProtocolError
+SupabaseRepository.get_graph_run retry attempt=1 table=graph_run err=RemoteProtocolError
+SupabaseRepository.save_checkpoint table=checkpoint context={'checkpoint_id': 'c84c7fb2-9590-4f6b-a297-2d1c25088bba', 'graph_run_id': '15d0829f-4374-4028-a8c7-ced792a861dd', 'kind': 'interrupt'}
+Traceback (most recent call last):
+  File "C:\Users\guestt\OneDrive\Desktop\KMBL\KMBL_V1\services\orchestrator\src\kmbl_orchestrator\graph\app.py", line 766, in run_graph
+    final = app.invoke(base)
+  File "C:\Users\guestt\OneDrive\Desktop\KMBL\KMBL_V1\services\orchestrator\.venv\lib\site-packages\langgraph\pregel\__init__.py", line 1936, in invoke
+    for chunk in self.stream(
+  File "C:\Users\guestt\OneDrive\Desktop\KMBL\KMBL_V1\services\orchestrator\.venv\lib\site-packages\langgraph\pregel\__init__.py", line 1656, in stream
+    for _ in runner.tick(
+  File "C:\Users\guestt\OneDrive\Desktop\KMBL\KMBL_V1\services\orchestrator\.venv\lib\site-packages\langgraph\pregel\runner.py", line 167, in tick
+    run_with_retry(
+  File "C:\Users\guestt\OneDrive\Desktop\KMBL\KMBL_V1\services\orchestrator\.venv\lib\site-packages\langgraph\pregel\retry.py", line 40, in run_with_retry
+    return task.proc.invoke(task.input, config)
+  File "C:\Users\guestt\OneDrive\Desktop\KMBL\KMBL_V1\services\orchestrator\.venv\lib\site-packages\langgraph\utils\runnable.py", line 408, in invoke
+    input = step.invoke(input, config, **kwargs)
+  File "C:\Users\guestt\OneDrive\Desktop\KMBL\KMBL_V1\services\orchestrator\.venv\lib\site-packages\langgraph\utils\runnable.py", line 184, in invoke
+    ret = context.run(self.func, input, **kwargs)
+  File "C:\Users\guestt\OneDrive\Desktop\KMBL\KMBL_V1\services\orchestrator\src\kmbl_orchestrator\graph\app.py", line 184, in planner_node
+    raise RoleInvocationFailed(
+kmbl_orchestrator.errors.RoleInvocationFailed: role invocation failed in planner: invalid JSON in assistant message.content
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\guestt\OneDrive\Desktop\KMBL\KMBL_V1\services\orchestrator\src\kmbl_orchestrator\persistence\supabase_repository.py", line 277, in _run
+    return fn()
+  File "C:\Users\guestt\OneDrive\Desktop\KMBL\KMBL_V1\services\orchestrator\src\kmbl_orchestrator\persistence\supabase_repository.py", line 601, in <lambda>
+    lambda: self._client.table("checkpoint").insert(row).execute(),
+  File "C:\Users\guestt\OneDrive\Desktop\KMBL\KMBL_V1\services\orchestrator\.venv\lib\site-packages\postgrest\_sync\request_builder.py", line 78, in execute
+    raise APIError(r.json())
+postgrest.exceptions.APIError: {'code': '23505', 'details': 'Key (checkpoint_id)=(c84c7fb2-9590-4f6b-a297-2d1c25088bba) already exists.', 'hint': None, 'message': 'duplicate key value violates unique constraint "checkpoint_pkey"'}
+Background graph run failed stage=unhandled graph_run_id=15d0829f-4374-4028-a8c7-ced792a861dd exc=RuntimeError
+Traceback (most recent call last):
+  File "C:\Users\guestt\OneDrive\Desktop\KMBL\KMBL_V1\services\orchestrator\src\kmbl_orchestrator\graph\app.py", line 766, in run_graph
+    final = app.invoke(base)
+  File "C:\Users\guestt\OneDrive\Desktop\KMBL\KMBL_V1\services\orchestrator\.venv\lib\site-packages\langgraph\pregel\__init__.py", line 1936, in invoke
+    for chunk in self.stream(
+  File "C:\Users\guestt\OneDrive\Desktop\KMBL\KMBL_V1\services\orchestrator\.venv\lib\site-packages\langgraph\pregel\__init__.py", line 1656, in stream
+    for _ in runner.tick(
+  File "C:\Users\guestt\OneDrive\Desktop\KMBL\KMBL_V1\services\orchestrator\.venv\lib\site-packages\langgraph\pregel\runner.py", line 167, in tick
+    run_with_retry(
+  File "C:\Users\guestt\OneDrive\Desktop\KMBL\KMBL_V1\services\orchestrator\.venv\lib\site-packages\langgraph\pregel\retry.py", line 40, in run_with_retry
+    return task.proc.invoke(task.input, config)
+  File "C:\Users\guestt\OneDrive\Desktop\KMBL\KMBL_V1\services\orchestrator\.venv\lib\site-packages\langgraph\utils\runnable.py", line 408, in invoke
+    input = step.invoke(input, config, **kwargs)
+  File "C:\Users\guestt\OneDrive\Desktop\KMBL\KMBL_V1\services\orchestrator\.venv\lib\site-packages\langgraph\utils\runnable.py", line 184, in invoke
+    ret = context.run(self.func, input, **kwargs)
+  File "C:\Users\guestt\OneDrive\Desktop\KMBL\KMBL_V1\services\orchestrator\src\kmbl_orchestrator\graph\app.py", line 184, in planner_node
+    raise RoleInvocationFailed(
+kmbl_orchestrator.errors.RoleInvocationFailed: role invocation failed in planner: invalid JSON in assistant message.content
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\guestt\OneDrive\Desktop\KMBL\KMBL_V1\services\orchestrator\src\kmbl_orchestrator\persistence\supabase_repository.py", line 277, in _run
+    return fn()
+  File "C:\Users\guestt\OneDrive\Desktop\KMBL\KMBL_V1\services\orchestrator\src\kmbl_orchestrator\persistence\supabase_repository.py", line 601, in <lambda>
+    lambda: self._client.table("checkpoint").insert(row).execute(),
+  File "C:\Users\guestt\OneDrive\Desktop\KMBL\KMBL_V1\services\orchestrator\.venv\lib\site-packages\postgrest\_sync\request_builder.py", line 78, in execute
+    raise APIError(r.json())
+postgrest.exceptions.APIError: {'code': '23505', 'details': 'Key (checkpoint_id)=(c84c7fb2-9590-4f6b-a297-2d1c25088bba) already exists.', 'hint': None, 'message': 'duplicate key value violates unique constraint "checkpoint_pkey"'}
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\guestt\OneDrive\Desktop\KMBL\KMBL_V1\services\orchestrator\src\kmbl_orchestrator\api\main.py", line 791, in _run_graph_background
+    run_graph(
+  File "C:\Users\guestt\OneDrive\Desktop\KMBL\KMBL_V1\services\orchestrator\src\kmbl_orchestrator\graph\app.py", line 772, in run_graph
+    _save_checkpoint_with_event(
+  File "C:\Users\guestt\OneDrive\Desktop\KMBL\KMBL_V1\services\orchestrator\src\kmbl_orchestrator\graph\app.py", line 77, in _save_checkpoint_with_event
+    ctx.repo.save_checkpoint(record)
+  File "C:\Users\guestt\OneDrive\Desktop\KMBL\KMBL_V1\services\orchestrator\src\kmbl_orchestrator\persistence\supabase_repository.py", line 598, in save_checkpoint
+    self._run(
+  File "C:\Users\guestt\OneDrive\Desktop\KMBL\KMBL_V1\services\orchestrator\src\kmbl_orchestrator\persistence\supabase_repository.py", line 296, in _run
+    raise RuntimeError(
+RuntimeError: SupabaseRepository.save_checkpoint(checkpoint) failed: APIError: {'code': '23505', 'details': 'Key (checkpoint_id)=(c84c7fb2-9590-4f6b-a297-2d1c25088bba) already exists.', 'hint': None, 'message': 'duplicate key value violates unique constraint "checkpoint_pkey"'}
+INFO:     127.0.0.1:60143 - "GET /orchestrator/runs/15d0829f-4374-4028-a8c7-ced792a861dd HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49267 - "GET /orchestrator/runs/15d0829f-4374-4028-a8c7-ced792a861dd HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49268 - "GET /orchestrator/runs/15d0829f-4374-4028-a8c7-ced792a861dd/detail HTTP/1.1" 200 OK

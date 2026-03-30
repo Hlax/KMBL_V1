@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from typing import Any, Literal, Protocol
 from uuid import UUID
 
@@ -10,8 +11,11 @@ from kmbl_orchestrator.domain import (
     BuildSpecRecord,
     CheckpointRecord,
     EvaluationReportRecord,
+    GraphRunEventRecord,
     GraphRunRecord,
+    PublicationSnapshotRecord,
     RoleInvocationRecord,
+    StagingSnapshotRecord,
     ThreadRecord,
 )
 
@@ -21,6 +25,8 @@ class Repository(Protocol):
 
     def ensure_thread(self, record: ThreadRecord) -> None: ...
 
+    def get_thread(self, thread_id: UUID) -> ThreadRecord | None: ...
+
     def update_thread_current_checkpoint(
         self, thread_id: UUID, checkpoint_id: UUID
     ) -> None:
@@ -28,6 +34,32 @@ class Repository(Protocol):
 
     def save_graph_run(self, record: GraphRunRecord) -> None: ...
     def get_graph_run(self, graph_run_id: UUID) -> GraphRunRecord | None: ...
+
+    def list_graph_runs(
+        self,
+        *,
+        status: str | None = None,
+        trigger_type: str | None = None,
+        identity_id: UUID | None = None,
+        limit: int = 50,
+    ) -> list[GraphRunRecord]:
+        """Newest ``started_at`` first. Optional filters; ``identity_id`` via ``thread`` rows."""
+
+    def aggregate_role_invocation_stats_for_graph_runs(
+        self, graph_run_ids: list[UUID]
+    ) -> dict[UUID, tuple[int, int | None]]:
+        """``(count, max_iteration_index)`` per id; ``(0, None)`` when no invocations."""
+
+    def latest_staging_snapshot_ids_for_graph_runs(
+        self, graph_run_ids: list[UUID]
+    ) -> dict[UUID, UUID | None]:
+        """Newest staging row per graph_run (by ``created_at``); value None if none."""
+
+    def graph_run_ids_with_interrupt_orchestrator_error(
+        self, graph_run_ids: list[UUID]
+    ) -> set[UUID]:
+        """Ids where latest interrupt checkpoint has ``state_json.orchestrator_error`` dict."""
+
     def update_graph_run_status(
         self,
         graph_run_id: UUID,
@@ -35,18 +67,133 @@ class Repository(Protocol):
         ended_at: str | None,
     ) -> None: ...
 
+    def mark_graph_run_resuming(self, graph_run_id: UUID) -> None:
+        """Set ``status`` to ``running`` and clear ``ended_at`` (operator resume / Pass K)."""
+
     def save_checkpoint(self, record: CheckpointRecord) -> None: ...
     def save_role_invocation(self, record: RoleInvocationRecord) -> None: ...
     def save_build_spec(self, record: BuildSpecRecord) -> None: ...
 
     def get_build_spec(self, build_spec_id: UUID) -> BuildSpecRecord | None: ...
     def save_build_candidate(self, record: BuildCandidateRecord) -> None: ...
+    def get_build_candidate(self, build_candidate_id: UUID) -> BuildCandidateRecord | None: ...
     def save_evaluation_report(self, record: EvaluationReportRecord) -> None: ...
+    def get_evaluation_report(
+        self, evaluation_report_id: UUID
+    ) -> EvaluationReportRecord | None: ...
+
+    def get_latest_build_spec_for_graph_run(
+        self, graph_run_id: UUID
+    ) -> BuildSpecRecord | None: ...
+
+    def get_latest_build_candidate_for_graph_run(
+        self, graph_run_id: UUID
+    ) -> BuildCandidateRecord | None: ...
+
+    def get_latest_evaluation_report_for_graph_run(
+        self, graph_run_id: UUID
+    ) -> EvaluationReportRecord | None: ...
+
+    def get_latest_failed_role_invocation_for_graph_run(
+        self, graph_run_id: UUID
+    ) -> RoleInvocationRecord | None:
+        """Most recent failed role row for this graph_run (KiloClaw / contract errors)."""
+
+    def get_latest_interrupt_orchestrator_error(
+        self, graph_run_id: UUID
+    ) -> dict[str, Any] | None:
+        """Payload from the newest interrupt checkpoint's ``state_json.orchestrator_error``."""
 
     def attach_run_snapshot(self, graph_run_id: UUID, payload: dict[str, Any]) -> None:
         """Deprecated for DB path — post-run checkpoint holds state; kept for API compat."""
 
     def get_run_snapshot(self, graph_run_id: UUID) -> dict[str, Any] | None: ...
+
+    def save_graph_run_event(self, record: GraphRunEventRecord) -> None: ...
+
+    def list_graph_run_events(
+        self, graph_run_id: UUID, *, limit: int = 200
+    ) -> list[GraphRunEventRecord]: ...
+
+    def list_role_invocations_for_graph_run(
+        self, graph_run_id: UUID
+    ) -> list[RoleInvocationRecord]:
+        """Oldest ``started_at`` first (execution order)."""
+
+    def list_staging_snapshots_for_graph_run(
+        self, graph_run_id: UUID, *, limit: int = 20
+    ) -> list[StagingSnapshotRecord]:
+        """Newest ``created_at`` first."""
+
+    def list_publications_for_graph_run(
+        self, graph_run_id: UUID, *, limit: int = 20
+    ) -> list[PublicationSnapshotRecord]:
+        """Newest ``published_at`` first; rows with matching ``graph_run_id`` only."""
+
+    def get_latest_checkpoint_for_graph_run(
+        self, graph_run_id: UUID
+    ) -> CheckpointRecord | None:
+        """Most recent checkpoint for this run (any kind)."""
+
+    def list_stale_running_graph_run_ids(self, older_than_seconds: int) -> list[UUID]:
+        """graph_run.status == running and started_at older than threshold (best-effort)."""
+
+    def save_staging_snapshot(self, record: StagingSnapshotRecord) -> None: ...
+
+    def get_staging_snapshot(
+        self, staging_snapshot_id: UUID
+    ) -> StagingSnapshotRecord | None: ...
+
+    def list_staging_snapshots(
+        self,
+        *,
+        limit: int = 20,
+        status: str | None = None,
+        identity_id: UUID | None = None,
+    ) -> list[StagingSnapshotRecord]:
+        """Persisted rows only, newest ``created_at`` first."""
+        ...
+
+    def update_staging_snapshot_status(
+        self,
+        staging_snapshot_id: UUID,
+        status: str,
+        *,
+        approved_by: str | None = None,
+        rejected_by: str | None = None,
+        rejection_reason: str | None = None,
+    ) -> StagingSnapshotRecord | None:
+        """Update ``staging_snapshot.status`` and matching audit columns (approve / reject / unapprove)."""
+
+    def save_publication_snapshot(self, record: PublicationSnapshotRecord) -> None: ...
+
+    def get_publication_snapshot(
+        self, publication_snapshot_id: UUID
+    ) -> PublicationSnapshotRecord | None: ...
+
+    def list_publication_snapshots(
+        self,
+        *,
+        limit: int = 20,
+        identity_id: UUID | None = None,
+        visibility: str | None = None,
+    ) -> list[PublicationSnapshotRecord]:
+        """Newest ``published_at`` first."""
+
+    def list_publications_for_staging(
+        self, staging_snapshot_id: UUID
+    ) -> list[PublicationSnapshotRecord]:
+        """All publication rows for this staging id, newest ``published_at`` first."""
+
+    def publication_counts_for_staging_snapshot_ids(
+        self, staging_snapshot_ids: list[UUID]
+    ) -> dict[UUID, int]:
+        """Count of ``publication_snapshot`` rows per ``source_staging_snapshot_id``."""
+
+    def get_latest_publication_snapshot(
+        self, *, identity_id: UUID | None = None
+    ) -> PublicationSnapshotRecord | None:
+        """Most recent published row, optionally scoped to ``identity_id``."""
 
 
 class InMemoryRepository:
@@ -61,6 +208,9 @@ class InMemoryRepository:
         self._build_candidates: dict[str, BuildCandidateRecord] = {}
         self._evaluation_reports: dict[str, EvaluationReportRecord] = {}
         self._run_snapshots: dict[str, dict[str, Any]] = {}
+        self._graph_run_events: list[GraphRunEventRecord] = []
+        self._staging_snapshots: dict[str, StagingSnapshotRecord] = {}
+        self._publications: dict[str, PublicationSnapshotRecord] = {}
 
     def ensure_thread(self, record: ThreadRecord) -> None:
         key = str(record.thread_id)
@@ -70,6 +220,9 @@ class InMemoryRepository:
                 update={"current_checkpoint_id": existing.current_checkpoint_id}
             )
         self._threads[key] = record
+
+    def get_thread(self, thread_id: UUID) -> ThreadRecord | None:
+        return self._threads.get(str(thread_id))
 
     def update_thread_current_checkpoint(
         self, thread_id: UUID, checkpoint_id: UUID
@@ -88,6 +241,97 @@ class InMemoryRepository:
     def get_graph_run(self, graph_run_id: UUID) -> GraphRunRecord | None:
         return self._graph_runs.get(str(graph_run_id))
 
+    def list_graph_runs(
+        self,
+        *,
+        status: str | None = None,
+        trigger_type: str | None = None,
+        identity_id: UUID | None = None,
+        limit: int = 50,
+    ) -> list[GraphRunRecord]:
+        rows = list(self._graph_runs.values())
+        if status is not None:
+            rows = [r for r in rows if r.status == status]
+        if trigger_type is not None:
+            rows = [r for r in rows if r.trigger_type == trigger_type]
+        if identity_id is not None:
+            allowed = {
+                str(t.thread_id)
+                for t in self._threads.values()
+                if t.identity_id == identity_id
+            }
+            rows = [r for r in rows if str(r.thread_id) in allowed]
+        rows.sort(key=lambda r: r.started_at, reverse=True)
+        return rows[: max(0, limit)]
+
+    def aggregate_role_invocation_stats_for_graph_runs(
+        self, graph_run_ids: list[UUID]
+    ) -> dict[UUID, tuple[int, int | None]]:
+        if not graph_run_ids:
+            return {}
+        want = {str(g) for g in graph_run_ids}
+        acc: dict[str, list[RoleInvocationRecord]] = {}
+        for r in self._role_invocations:
+            gs = str(r.graph_run_id)
+            if gs in want:
+                acc.setdefault(gs, []).append(r)
+        out: dict[UUID, tuple[int, int | None]] = {}
+        for g in graph_run_ids:
+            rows = acc.get(str(g), [])
+            if not rows:
+                out[g] = (0, None)
+            else:
+                out[g] = (len(rows), max(x.iteration_index for x in rows))
+        return out
+
+    def latest_staging_snapshot_ids_for_graph_runs(
+        self, graph_run_ids: list[UUID]
+    ) -> dict[UUID, UUID | None]:
+        if not graph_run_ids:
+            return {}
+        want = {str(g) for g in graph_run_ids}
+        out: dict[UUID, UUID | None] = {g: None for g in graph_run_ids}
+        by_gid: dict[str, list[StagingSnapshotRecord]] = {}
+        for s in self._staging_snapshots.values():
+            if s.graph_run_id is None:
+                continue
+            gs = str(s.graph_run_id)
+            if gs in want:
+                by_gid.setdefault(gs, []).append(s)
+        for g in graph_run_ids:
+            rows = by_gid.get(str(g), [])
+            if not rows:
+                continue
+            rows.sort(key=lambda x: x.created_at, reverse=True)
+            out[g] = rows[0].staging_snapshot_id
+        return out
+
+    def graph_run_ids_with_interrupt_orchestrator_error(
+        self, graph_run_ids: list[UUID]
+    ) -> set[UUID]:
+        if not graph_run_ids:
+            return set()
+        want = {str(g) for g in graph_run_ids}
+        by_gid: dict[str, list[CheckpointRecord]] = {}
+        for c in self._checkpoints:
+            if c.checkpoint_kind != "interrupt":
+                continue
+            gs = str(c.graph_run_id)
+            if gs not in want:
+                continue
+            by_gid.setdefault(gs, []).append(c)
+        out: set[UUID] = set()
+        for g in graph_run_ids:
+            rows = by_gid.get(str(g), [])
+            if not rows:
+                continue
+            rows.sort(key=lambda c: c.created_at)
+            last = rows[-1].state_json
+            err = last.get("orchestrator_error") if isinstance(last, dict) else None
+            if isinstance(err, dict):
+                out.add(g)
+        return out
+
     def update_graph_run_status(
         self,
         graph_run_id: UUID,
@@ -99,6 +343,14 @@ class InMemoryRepository:
             return
         self._graph_runs[str(graph_run_id)] = r.model_copy(
             update={"status": status, "ended_at": ended_at}
+        )
+
+    def mark_graph_run_resuming(self, graph_run_id: UUID) -> None:
+        r = self._graph_runs.get(str(graph_run_id))
+        if r is None:
+            return
+        self._graph_runs[str(graph_run_id)] = r.model_copy(
+            update={"status": "running", "ended_at": None}
         )
 
     def save_checkpoint(self, record: CheckpointRecord) -> None:
@@ -116,8 +368,73 @@ class InMemoryRepository:
     def save_build_candidate(self, record: BuildCandidateRecord) -> None:
         self._build_candidates[str(record.build_candidate_id)] = record
 
+    def get_build_candidate(self, build_candidate_id: UUID) -> BuildCandidateRecord | None:
+        return self._build_candidates.get(str(build_candidate_id))
+
     def save_evaluation_report(self, record: EvaluationReportRecord) -> None:
         self._evaluation_reports[str(record.evaluation_report_id)] = record
+
+    def get_evaluation_report(
+        self, evaluation_report_id: UUID
+    ) -> EvaluationReportRecord | None:
+        return self._evaluation_reports.get(str(evaluation_report_id))
+
+    def get_latest_build_spec_for_graph_run(
+        self, graph_run_id: UUID
+    ) -> BuildSpecRecord | None:
+        matches = [
+            b for b in self._build_specs.values() if b.graph_run_id == graph_run_id
+        ]
+        if not matches:
+            return None
+        return max(matches, key=lambda b: b.created_at)
+
+    def get_latest_build_candidate_for_graph_run(
+        self, graph_run_id: UUID
+    ) -> BuildCandidateRecord | None:
+        matches = [
+            c for c in self._build_candidates.values() if c.graph_run_id == graph_run_id
+        ]
+        if not matches:
+            return None
+        return max(matches, key=lambda c: c.created_at)
+
+    def get_latest_evaluation_report_for_graph_run(
+        self, graph_run_id: UUID
+    ) -> EvaluationReportRecord | None:
+        matches = [
+            e for e in self._evaluation_reports.values() if e.graph_run_id == graph_run_id
+        ]
+        if not matches:
+            return None
+        return max(matches, key=lambda e: e.created_at)
+
+    def get_latest_failed_role_invocation_for_graph_run(
+        self, graph_run_id: UUID
+    ) -> RoleInvocationRecord | None:
+        failed = [
+            r
+            for r in self._role_invocations
+            if r.graph_run_id == graph_run_id and r.status == "failed"
+        ]
+        if not failed:
+            return None
+        return max(failed, key=lambda r: r.started_at)
+
+    def get_latest_interrupt_orchestrator_error(
+        self, graph_run_id: UUID
+    ) -> dict[str, Any] | None:
+        rows = [
+            c
+            for c in self._checkpoints
+            if c.graph_run_id == graph_run_id and c.checkpoint_kind == "interrupt"
+        ]
+        if not rows:
+            return None
+        rows.sort(key=lambda c: c.created_at)
+        last = rows[-1].state_json
+        err = last.get("orchestrator_error") if isinstance(last, dict) else None
+        return err if isinstance(err, dict) else None
 
     def attach_run_snapshot(self, graph_run_id: UUID, payload: dict[str, Any]) -> None:
         self._run_snapshots[str(graph_run_id)] = payload
@@ -135,3 +452,181 @@ class InMemoryRepository:
             return None
         post.sort(key=lambda c: c.created_at)
         return post[-1].state_json
+
+    def save_graph_run_event(self, record: GraphRunEventRecord) -> None:
+        self._graph_run_events.append(record)
+
+    def list_graph_run_events(
+        self, graph_run_id: UUID, *, limit: int = 200
+    ) -> list[GraphRunEventRecord]:
+        gid = str(graph_run_id)
+        rows = [e for e in self._graph_run_events if str(e.graph_run_id) == gid]
+        rows.sort(key=lambda e: e.created_at)
+        return rows[-limit:] if limit else rows
+
+    def list_role_invocations_for_graph_run(
+        self, graph_run_id: UUID
+    ) -> list[RoleInvocationRecord]:
+        gid = str(graph_run_id)
+        rows = [r for r in self._role_invocations if str(r.graph_run_id) == gid]
+        rows.sort(key=lambda r: r.started_at)
+        return rows
+
+    def list_staging_snapshots_for_graph_run(
+        self, graph_run_id: UUID, *, limit: int = 20
+    ) -> list[StagingSnapshotRecord]:
+        gid = str(graph_run_id)
+        rows = [
+            r
+            for r in self._staging_snapshots.values()
+            if r.graph_run_id is not None and str(r.graph_run_id) == gid
+        ]
+        rows.sort(key=lambda r: r.created_at, reverse=True)
+        return rows[: max(0, limit)]
+
+    def list_publications_for_graph_run(
+        self, graph_run_id: UUID, *, limit: int = 20
+    ) -> list[PublicationSnapshotRecord]:
+        gid = str(graph_run_id)
+        rows = [
+            r
+            for r in self._publications.values()
+            if r.graph_run_id is not None and str(r.graph_run_id) == gid
+        ]
+        rows.sort(key=lambda r: r.published_at, reverse=True)
+        return rows[: max(0, limit)]
+
+    def get_latest_checkpoint_for_graph_run(
+        self, graph_run_id: UUID
+    ) -> CheckpointRecord | None:
+        gid = str(graph_run_id)
+        rows = [c for c in self._checkpoints if str(c.graph_run_id) == gid]
+        if not rows:
+            return None
+        rows.sort(key=lambda c: c.created_at, reverse=True)
+        return rows[0]
+
+    def list_stale_running_graph_run_ids(self, older_than_seconds: int) -> list[UUID]:
+        if older_than_seconds <= 0:
+            return []
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=older_than_seconds)
+        out: list[UUID] = []
+        for gr in self._graph_runs.values():
+            if gr.status != "running":
+                continue
+            try:
+                started = datetime.fromisoformat(
+                    gr.started_at.replace("Z", "+00:00")
+                )
+            except ValueError:
+                continue
+            if started < cutoff:
+                out.append(gr.graph_run_id)
+        return out
+
+    def save_staging_snapshot(self, record: StagingSnapshotRecord) -> None:
+        self._staging_snapshots[str(record.staging_snapshot_id)] = record
+
+    def get_staging_snapshot(
+        self, staging_snapshot_id: UUID
+    ) -> StagingSnapshotRecord | None:
+        return self._staging_snapshots.get(str(staging_snapshot_id))
+
+    def list_staging_snapshots(
+        self,
+        *,
+        limit: int = 20,
+        status: str | None = None,
+        identity_id: UUID | None = None,
+    ) -> list[StagingSnapshotRecord]:
+        rows = list(self._staging_snapshots.values())
+        if status is not None:
+            rows = [r for r in rows if r.status == status]
+        if identity_id is not None:
+            rows = [r for r in rows if r.identity_id == identity_id]
+        rows.sort(key=lambda r: r.created_at, reverse=True)
+        return rows[: max(0, limit)]
+
+    def update_staging_snapshot_status(
+        self,
+        staging_snapshot_id: UUID,
+        status: str,
+        *,
+        approved_by: str | None = None,
+        rejected_by: str | None = None,
+        rejection_reason: str | None = None,
+    ) -> StagingSnapshotRecord | None:
+        from kmbl_orchestrator.staging.status_transition import apply_staging_status_transition
+
+        key = str(staging_snapshot_id)
+        cur = self._staging_snapshots.get(key)
+        if cur is None:
+            return None
+        updated = apply_staging_status_transition(
+            cur,
+            status,
+            approved_by=approved_by,
+            rejected_by=rejected_by,
+            rejection_reason=rejection_reason,
+        )
+        self._staging_snapshots[key] = updated
+        return updated
+
+    def save_publication_snapshot(self, record: PublicationSnapshotRecord) -> None:
+        self._publications[str(record.publication_snapshot_id)] = record
+
+    def get_publication_snapshot(
+        self, publication_snapshot_id: UUID
+    ) -> PublicationSnapshotRecord | None:
+        return self._publications.get(str(publication_snapshot_id))
+
+    def list_publication_snapshots(
+        self,
+        *,
+        limit: int = 20,
+        identity_id: UUID | None = None,
+        visibility: str | None = None,
+    ) -> list[PublicationSnapshotRecord]:
+        rows = list(self._publications.values())
+        if identity_id is not None:
+            rows = [r for r in rows if r.identity_id == identity_id]
+        if visibility is not None:
+            rows = [r for r in rows if r.visibility == visibility]
+        rows.sort(key=lambda r: r.published_at, reverse=True)
+        return rows[: max(0, limit)]
+
+    def list_publications_for_staging(
+        self, staging_snapshot_id: UUID
+    ) -> list[PublicationSnapshotRecord]:
+        sid = str(staging_snapshot_id)
+        rows = [
+            r
+            for r in self._publications.values()
+            if str(r.source_staging_snapshot_id) == sid
+        ]
+        rows.sort(key=lambda r: r.published_at, reverse=True)
+        return rows
+
+    def publication_counts_for_staging_snapshot_ids(
+        self, staging_snapshot_ids: list[UUID]
+    ) -> dict[UUID, int]:
+        if not staging_snapshot_ids:
+            return {}
+        want = {str(s) for s in staging_snapshot_ids}
+        counts: dict[str, int] = {}
+        for r in self._publications.values():
+            sid = str(r.source_staging_snapshot_id)
+            if sid in want:
+                counts[sid] = counts.get(sid, 0) + 1
+        return {s: counts.get(str(s), 0) for s in staging_snapshot_ids}
+
+    def get_latest_publication_snapshot(
+        self, *, identity_id: UUID | None = None
+    ) -> PublicationSnapshotRecord | None:
+        rows = list(self._publications.values())
+        if identity_id is not None:
+            rows = [r for r in rows if r.identity_id == identity_id]
+        if not rows:
+            return None
+        rows.sort(key=lambda r: r.published_at, reverse=True)
+        return rows[0]

@@ -5,6 +5,13 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID, uuid4
 
+from kmbl_orchestrator.contracts.gallery_image_artifact_v1 import (
+    normalize_gallery_artifact_outputs_list,
+)
+from kmbl_orchestrator.contracts.ui_gallery_strip_v1 import (
+    normalize_ui_gallery_strip_v1_in_patch,
+    resolve_gallery_artifact_refs_in_patch,
+)
 from kmbl_orchestrator.domain import BuildCandidateRecord
 
 
@@ -18,12 +25,12 @@ def normalize_generator_output(
 ) -> BuildCandidateRecord:
     """Map KiloClaw generator JSON into persisted build_candidate columns."""
     candidate_id = uuid4()
+    artifacts = normalize_gallery_artifact_outputs_list(raw.get("artifact_outputs"))
     patch = raw.get("updated_state") or raw.get("proposed_changes")
     if not isinstance(patch, dict):
         patch = {}
-    artifacts = raw.get("artifact_outputs")
-    if not isinstance(artifacts, list):
-        artifacts = [] if artifacts is None else [artifacts]
+    patch = resolve_gallery_artifact_refs_in_patch(patch, artifacts)
+    patch = normalize_ui_gallery_strip_v1_in_patch(patch)
     sandbox = raw.get("sandbox_ref")
     preview = raw.get("preview_url")
     return BuildCandidateRecord(

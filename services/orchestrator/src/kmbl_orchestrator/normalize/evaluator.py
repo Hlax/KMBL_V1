@@ -22,6 +22,10 @@ def normalize_evaluator_output(
     if status not in ("pass", "partial", "fail", "blocked"):
         status = "fail"
     summary = raw.get("summary")
+    if summary is None:
+        summary = ""
+    else:
+        summary = str(summary)
     issues = raw.get("issues")
     if not isinstance(issues, list):
         issues = [] if issues is None else [issues]
@@ -38,7 +42,7 @@ def normalize_evaluator_output(
         evaluator_invocation_id=evaluator_invocation_id,
         build_candidate_id=build_candidate_id,
         status=cast(Literal["pass", "partial", "fail", "blocked"], status),
-        summary=str(summary) if summary is not None else None,
+        summary=summary,
         issues_json=issues,
         metrics_json=metrics,
         artifacts_json=artifacts,

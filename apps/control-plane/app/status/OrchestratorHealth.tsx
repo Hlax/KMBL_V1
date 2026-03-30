@@ -10,6 +10,10 @@ type HealthPayload = {
   error: string | null;
 };
 
+function isRecord(x: unknown): x is Record<string, unknown> {
+  return typeof x === "object" && x !== null && !Array.isArray(x);
+}
+
 export function OrchestratorHealth({
   configuredBaseUrl,
 }: {
@@ -44,6 +48,16 @@ export function OrchestratorHealth({
     };
   }, [configuredBaseUrl]);
 
+  const readiness = data?.body != null && isRecord(data.body)
+    ? data.body.readiness
+    : null;
+  const readinessRec =
+    readiness != null && isRecord(readiness) ? readiness : null;
+  const repoBackend =
+    data?.body != null && isRecord(data.body)
+      ? data.body.repository_backend
+      : null;
+
   const summary =
     data == null
       ? "…"
@@ -69,6 +83,21 @@ export function OrchestratorHealth({
         ) : (
           <strong>{summary}</strong>
         )}
+        {readinessRec && typeof readinessRec.ready_for_full_local_run === "boolean" && (
+          <>
+            {" "}
+            · local run:{" "}
+            <strong
+              style={{
+                color: readinessRec.ready_for_full_local_run ? "#86efac" : "#fbbf24",
+              }}
+            >
+              {readinessRec.ready_for_full_local_run
+                ? "config ready (keys set)"
+                : "config incomplete"}
+            </strong>
+          </>
+        )}
       </p>
       {data && (
         <>
@@ -79,6 +108,27 @@ export function OrchestratorHealth({
             <p className="muted">
               HTTP: <code>{data.httpStatus}</code>
             </p>
+          )}
+          {repoBackend != null && (
+            <p className="muted">
+              repository_backend: <code>{String(repoBackend)}</code>
+            </p>
+          )}
+          {readinessRec && (
+            <dl className="debug-kv" style={{ marginTop: "0.5rem" }}>
+              <dt>readiness.supabase_configured</dt>
+              <dd>
+                {String(readinessRec.supabase_configured ?? "—")}
+              </dd>
+              <dt>readiness.kiloclaw_configured</dt>
+              <dd>
+                {String(readinessRec.kiloclaw_configured ?? "—")}
+              </dd>
+              <dt>readiness.persisted_runs_available</dt>
+              <dd>
+                {String(readinessRec.persisted_runs_available ?? "—")}
+              </dd>
+            </dl>
           )}
           {data.error && (
             <p role="alert">

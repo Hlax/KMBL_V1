@@ -1,0 +1,43 @@
+INFO:     Started server process [34696]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8014 (Press CTRL+C to quit)
+SupabaseRepository.save_graph_run_event table=graph_run_event context={'graph_run_event_id': '8e032440-e906-4f89-a2e5-1fbeee795b23', 'graph_run_id': 'b4534b89-b800-4d10-87c6-25c9817b25a3'}
+Traceback (most recent call last):
+  File "C:\Users\guestt\OneDrive\Desktop\KMBL\KMBL_V1\services\orchestrator\src\kmbl_orchestrator\persistence\supabase_repository.py", line 247, in _run
+    return fn()
+  File "C:\Users\guestt\OneDrive\Desktop\KMBL\KMBL_V1\services\orchestrator\src\kmbl_orchestrator\persistence\supabase_repository.py", line 836, in <lambda>
+    lambda: self._client.table("graph_run_event").insert(row).execute(),
+  File "C:\Users\guestt\OneDrive\Desktop\KMBL\KMBL_V1\services\orchestrator\.venv\lib\site-packages\postgrest\_sync\request_builder.py", line 78, in execute
+    raise APIError(r.json())
+postgrest.exceptions.APIError: {'code': 'PGRST205', 'details': None, 'hint': "Perhaps you meant the table 'public.graph_run'", 'message': "Could not find the table 'public.graph_run_event' in the schema cache"}
+persist_graph_run_start failed
+Traceback (most recent call last):
+  File "C:\Users\guestt\OneDrive\Desktop\KMBL\KMBL_V1\services\orchestrator\src\kmbl_orchestrator\persistence\supabase_repository.py", line 247, in _run
+    return fn()
+  File "C:\Users\guestt\OneDrive\Desktop\KMBL\KMBL_V1\services\orchestrator\src\kmbl_orchestrator\persistence\supabase_repository.py", line 836, in <lambda>
+    lambda: self._client.table("graph_run_event").insert(row).execute(),
+  File "C:\Users\guestt\OneDrive\Desktop\KMBL\KMBL_V1\services\orchestrator\.venv\lib\site-packages\postgrest\_sync\request_builder.py", line 78, in execute
+    raise APIError(r.json())
+postgrest.exceptions.APIError: {'code': 'PGRST205', 'details': None, 'hint': "Perhaps you meant the table 'public.graph_run'", 'message': "Could not find the table 'public.graph_run_event' in the schema cache"}
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\guestt\OneDrive\Desktop\KMBL\KMBL_V1\services\orchestrator\src\kmbl_orchestrator\api\main.py", line 866, in start_run
+    tid, gid = await asyncio.wait_for(
+  File "C:\Users\guestt\AppData\Local\Programs\Python\Python310\lib\asyncio\tasks.py", line 445, in wait_for
+    return fut.result()
+  File "C:\Users\guestt\AppData\Local\Programs\Python\Python310\lib\asyncio\threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+  File "C:\Users\guestt\AppData\Local\Programs\Python\Python310\lib\concurrent\futures\thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "C:\Users\guestt\OneDrive\Desktop\KMBL\KMBL_V1\services\orchestrator\src\kmbl_orchestrator\graph\app.py", line 937, in persist_graph_run_start
+    append_graph_run_event(repo, UUID(gid), RunEventType.GRAPH_RUN_STARTED, {})
+  File "C:\Users\guestt\OneDrive\Desktop\KMBL\KMBL_V1\services\orchestrator\src\kmbl_orchestrator\runtime\run_events.py", line 37, in append_graph_run_event
+    repo.save_graph_run_event(
+  File "C:\Users\guestt\OneDrive\Desktop\KMBL\KMBL_V1\services\orchestrator\src\kmbl_orchestrator\persistence\supabase_repository.py", line 833, in save_graph_run_event
+    self._run(
+  File "C:\Users\guestt\OneDrive\Desktop\KMBL\KMBL_V1\services\orchestrator\src\kmbl_orchestrator\persistence\supabase_repository.py", line 255, in _run
+    raise RuntimeError(
+RuntimeError: SupabaseRepository.save_graph_run_event(graph_run_event) failed: APIError: {'code': 'PGRST205', 'details': None, 'hint': "Perhaps you meant the table 'public.graph_run'", 'message': "Could not find the table 'public.graph_run_event' in the schema cache"}

@@ -1,0 +1,25 @@
+INFO:     Started server process [69980]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8016 (Press CTRL+C to quit)
+INFO:     127.0.0.1:64886 - "GET /health HTTP/1.1" 200 OK
+run_start stage=request_received elapsed_ms=0.0
+run_start stage=event_input_resolved elapsed_ms=0.1
+persist_graph_run_start graph_run_id=fd783ad4-61bd-40fb-bc6f-a89d3f7215af thread_id=88b008f4-46ec-4610-afce-c602021f6d28 stage=thread_resolved elapsed_ms=185.0
+persist_graph_run_start graph_run_id=fd783ad4-61bd-40fb-bc6f-a89d3f7215af thread_id=88b008f4-46ec-4610-afce-c602021f6d28 stage=graph_run_persisted elapsed_ms=392.8
+run_start stage=graph_run_persisted thread_id=88b008f4-46ec-4610-afce-c602021f6d28 graph_run_id=fd783ad4-61bd-40fb-bc6f-a89d3f7215af elapsed_ms=393.8
+run_start stage=response_returning thread_id=88b008f4-46ec-4610-afce-c602021f6d28 graph_run_id=fd783ad4-61bd-40fb-bc6f-a89d3f7215af total_elapsed_ms=393.9
+INFO:     127.0.0.1:50192 - "POST /orchestrator/runs/start HTTP/1.1" 200 OK
+run_start_background graph_run_id=fd783ad4-61bd-40fb-bc6f-a89d3f7215af stage=background_graph_enter elapsed_ms=0.0
+run_start_background graph_run_id=fd783ad4-61bd-40fb-bc6f-a89d3f7215af mode=ORCHESTRATOR_SMOKE_PLANNER_ONLY (single planner HTTP only)
+smoke_planner_only graph_run_id=fd783ad4-61bd-40fb-bc6f-a89d3f7215af stage=enter elapsed_ms=0.0
+smoke_planner_only graph_run_id=fd783ad4-61bd-40fb-bc6f-a89d3f7215af stage=planner_invocation_start elapsed_ms=0.0
+kiloclaw_http_outbound start url=http://100.102.80.113:18789/v1/chat/completions path=/v1/chat/completions role_type=planner model=openclaw:kmbl-planner connect_timeout_sec=30.0 read_timeout_sec=300.0 user_content_len=214 elapsed_ms=0.0
+INFO:     127.0.0.1:50195 - "GET /orchestrator/runs/fd783ad4-61bd-40fb-bc6f-a89d3f7215af HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61263 - "GET /orchestrator/runs/fd783ad4-61bd-40fb-bc6f-a89d3f7215af HTTP/1.1" 200 OK
+kiloclaw_http_outbound done url=http://100.102.80.113:18789/v1/chat/completions path=/v1/chat/completions role_type=planner http_status=200 elapsed_ms=4630.1
+smoke_planner_only graph_run_id=fd783ad4-61bd-40fb-bc6f-a89d3f7215af stage=planner_invocation_finished elapsed_ms=4630.5
+planner build_spec normalized missing/empty fields: ['title']
+smoke_planner_only graph_run_id=fd783ad4-61bd-40fb-bc6f-a89d3f7215af stage=response_returning status=completed total_elapsed_ms=5451.5
+run_start_background graph_run_id=fd783ad4-61bd-40fb-bc6f-a89d3f7215af stage=background_graph_exit_ok elapsed_ms=5451.8
+INFO:     127.0.0.1:51867 - "GET /orchestrator/runs/fd783ad4-61bd-40fb-bc6f-a89d3f7215af HTTP/1.1" 200 OK

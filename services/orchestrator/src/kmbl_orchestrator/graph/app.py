@@ -7,24 +7,49 @@ TODO: interrupt_node, publication_node, richer context compaction (docs/08 §8).
 
 from __future__ import annotations
 
+import logging
+import time
 from typing import Any, Literal, cast
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from langgraph.graph import END, START, StateGraph
+from pydantic import ValidationError
 
 from kmbl_orchestrator.config import Settings, get_settings
-from kmbl_orchestrator.domain import CheckpointRecord, GraphRunRecord
-from kmbl_orchestrator.errors import RoleInvocationFailed
+from kmbl_orchestrator.contracts.normalized_errors import (
+    contract_validation_failure,
+    error_kind_from_detail,
+    staging_integrity_failure,
+)
+from kmbl_orchestrator.contracts.persistence_validate import (
+    validate_role_output_for_persistence,
+)
+from kmbl_orchestrator.contracts.planner_normalize import (
+    normalize_build_spec_for_persistence,
+)
+from kmbl_orchestrator.domain import CheckpointRecord, GraphRunRecord, StagingSnapshotRecord
+from kmbl_orchestrator.errors import RoleInvocationFailed, StagingIntegrityFailed
 from kmbl_orchestrator.graph.state import GraphState
 from kmbl_orchestrator.normalize import (
     normalize_evaluator_output,
     normalize_generator_output,
     normalize_planner_output,
 )
+from kmbl_orchestrator.normalize.gallery_strip_harness import (
+    merge_gallery_strip_harness_checks,
+)
 from kmbl_orchestrator.domain import ThreadRecord
 from kmbl_orchestrator.persistence.repository import Repository
+from kmbl_orchestrator.staging.build_snapshot import build_staging_snapshot_payload
+from kmbl_orchestrator.staging.integrity import (
+    validate_generator_output_for_candidate,
+    validate_preview_integrity,
+)
 from kmbl_orchestrator.roles.invoke import DefaultRoleInvoker
+from kmbl_orchestrator.runtime.run_events import RunEventType, append_graph_run_event
+
+_log = logging.getLogger(__name__)
 
 
 def _uuid() -> str:
@@ -45,6 +70,48 @@ class GraphContext:
         self.settings = settings
 
 
+def _save_checkpoint_with_event(
+    ctx: GraphContext,
+    record: CheckpointRecord,
+) -> None:
+    ctx.repo.save_checkpoint(record)
+    append_graph_run_event(
+        ctx.repo,
+        record.graph_run_id,
+        RunEventType.CHECKPOINT_WRITTEN,
+        {
+            "checkpoint_kind": record.checkpoint_kind,
+            "checkpoint_id": str(record.checkpoint_id),
+        },
+    )
+
+
+def _persist_invocation_failure(
+    *,
+    inv: Any,
+    raw_detail: dict[str, Any],
+    phase: Literal["planner", "generator", "evaluator"],
+    graph_run_id: UUID,
+    thread_id: UUID,
+    repo: Repository,
+) -> None:
+    ended = datetime.now(timezone.utc).isoformat()
+    failed = inv.model_copy(
+        update={
+            "output_payload_json": raw_detail,
+            "status": "failed",
+            "ended_at": ended,
+        }
+    )
+    repo.save_role_invocation(failed)
+    raise RoleInvocationFailed(
+        phase=phase,
+        graph_run_id=graph_run_id,
+        thread_id=thread_id,
+        detail=raw_detail,
+    )
+
+
 def build_compiled_graph(ctx: GraphContext):
     def thread_resolver(state: GraphState) -> dict[str, Any]:
         tid = state.get("thread_id") or _uuid()
@@ -61,20 +128,36 @@ def build_compiled_graph(ctx: GraphContext):
         }
 
     def checkpoint_pre(state: GraphState) -> dict[str, Any]:
+        gid = UUID(state["graph_run_id"])
         cp = CheckpointRecord(
             checkpoint_id=uuid4(),
             thread_id=UUID(state["thread_id"]),
-            graph_run_id=UUID(state["graph_run_id"]),
+            graph_run_id=gid,
             checkpoint_kind="pre_role",
-            state_json=dict(state),
+            state_json={**dict(state), "_role_checkpoint_gate": "pre_graph"},
             context_compaction_json=None,
         )
-        ctx.repo.save_checkpoint(cp)
+        _save_checkpoint_with_event(ctx, cp)
         return {}
 
     def planner_node(state: GraphState) -> dict[str, Any]:
         gid = UUID(state["graph_run_id"])
         tid = UUID(state["thread_id"])
+        cp0 = CheckpointRecord(
+            checkpoint_id=uuid4(),
+            thread_id=tid,
+            graph_run_id=gid,
+            checkpoint_kind="pre_role",
+            state_json={**dict(state), "_role_checkpoint_gate": "pre_planner"},
+            context_compaction_json=None,
+        )
+        _save_checkpoint_with_event(ctx, cp0)
+        append_graph_run_event(ctx.repo, gid, RunEventType.PLANNER_INVOCATION_STARTED, {})
+        _log.info(
+            "graph_run graph_run_id=%s stage=planner_invocation_start elapsed_ms=0.0",
+            gid,
+        )
+
         payload = {
             "thread_id": state["thread_id"],
             "identity_context": state.get("identity_context") or {},
@@ -82,6 +165,7 @@ def build_compiled_graph(ctx: GraphContext):
             "event_input": state.get("event_input") or {},
             "current_state_summary": state.get("current_state") or {},
         }
+        t_pl = time.perf_counter()
         inv, raw = ctx.invoker.invoke(
             graph_run_id=gid,
             thread_id=tid,
@@ -90,14 +174,50 @@ def build_compiled_graph(ctx: GraphContext):
             input_payload=payload,
             iteration_index=state.get("iteration_index", 0),
         )
-        ctx.repo.save_role_invocation(inv)
+        _log.info(
+            "graph_run graph_run_id=%s stage=planner_invocation_finished elapsed_ms=%.1f",
+            gid,
+            (time.perf_counter() - t_pl) * 1000,
+        )
         if inv.status == "failed":
+            ctx.repo.save_role_invocation(inv)
             raise RoleInvocationFailed(
                 phase="planner",
                 graph_run_id=gid,
                 thread_id=tid,
                 detail=raw,
             )
+        if not isinstance(raw.get("build_spec"), dict):
+            raw["build_spec"] = {}
+        norm_bs, normalized_fields = normalize_build_spec_for_persistence(raw["build_spec"])
+        raw["build_spec"] = norm_bs
+        if normalized_fields:
+            md = raw.setdefault("_kmbl_planner_metadata", {})
+            md["normalized_missing_fields"] = normalized_fields
+        try:
+            validate_role_output_for_persistence("planner", raw)
+        except (ValidationError, ValueError) as e:
+            pe = e.errors() if isinstance(e, ValidationError) else None
+            msg = (
+                "Persist-time validation failed"
+                if isinstance(e, ValidationError)
+                else str(e)
+            )
+            detail = contract_validation_failure(
+                phase="planner",
+                message=msg,
+                pydantic_errors=pe,
+            )
+            _persist_invocation_failure(
+                inv=inv,
+                raw_detail=detail,
+                phase="planner",
+                graph_run_id=gid,
+                thread_id=tid,
+                repo=ctx.repo,
+            )
+
+        ctx.repo.save_role_invocation(inv)
         spec = normalize_planner_output(
             raw,
             thread_id=tid,
@@ -106,6 +226,28 @@ def build_compiled_graph(ctx: GraphContext):
         )
         spec = spec.model_copy(update={"raw_payload_json": raw})
         ctx.repo.save_build_spec(spec)
+        step_state = {
+            **dict(state),
+            "build_spec": raw.get("build_spec"),
+            "build_spec_id": str(spec.build_spec_id),
+        }
+        _save_checkpoint_with_event(
+            ctx,
+            CheckpointRecord(
+                checkpoint_id=uuid4(),
+                thread_id=tid,
+                graph_run_id=gid,
+                checkpoint_kind="post_step",
+                state_json=step_state,
+                context_compaction_json=None,
+            ),
+        )
+        append_graph_run_event(
+            ctx.repo,
+            gid,
+            RunEventType.PLANNER_INVOCATION_COMPLETED,
+            {"build_spec_id": str(spec.build_spec_id)},
+        )
         return {
             "build_spec": raw.get("build_spec"),
             "build_spec_id": str(spec.build_spec_id),
@@ -117,6 +259,21 @@ def build_compiled_graph(ctx: GraphContext):
         bsid = state.get("build_spec_id")
         if not bsid:
             raise RuntimeError("build_spec_id required before generator")
+        cp0 = CheckpointRecord(
+            checkpoint_id=uuid4(),
+            thread_id=tid,
+            graph_run_id=gid,
+            checkpoint_kind="pre_role",
+            state_json={**dict(state), "_role_checkpoint_gate": "pre_generator"},
+            context_compaction_json=None,
+        )
+        _save_checkpoint_with_event(ctx, cp0)
+        append_graph_run_event(ctx.repo, gid, RunEventType.GENERATOR_INVOCATION_STARTED, {})
+        _log.info(
+            "graph_run graph_run_id=%s stage=generator_invocation_start elapsed_ms=0.0",
+            gid,
+        )
+
         iteration = int(state.get("iteration_index", 0))
         feedback: Any = None
         if iteration > 0:
@@ -126,7 +283,9 @@ def build_compiled_graph(ctx: GraphContext):
             "build_spec": state.get("build_spec") or {},
             "current_working_state": state.get("current_state") or {},
             "iteration_feedback": feedback,
+            "event_input": state.get("event_input") or {},
         }
+        t_gen = time.perf_counter()
         inv, raw = ctx.invoker.invoke(
             graph_run_id=gid,
             thread_id=tid,
@@ -135,14 +294,59 @@ def build_compiled_graph(ctx: GraphContext):
             input_payload=payload,
             iteration_index=iteration,
         )
-        ctx.repo.save_role_invocation(inv)
+        _log.info(
+            "graph_run graph_run_id=%s stage=generator_invocation_finished elapsed_ms=%.1f",
+            gid,
+            (time.perf_counter() - t_gen) * 1000,
+        )
         if inv.status == "failed":
+            ctx.repo.save_role_invocation(inv)
             raise RoleInvocationFailed(
                 phase="generator",
                 graph_run_id=gid,
                 thread_id=tid,
                 detail=raw,
             )
+        try:
+            validate_generator_output_for_candidate(raw)
+        except ValueError as e:
+            detail = contract_validation_failure(
+                phase="generator",
+                message=str(e),
+                pydantic_errors=None,
+            )
+            _persist_invocation_failure(
+                inv=inv,
+                raw_detail=detail,
+                phase="generator",
+                graph_run_id=gid,
+                thread_id=tid,
+                repo=ctx.repo,
+            )
+        try:
+            validate_role_output_for_persistence("generator", raw)
+        except (ValidationError, ValueError) as e:
+            pe = e.errors() if isinstance(e, ValidationError) else None
+            msg = (
+                "Persist-time validation failed"
+                if isinstance(e, ValidationError)
+                else str(e)
+            )
+            detail = contract_validation_failure(
+                phase="generator",
+                message=msg,
+                pydantic_errors=pe,
+            )
+            _persist_invocation_failure(
+                inv=inv,
+                raw_detail=detail,
+                phase="generator",
+                graph_run_id=gid,
+                thread_id=tid,
+                repo=ctx.repo,
+            )
+
+        ctx.repo.save_role_invocation(inv)
         cand = normalize_generator_output(
             raw,
             thread_id=tid,
@@ -152,7 +356,8 @@ def build_compiled_graph(ctx: GraphContext):
         )
         cand = cand.model_copy(update={"raw_payload_json": raw})
         ctx.repo.save_build_candidate(cand)
-        return {
+        step_state = {
+            **dict(state),
             "build_candidate": {
                 "proposed_changes": raw.get("proposed_changes"),
                 "artifact_outputs": raw.get("artifact_outputs"),
@@ -163,6 +368,28 @@ def build_compiled_graph(ctx: GraphContext):
             "build_candidate_id": str(cand.build_candidate_id),
             "current_state": raw.get("updated_state") or state.get("current_state") or {},
         }
+        _save_checkpoint_with_event(
+            ctx,
+            CheckpointRecord(
+                checkpoint_id=uuid4(),
+                thread_id=tid,
+                graph_run_id=gid,
+                checkpoint_kind="post_step",
+                state_json=step_state,
+                context_compaction_json=None,
+            ),
+        )
+        append_graph_run_event(
+            ctx.repo,
+            gid,
+            RunEventType.GENERATOR_INVOCATION_COMPLETED,
+            {"build_candidate_id": str(cand.build_candidate_id)},
+        )
+        return {
+            "build_candidate": step_state["build_candidate"],
+            "build_candidate_id": str(cand.build_candidate_id),
+            "current_state": step_state["current_state"],
+        }
 
     def evaluator_node(state: GraphState) -> dict[str, Any]:
         gid = UUID(state["graph_run_id"])
@@ -171,6 +398,21 @@ def build_compiled_graph(ctx: GraphContext):
         bsid = state.get("build_spec_id")
         if not bcid or not bsid:
             raise RuntimeError("build_candidate_id and build_spec_id required before evaluator")
+        cp0 = CheckpointRecord(
+            checkpoint_id=uuid4(),
+            thread_id=tid,
+            graph_run_id=gid,
+            checkpoint_kind="pre_role",
+            state_json={**dict(state), "_role_checkpoint_gate": "pre_evaluator"},
+            context_compaction_json=None,
+        )
+        _save_checkpoint_with_event(ctx, cp0)
+        append_graph_run_event(ctx.repo, gid, RunEventType.EVALUATOR_INVOCATION_STARTED, {})
+        _log.info(
+            "graph_run graph_run_id=%s stage=evaluator_invocation_start elapsed_ms=0.0",
+            gid,
+        )
+
         spec = ctx.repo.get_build_spec(UUID(bsid))
         success = spec.success_criteria_json if spec else []
         targets = spec.evaluation_targets_json if spec else []
@@ -181,6 +423,7 @@ def build_compiled_graph(ctx: GraphContext):
             "evaluation_targets": targets,
             "iteration_hint": state.get("iteration_index", 0),
         }
+        t_ev = time.perf_counter()
         inv, raw = ctx.invoker.invoke(
             graph_run_id=gid,
             thread_id=tid,
@@ -189,14 +432,43 @@ def build_compiled_graph(ctx: GraphContext):
             input_payload=payload,
             iteration_index=int(state.get("iteration_index", 0)),
         )
-        ctx.repo.save_role_invocation(inv)
+        _log.info(
+            "graph_run graph_run_id=%s stage=evaluator_invocation_finished elapsed_ms=%.1f",
+            gid,
+            (time.perf_counter() - t_ev) * 1000,
+        )
         if inv.status == "failed":
+            ctx.repo.save_role_invocation(inv)
             raise RoleInvocationFailed(
                 phase="evaluator",
                 graph_run_id=gid,
                 thread_id=tid,
                 detail=raw,
             )
+        try:
+            validate_role_output_for_persistence("evaluator", raw)
+        except (ValidationError, ValueError) as e:
+            pe = e.errors() if isinstance(e, ValidationError) else None
+            msg = (
+                "Persist-time validation failed"
+                if isinstance(e, ValidationError)
+                else str(e)
+            )
+            detail = contract_validation_failure(
+                phase="evaluator",
+                message=msg,
+                pydantic_errors=pe,
+            )
+            _persist_invocation_failure(
+                inv=inv,
+                raw_detail=detail,
+                phase="evaluator",
+                graph_run_id=gid,
+                thread_id=tid,
+                repo=ctx.repo,
+            )
+
+        ctx.repo.save_role_invocation(inv)
         report = normalize_evaluator_output(
             raw,
             thread_id=tid,
@@ -204,9 +476,13 @@ def build_compiled_graph(ctx: GraphContext):
             evaluator_invocation_id=inv.role_invocation_id,
             build_candidate_id=UUID(bcid),
         )
+        bc_row = ctx.repo.get_build_candidate(UUID(bcid))
+        if bc_row is not None:
+            report = merge_gallery_strip_harness_checks(report, bc_row)
         report = report.model_copy(update={"raw_payload_json": raw})
         ctx.repo.save_evaluation_report(report)
-        return {
+        step_state = {
+            **dict(state),
             "evaluation_report": {
                 "status": raw.get("status"),
                 "summary": raw.get("summary"),
@@ -216,8 +492,30 @@ def build_compiled_graph(ctx: GraphContext):
             },
             "evaluation_report_id": str(report.evaluation_report_id),
         }
+        _save_checkpoint_with_event(
+            ctx,
+            CheckpointRecord(
+                checkpoint_id=uuid4(),
+                thread_id=tid,
+                graph_run_id=gid,
+                checkpoint_kind="post_step",
+                state_json=step_state,
+                context_compaction_json=None,
+            ),
+        )
+        append_graph_run_event(
+            ctx.repo,
+            gid,
+            RunEventType.EVALUATOR_INVOCATION_COMPLETED,
+            {"evaluation_report_id": str(report.evaluation_report_id)},
+        )
+        return {
+            "evaluation_report": step_state["evaluation_report"],
+            "evaluation_report_id": str(report.evaluation_report_id),
+        }
 
     def decision_router(state: GraphState) -> dict[str, Any]:
+        gid = UUID(state["graph_run_id"])
         ev = state.get("evaluation_report") or {}
         status = ev.get("status", "fail")
         iteration = int(state.get("iteration_index", 0))
@@ -240,17 +538,150 @@ def build_compiled_graph(ctx: GraphContext):
             decision = "interrupt"
             interrupt_reason = "unknown_eval_status"
 
+        if status != "pass":
+            append_graph_run_event(
+                ctx.repo,
+                gid,
+                RunEventType.STAGING_SNAPSHOT_BLOCKED,
+                {
+                    "reason": "evaluator_not_pass",
+                    "error_kind": "staging_integrity",
+                    "evaluation_status": status,
+                },
+            )
+
         out: dict[str, Any] = {"decision": decision}
         if decision == "iterate":
             out["iteration_index"] = iteration + 1
         if interrupt_reason:
             out["interrupt_reason"] = interrupt_reason
+        append_graph_run_event(
+            ctx.repo,
+            gid,
+            RunEventType.DECISION_MADE,
+            {"decision": decision, "interrupt_reason": interrupt_reason},
+        )
         return out
 
     def staging_node(state: GraphState) -> dict[str, Any]:
-        # TODO: persist staging_snapshot table (docs/07 §1.11).
-        ssid = _uuid()
-        return {"staging_snapshot_id": ssid, "status": "completed"}
+        gid = UUID(state["graph_run_id"])
+        tid = UUID(state["thread_id"])
+        bcid_s = state.get("build_candidate_id")
+        erid_s = state.get("evaluation_report_id")
+        bsid_s = state.get("build_spec_id")
+        if not bcid_s or not erid_s or not bsid_s:
+            raise StagingIntegrityFailed(
+                graph_run_id=gid,
+                thread_id=tid,
+                reason="staging_integrity",
+                message="staging_node requires build_candidate_id, evaluation_report_id, build_spec_id",
+                detail={"stage": "staging_node"},
+            )
+        bc = ctx.repo.get_build_candidate(UUID(bcid_s))
+        ev = ctx.repo.get_evaluation_report(UUID(erid_s))
+        if bc is None or ev is None:
+            raise StagingIntegrityFailed(
+                graph_run_id=gid,
+                thread_id=tid,
+                reason="persistence_error",
+                message="could not load build_candidate or evaluation_report for staging",
+                detail={
+                    "build_candidate_id": bcid_s,
+                    "evaluation_report_id": erid_s,
+                },
+            )
+        if ev.status != "pass":
+            append_graph_run_event(
+                ctx.repo,
+                gid,
+                RunEventType.STAGING_SNAPSHOT_BLOCKED,
+                {
+                    "reason": "staging_integrity",
+                    "error_kind": "staging_integrity",
+                    "evaluation_status": ev.status,
+                },
+            )
+            raise StagingIntegrityFailed(
+                graph_run_id=gid,
+                thread_id=tid,
+                reason="staging_integrity",
+                message="evaluation_report.status must be pass before staging snapshot",
+                detail={"evaluation_status": ev.status},
+            )
+        try:
+            validate_preview_integrity(bc, ev)
+        except ValueError as e:
+            append_graph_run_event(
+                ctx.repo,
+                gid,
+                RunEventType.STAGING_SNAPSHOT_BLOCKED,
+                {
+                    "reason": "preview_integrity",
+                    "error_kind": "staging_integrity",
+                    "message": str(e),
+                },
+            )
+            raise StagingIntegrityFailed(
+                graph_run_id=gid,
+                thread_id=tid,
+                reason="preview_integrity",
+                message=str(e),
+                detail={"build_candidate_id": str(bc.build_candidate_id)},
+            ) from e
+        thread = ctx.repo.get_thread(tid)
+        if thread is None:
+            raise StagingIntegrityFailed(
+                graph_run_id=gid,
+                thread_id=tid,
+                reason="persistence_error",
+                message="thread not found for staging_snapshot",
+                detail={"thread_id": str(tid)},
+            )
+        spec = ctx.repo.get_build_spec(UUID(bsid_s))
+        payload = build_staging_snapshot_payload(
+            build_candidate=bc,
+            evaluation_report=ev,
+            thread=thread,
+            build_spec=spec,
+        )
+        t_st = time.perf_counter()
+        _log.info(
+            "graph_run graph_run_id=%s stage=staging_snapshot_creation_start elapsed_ms=0.0",
+            gid,
+        )
+        ssid = uuid4()
+        snap = StagingSnapshotRecord(
+            staging_snapshot_id=ssid,
+            thread_id=bc.thread_id,
+            build_candidate_id=bc.build_candidate_id,
+            graph_run_id=bc.graph_run_id,
+            identity_id=thread.identity_id,
+            snapshot_payload_json=payload,
+            preview_url=bc.preview_url,
+            status="review_ready",
+        )
+        ctx.repo.save_staging_snapshot(snap)
+        append_graph_run_event(
+            ctx.repo,
+            gid,
+            RunEventType.STAGING_SNAPSHOT_CREATED,
+            {
+                "staging_snapshot_id": str(ssid),
+                "graph_run_id": str(gid),
+                "thread_id": str(tid),
+                "build_candidate_id": str(bc.build_candidate_id),
+                "reason": "snapshot_persisted",
+                "review_ready": True,
+                "preview_url": bc.preview_url,
+            },
+        )
+        _log.info(
+            "graph_run graph_run_id=%s stage=staging_snapshot_creation_done staging_snapshot_id=%s elapsed_ms=%.1f",
+            gid,
+            ssid,
+            (time.perf_counter() - t_st) * 1000,
+        )
+        return {"staging_snapshot_id": str(ssid), "status": "completed"}
 
     def route_after_decision(state: GraphState) -> str:
         d = state.get("decision")
@@ -302,8 +733,9 @@ def run_graph(
 
     **Invariant:** the ``graph_run_id`` (and thread) must already exist in the
     repository. Call :func:`persist_graph_run_start` first. The public
-    ``POST /orchestrator/runs/start`` handler does this in order — do not call
-    ``run_graph`` with arbitrary IDs or you will hit FK errors / the guard below.
+    ``POST /orchestrator/runs/start`` handler persists first, then (asynchronously)
+    invokes this — do not call ``run_graph`` with arbitrary IDs or you will hit
+    FK errors / the guard below.
 
     Checkpoint ``state_json`` can grow; compaction/splitting is a later concern.
     """
@@ -325,12 +757,122 @@ def run_graph(
             "graph_run not found — call persist_graph_run_start() before run_graph() "
             "so thread and graph_run rows exist."
         )
+    t_run = time.perf_counter()
+    _log.info(
+        "run_graph graph_run_id=%s stage=langgraph_invoke_start elapsed_ms=0.0",
+        gid0,
+    )
     try:
         final = app.invoke(base)
-    except RoleInvocationFailed:
+    except RoleInvocationFailed as e:
         if gid0:
+            gid_u = UUID(str(gid0))
+            tid_u = e.thread_id
+            ek = error_kind_from_detail(e.detail) or "role_invocation"
+            _save_checkpoint_with_event(
+                ctx,
+                CheckpointRecord(
+                    checkpoint_id=uuid4(),
+                    thread_id=tid_u,
+                    graph_run_id=gid_u,
+                    checkpoint_kind="interrupt",
+                    state_json={
+                        "orchestrator_error": {
+                            "error_kind": ek,
+                            "error_message": str(
+                                e.detail.get("message", "role invocation failed")
+                            ),
+                            "failure": e.detail,
+                            "failure_phase": e.phase,
+                        }
+                    },
+                    context_compaction_json=None,
+                ),
+            )
+            append_graph_run_event(
+                repo,
+                gid_u,
+                RunEventType.GRAPH_RUN_FAILED,
+                {"phase": e.phase, "error_kind": ek},
+            )
             repo.update_graph_run_status(
-                UUID(str(gid0)),
+                gid_u,
+                "failed",
+                datetime.now(timezone.utc).isoformat(),
+            )
+        raise
+    except StagingIntegrityFailed as e:
+        if gid0:
+            gid_u = UUID(str(gid0))
+            tid_u = e.thread_id
+            failure = staging_integrity_failure(
+                reason=e.reason,
+                message=e.message,
+                details=e.detail if e.detail else None,
+            )
+            _save_checkpoint_with_event(
+                ctx,
+                CheckpointRecord(
+                    checkpoint_id=uuid4(),
+                    thread_id=tid_u,
+                    graph_run_id=gid_u,
+                    checkpoint_kind="interrupt",
+                    state_json={
+                        "orchestrator_error": {
+                            "error_kind": "staging_integrity",
+                            "error_message": e.message,
+                            "failure": failure,
+                            "staging_reason": e.reason,
+                        }
+                    },
+                    context_compaction_json=None,
+                ),
+            )
+            append_graph_run_event(
+                repo,
+                gid_u,
+                RunEventType.GRAPH_RUN_FAILED,
+                {
+                    "error_kind": "staging_integrity",
+                    "staging_reason": e.reason,
+                },
+            )
+            repo.update_graph_run_status(
+                gid_u,
+                "failed",
+                datetime.now(timezone.utc).isoformat(),
+            )
+        raise
+    except Exception as e:
+        if gid0:
+            gid_u = UUID(str(gid0))
+            tid_s = base.get("thread_id")
+            if tid_s:
+                tid_u = UUID(str(tid_s))
+                _save_checkpoint_with_event(
+                    ctx,
+                    CheckpointRecord(
+                        checkpoint_id=uuid4(),
+                        thread_id=tid_u,
+                        graph_run_id=gid_u,
+                        checkpoint_kind="interrupt",
+                        state_json={
+                            "orchestrator_error": {
+                                "error_kind": "graph_error",
+                                "error_message": f"{type(e).__name__}: {e}",
+                            }
+                        },
+                        context_compaction_json=None,
+                    ),
+                )
+                append_graph_run_event(
+                    repo,
+                    gid_u,
+                    RunEventType.GRAPH_RUN_FAILED,
+                    {"error_kind": "graph_error"},
+                )
+            repo.update_graph_run_status(
+                gid_u,
                 "failed",
                 datetime.now(timezone.utc).isoformat(),
             )
@@ -340,19 +882,31 @@ def run_graph(
     if gid:
         tid_s = final.get("thread_id")
         if tid_s:
+            gid_u = UUID(gid)
             post = CheckpointRecord(
                 checkpoint_id=uuid4(),
                 thread_id=UUID(tid_s),
-                graph_run_id=UUID(gid),
+                graph_run_id=gid_u,
                 checkpoint_kind="post_role",
                 state_json=dict(final),
                 context_compaction_json=None,
             )
-            repo.save_checkpoint(post)
+            _save_checkpoint_with_event(ctx, post)
             repo.update_thread_current_checkpoint(UUID(tid_s), post.checkpoint_id)
         ended = datetime.now(timezone.utc).isoformat()
         repo.update_graph_run_status(UUID(gid), "completed", ended)
         repo.attach_run_snapshot(UUID(gid), dict(final))
+        append_graph_run_event(
+            repo,
+            UUID(gid),
+            RunEventType.GRAPH_RUN_COMPLETED,
+            {},
+        )
+    _log.info(
+        "run_graph graph_run_id=%s stage=response_returning elapsed_ms=%.1f",
+        final.get("graph_run_id", gid0),
+        (time.perf_counter() - t_run) * 1000,
+    )
     return final  # type: ignore[return-value]
 
 
@@ -366,6 +920,7 @@ def persist_graph_run_start(
     event_input: dict[str, Any],
 ) -> tuple[str, str]:
     """Ensure thread + graph_run rows exist; return (thread_id, graph_run_id)."""
+    t0 = time.perf_counter()
     tid = thread_id or _uuid()
     gid = graph_run_id or _uuid()
     tid_u = UUID(tid)
@@ -377,6 +932,12 @@ def persist_graph_run_start(
             status="active",
         )
     )
+    _log.info(
+        "persist_graph_run_start graph_run_id=%s thread_id=%s stage=thread_resolved elapsed_ms=%.1f",
+        gid,
+        tid,
+        (time.perf_counter() - t0) * 1000,
+    )
     gr = GraphRunRecord(
         graph_run_id=UUID(gid),
         thread_id=tid_u,
@@ -386,5 +947,12 @@ def persist_graph_run_start(
         status="running",
     )
     repo.save_graph_run(gr)
+    append_graph_run_event(repo, UUID(gid), RunEventType.GRAPH_RUN_STARTED, {})
+    _log.info(
+        "persist_graph_run_start graph_run_id=%s thread_id=%s stage=graph_run_persisted elapsed_ms=%.1f",
+        gid,
+        tid,
+        (time.perf_counter() - t0) * 1000,
+    )
     _ = event_input
     return tid, gid

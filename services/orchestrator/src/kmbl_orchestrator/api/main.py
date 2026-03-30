@@ -12,6 +12,7 @@ from typing import Annotated, Any, Literal
 from uuid import UUID, uuid4
 
 from fastapi import BackgroundTasks, Body, Depends, FastAPI, HTTPException, Query
+from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from kmbl_orchestrator.config import Settings, get_settings
@@ -22,6 +23,8 @@ from kmbl_orchestrator.domain import (
     BuildSpecRecord,
     CheckpointRecord,
     EvaluationReportRecord,
+    IdentityProfileRecord,
+    IdentitySourceRecord,
     PublicationSnapshotRecord,
     StagingSnapshotRecord,
 )
@@ -36,6 +39,11 @@ from kmbl_orchestrator.persistence.factory import (
 )
 from kmbl_orchestrator.persistence.repository import Repository
 from kmbl_orchestrator.roles.invoke import DefaultRoleInvoker
+from kmbl_orchestrator.runtime.kilo_model_routing import (
+    ImageRouteBudgetExceededError,
+    ImageRouteConfigurationError,
+    select_generator_provider_config,
+)
 from kmbl_orchestrator.runtime.graph_run_detail_read_model import (
     build_graph_run_detail_read_model,
 )
@@ -43,6 +51,7 @@ from kmbl_orchestrator.runtime.scenario_visibility import (
     gallery_strip_visibility_from_staging_payload,
     scenario_badge_from_tag,
     scenario_tag_from_run_state,
+    static_frontend_visibility_from_staging_payload,
 )
 from kmbl_orchestrator.runtime.graph_run_list_read_model import (
     build_graph_run_list_read_model,
@@ -61,6 +70,10 @@ from kmbl_orchestrator.runtime.run_snapshot_sanitize import (
     sanitize_checkpoint_state_for_api,
 )
 from kmbl_orchestrator.runtime.stale_run import reconcile_stale_running_graph_run
+from kmbl_orchestrator.staging.static_preview_assembly import (
+    assemble_static_preview_html,
+    resolve_static_preview_entry_path,
+)
 from kmbl_orchestrator.staging.read_model import (
     evaluation_summary_from_payload,
     evaluation_summary_section_from_payload,
@@ -87,6 +100,9 @@ from kmbl_orchestrator.staging.proposals_queue import (
 )
 from kmbl_orchestrator.staging.review_action import derive_review_action_state
 from kmbl_orchestrator.seeds import (
+    KILOCLAW_IMAGE_ONLY_TEST_EVENT_INPUT,
+    KILOCLAW_IMAGE_ONLY_TEST_SCENARIO_PRESET,
+    KILOCLAW_IMAGE_ONLY_TEST_SCENARIO_TAG,
     SEEDED_GALLERY_STRIP_EVENT_INPUT,
     SEEDED_GALLERY_STRIP_SCENARIO_PRESET,
     SEEDED_GALLERY_STRIP_SCENARIO_TAG,
@@ -155,6 +171,7 @@ class StartRunBody(BaseModel):
             "seeded_local_v1",
             "seeded_gallery_strip_v1",
             "seeded_gallery_strip_varied_v1",
+            "kiloclaw_image_only_test_v1",
         ]
         | None
     ) = Field(
@@ -164,6 +181,8 @@ class StartRunBody(BaseModel):
             "with the canonical seeded scenario (deterministic tag in event_input.scenario). "
             "seeded_gallery_strip_varied_v1 replaces event_input with a non-deterministic "
             "bounded-variation gallery scenario (fresh run_nonce per start). "
+            "kiloclaw_image_only_test_v1 requires gallery images via KiloClaw kmbl-image-gen routing "
+            "(KILOCLAW_GENERATOR_OPENAI_IMAGE_CONFIG_KEY). "
             "Ignores event_input for that run."
         ),
     )
@@ -287,6 +306,10 @@ class GraphRunSummaryBlock(BaseModel):
     graph_run_id: str
     thread_id: str
     identity_id: str | None = None
+    graph_run_identity_id: str | None = Field(
+        default=None,
+        description="Denormalized identity on graph_run when set (may match thread.identity_id).",
+    )
     trigger_type: str
     status: str
     started_at: str
@@ -309,6 +332,11 @@ class RoleInvocationDetailItem(BaseModel):
     ended_at: str | None = None
     provider: str
     provider_config_key: str
+    routing_hints: dict[str, Any] | None = Field(
+        default=None,
+        description="Subset of persisted routing_metadata_json (generator invocations only).",
+    )
+    routing_fact_source: Literal["persisted", "none"] = "none"
 
 
 class AssociatedOutputsBlock(BaseModel):
@@ -337,6 +365,17 @@ class OperatorActionItem(BaseModel):
     details: dict[str, Any] | None = None
 
 
+class IdentityTraceBlock(BaseModel):
+    """Minimal visibility: thread vs graph_run ids and planner input identity_context."""
+
+    thread_identity_id: str | None = None
+    graph_run_identity_id: str | None = None
+    planner_identity_context: dict[str, Any] | None = Field(
+        default=None,
+        description="From first planner role_invocation.input_payload_json.identity_context.",
+    )
+
+
 class GraphRunDetailResponse(BaseModel):
     """Pass H — persisted read surface only (no live streaming)."""
 
@@ -354,6 +393,10 @@ class GraphRunDetailResponse(BaseModel):
     )
     scenario_tag: str | None = None
     scenario_badge: str | None = None
+    identity_trace: IdentityTraceBlock | None = Field(
+        default=None,
+        description="Debug: identity linkage and hydrated planner identity_context.",
+    )
 
 
 class GraphRunListItem(BaseModel):
@@ -511,12 +554,16 @@ class StagingSnapshotDetailResponse(BaseModel):
     lifecycle_timeline: list[LifecycleTimelineItem] = Field(default_factory=list)
     content_kind: str | None = Field(
         default=None,
-        description="Derived: gallery_strip when payload includes ui_gallery_strip_v1.",
+        description="Derived: gallery_strip, static_frontend, mixed, or null.",
     )
     has_gallery_strip: bool = False
     gallery_strip_item_count: int = 0
     gallery_image_artifact_count: int = 0
     gallery_items_with_artifact_key: int = 0
+    has_static_frontend: bool = False
+    static_frontend_file_count: int = 0
+    static_frontend_bundle_count: int = 0
+    has_previewable_html: bool = False
 
 
 class ApproveStagingBody(BaseModel):
@@ -644,6 +691,11 @@ def _resolve_start_event_input(body: StartRunBody) -> tuple[dict[str, Any], str 
             build_seeded_gallery_strip_varied_v1_event_input(),
             SEEDED_GALLERY_STRIP_VARIED_SCENARIO_PRESET,
         )
+    if body.scenario_preset == KILOCLAW_IMAGE_ONLY_TEST_SCENARIO_PRESET:
+        return (
+            dict(KILOCLAW_IMAGE_ONLY_TEST_EVENT_INPUT),
+            KILOCLAW_IMAGE_ONLY_TEST_SCENARIO_PRESET,
+        )
     return dict(body.event_input), None
 
 
@@ -668,6 +720,7 @@ def _outputs_substantive(
         SEEDED_SCENARIO_TAG,
         SEEDED_GALLERY_STRIP_SCENARIO_TAG,
         SEEDED_GALLERY_STRIP_VARIED_SCENARIO_TAG,
+        KILOCLAW_IMAGE_ONLY_TEST_SCENARIO_TAG,
     ):
         return True
     hint = _spec_title_hint(bs.spec_json) if bs else None
@@ -961,6 +1014,14 @@ async def start_run(
                     ),
                     "value": {"scenario_preset": "seeded_gallery_strip_varied_v1"},
                 },
+                "kiloclaw_image_only_test_v1": {
+                    "summary": "KiloClaw image agent integration (3–4 gallery images)",
+                    "description": (
+                        "Routes generator to kmbl-image-gen when image intent matches. "
+                        "Requires KILOCLAW_GENERATOR_OPENAI_IMAGE_CONFIG_KEY and a working gateway."
+                    ),
+                    "value": {"scenario_preset": "kiloclaw_image_only_test_v1"},
+                },
             },
         ),
     ],
@@ -1048,6 +1109,91 @@ async def start_run(
         scenario_preset=preset_applied,
         effective_event_input=effective_event_input,
     )
+
+
+class CreateIdentitySourceBody(BaseModel):
+    identity_id: UUID
+    source_type: str
+    source_uri: str | None = None
+    raw_text: str | None = None
+    metadata_json: dict[str, Any] = Field(default_factory=dict)
+
+
+class UpsertIdentityProfileBody(BaseModel):
+    profile_summary: str | None = None
+    facets_json: dict[str, Any] = Field(default_factory=dict)
+    open_questions_json: list[Any] = Field(default_factory=list)
+
+
+@app.post("/orchestrator/identity/sources")
+def create_identity_source_endpoint(
+    body: CreateIdentitySourceBody,
+    repo: Repository = Depends(get_repo),
+) -> dict[str, str]:
+    """Persist one identity_source row (minimal spine — docs/07 §1.1)."""
+    rid = uuid4()
+    rec = IdentitySourceRecord(
+        identity_source_id=rid,
+        identity_id=body.identity_id,
+        source_type=body.source_type,
+        source_uri=body.source_uri,
+        raw_text=body.raw_text,
+        metadata_json=body.metadata_json,
+    )
+    repo.create_identity_source(rec)
+    return {"identity_source_id": str(rid), "identity_id": str(body.identity_id)}
+
+
+@app.get("/orchestrator/identity/{identity_id}/profile")
+def get_identity_profile_endpoint(
+    identity_id: str,
+    repo: Repository = Depends(get_repo),
+) -> dict[str, Any]:
+    try:
+        uid = UUID(identity_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="invalid identity_id") from e
+    p = repo.get_identity_profile(uid)
+    if p is None:
+        return {"identity_id": identity_id, "profile": None}
+    return {"identity_id": str(p.identity_id), "profile": p.model_dump(mode="json")}
+
+
+@app.put("/orchestrator/identity/{identity_id}/profile")
+def upsert_identity_profile_endpoint(
+    identity_id: str,
+    body: UpsertIdentityProfileBody,
+    repo: Repository = Depends(get_repo),
+) -> dict[str, Any]:
+    try:
+        uid = UUID(identity_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="invalid identity_id") from e
+    rec = IdentityProfileRecord(
+        identity_id=uid,
+        profile_summary=body.profile_summary,
+        facets_json=body.facets_json,
+        open_questions_json=body.open_questions_json,
+    )
+    repo.upsert_identity_profile(rec)
+    return {"ok": True, "identity_id": str(uid)}
+
+
+@app.get("/orchestrator/identity/{identity_id}/sources")
+def list_identity_sources_endpoint(
+    identity_id: str,
+    repo: Repository = Depends(get_repo),
+) -> dict[str, Any]:
+    try:
+        uid = UUID(identity_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="invalid identity_id") from e
+    rows = repo.list_identity_sources(uid)
+    return {
+        "identity_id": str(uid),
+        "sources": [r.model_dump(mode="json") for r in rows],
+        "count": len(rows),
+    }
 
 
 def _optional_query_str(value: str | None) -> str | None:
@@ -1228,6 +1374,17 @@ def graph_run_detail(
     snap_detail = repo.get_run_snapshot(gid)
     scen_tag = scenario_tag_from_run_state(snap_detail)
     scen_badge = scenario_badge_from_tag(scen_tag)
+    first_planner = next((r for r in invocations if r.role_type == "planner"), None)
+    planner_ic: dict[str, Any] | None = None
+    if first_planner:
+        inp = first_planner.input_payload_json or {}
+        c = inp.get("identity_context")
+        planner_ic = c if isinstance(c, dict) else None
+    id_trace = IdentityTraceBlock(
+        thread_identity_id=str(thread.identity_id) if thread and thread.identity_id else None,
+        graph_run_identity_id=str(gr.identity_id) if gr.identity_id else None,
+        planner_identity_context=planner_ic,
+    )
     return GraphRunDetailResponse(
         summary=GraphRunSummaryBlock(**raw["summary"]),
         operator_actions=[
@@ -1241,6 +1398,7 @@ def graph_run_detail(
         retry_eligible=False,
         scenario_tag=scen_tag,
         scenario_badge=scen_badge,
+        identity_trace=id_trace,
     )
 
 
@@ -1827,7 +1985,17 @@ def get_staging_snapshot(
     eval_raw = evaluation_summary_section_from_payload(p)
     explain = review_readiness_explanation_for_staging(rec, p)
     gv = gallery_strip_visibility_from_staging_payload(p)
-    ck = "gallery_strip" if gv.get("has_gallery_strip") else None
+    fv = static_frontend_visibility_from_staging_payload(p)
+    has_g = bool(gv.get("has_gallery_strip"))
+    has_f = bool(fv.get("has_static_frontend"))
+    if has_g and has_f:
+        ck = "mixed"
+    elif has_g:
+        ck = "gallery_strip"
+    elif has_f:
+        ck = "static_frontend"
+    else:
+        ck = None
     return StagingSnapshotDetailResponse(
         staging_snapshot_id=str(rec.staging_snapshot_id),
         thread_id=str(rec.thread_id),
@@ -1854,10 +2022,62 @@ def get_staging_snapshot(
         linked_publications=[LinkedPublicationItem(**x) for x in linked_raw],
         lifecycle_timeline=[LifecycleTimelineItem(**x) for x in timeline_raw],
         content_kind=ck,
-        has_gallery_strip=bool(gv.get("has_gallery_strip")),
+        has_gallery_strip=has_g,
         gallery_strip_item_count=int(gv.get("gallery_strip_item_count") or 0),
         gallery_image_artifact_count=int(gv.get("gallery_image_artifact_count") or 0),
         gallery_items_with_artifact_key=int(gv.get("gallery_items_with_artifact_key") or 0),
+        has_static_frontend=has_f,
+        static_frontend_file_count=int(fv.get("static_frontend_file_count") or 0),
+        static_frontend_bundle_count=int(fv.get("static_frontend_bundle_count") or 0),
+        has_previewable_html=bool(fv.get("has_previewable_html")),
+    )
+
+
+@app.get("/orchestrator/staging/{staging_snapshot_id}/static-preview")
+def get_staging_static_preview(
+    staging_snapshot_id: str,
+    bundle_id: str | None = Query(
+        None,
+        description="When set, preview the bundle with this slug (multiple bundles).",
+    ),
+    repo: Repository = Depends(get_repo),
+) -> Response:
+    """
+    Serve one assembled HTML document for ``static_frontend_file_v1`` artifacts (trusted path).
+
+    404 JSON when no previewable static bundle exists. No filesystem access — payload only.
+    """
+    try:
+        sid = UUID(staging_snapshot_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="invalid staging_snapshot_id") from e
+    rec = repo.get_staging_snapshot(sid)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="staging_snapshot not found")
+    p = dict(rec.snapshot_payload_json)
+    entry, err = resolve_static_preview_entry_path(p, bundle_id=bundle_id)
+    if err or not entry:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error_kind": "static_preview_unavailable",
+                "reason": err or "unknown",
+            },
+        )
+    html, aerr = assemble_static_preview_html(p, entry_path=entry)
+    if aerr or not html:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_kind": "static_preview_unavailable", "reason": aerr or "unknown"},
+        )
+    return Response(
+        content=html.encode("utf-8"),
+        media_type="text/html; charset=utf-8",
+        headers={
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'; img-src data: https:; font-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'",
+            "Cache-Control": "private, no-store",
+        },
     )
 
 
@@ -1919,11 +2139,24 @@ def invoke_role(
     # Minimal synthetic IDs for standalone calls
     gid = UUID(int=0)
     tid = UUID(int=1)
-    key = {
-        "planner": settings.kiloclaw_planner_config_key,
-        "generator": settings.kiloclaw_generator_config_key,
-        "evaluator": settings.kiloclaw_evaluator_config_key,
-    }[body.role_type]
+    routing_meta: dict[str, Any] = {"invoke_role_dev": True, "role_type": body.role_type}
+    if body.role_type == "generator":
+        p = body.payload
+        try:
+            key, routing_meta = select_generator_provider_config(
+                settings,
+                build_spec=p.get("build_spec") or {},
+                event_input=p.get("event_input") or {},
+                generator_payload=p if isinstance(p, dict) else {},
+            )
+        except (ImageRouteConfigurationError, ImageRouteBudgetExceededError) as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+    else:
+        key = {
+            "planner": settings.kiloclaw_planner_config_key,
+            "generator": settings.kiloclaw_generator_config_key,
+            "evaluator": settings.kiloclaw_evaluator_config_key,
+        }[body.role_type]
     _inv, raw = invoker.invoke(
         graph_run_id=gid,
         thread_id=tid,
@@ -1931,6 +2164,7 @@ def invoke_role(
         provider_config_key=key,
         input_payload=body.payload,
         iteration_index=0,
+        routing_metadata=routing_meta,
     )
     return {"output": raw}
 

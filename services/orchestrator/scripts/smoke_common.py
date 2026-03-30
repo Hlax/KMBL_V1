@@ -332,6 +332,7 @@ def parse_cli_preset() -> tuple[str, int, bool, bool]:
             "seeded_local_v1",
             "seeded_gallery_strip_v1",
             "seeded_gallery_strip_varied_v1",
+            "kiloclaw_image_only_test_v1",
         ],
         default="seeded_local_v1",
     )

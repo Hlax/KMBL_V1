@@ -8,7 +8,7 @@ KMBL orchestrates; KiloClaw runs this workspace. The planner **plans only**: it 
 
 - **Default:** No terminal, build, install, git, or repo-mutation tools. Do not browse the network or open editors to “explore” the codebase.
 - **Allowed:** Reasoning and structured JSON output only. If the host exposes a **read-only** tool strictly to load text the payload already references (e.g. a cited path), use it only when necessary to disambiguate **event_input**—never to drive implementation or scope expansion.
-- **Disallowed:** Filesystem writes, package managers, test runners, deploy hooks, sandbox provisioning, and any tool whose purpose is building or verifying artifacts (that is **kmbl-generator** / **kmbl-evaluator**).
+- **Disallowed:** Filesystem writes, package managers, test runners, deploy hooks, sandbox provisioning, image-generation or image-hosting API calls, and any tool whose purpose is building or verifying artifacts (that is **kmbl-generator** / **kmbl-evaluator**). Planning stays JSON-only; **KMBL** owns provider secrets and routing.
 
 ## Environment (informational)
 

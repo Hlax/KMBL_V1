@@ -28,6 +28,8 @@ export type ProposalRow = {
   gallery_strip_item_count?: number;
   gallery_image_artifact_count?: number;
   gallery_items_with_artifact_key?: number;
+  has_static_frontend?: boolean;
+  has_previewable_html?: boolean;
   review_readiness?: ReviewReadiness;
   staging_status?: string;
   /** Pass J — persisted derivation */
@@ -121,6 +123,11 @@ export type StagingDetail = {
   gallery_strip_item_count?: number;
   gallery_image_artifact_count?: number;
   gallery_items_with_artifact_key?: number;
+  /** Static HTML/CSS/JS (derived from static_frontend_file_v1) */
+  has_static_frontend?: boolean;
+  static_frontend_file_count?: number;
+  static_frontend_bundle_count?: number;
+  has_previewable_html?: boolean;
   preview_url?: string | null;
   status: string;
   created_at?: string;
@@ -224,6 +231,9 @@ export type RoleInvocationDetailItem = {
   ended_at?: string | null;
   provider: string;
   provider_config_key: string;
+  /** Subset of persisted routing_metadata_json (generator rows). */
+  routing_hints?: Record<string, unknown> | null;
+  routing_fact_source?: "persisted" | "none";
 };
 
 export type AssociatedOutputsBlock = {

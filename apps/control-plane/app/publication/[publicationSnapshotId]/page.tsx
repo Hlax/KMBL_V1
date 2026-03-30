@@ -5,7 +5,9 @@ import { identityOverviewPath } from "@/lib/identity-nav";
 import { OperatorOutputSurface } from "@/app/components/OperatorOutputSurface";
 import { buildPublicationAuditFacts } from "@/lib/review-publication-audit-read-model";
 import { serverOriginFromHeaders } from "@/lib/server-origin";
-import type { PublicationDetail } from "@/lib/api-types";
+import type { PublicationDetail, StagingDetail } from "@/lib/api-types";
+import { StagingFactsCard } from "@/app/components/StagingFactsCard";
+import { SourceStagingImageFacts } from "@/app/components/SourceStagingImageFacts";
 
 export const dynamic = "force-dynamic";
 
@@ -111,6 +113,23 @@ export default async function PublicationDetailPage({
   const lineageGraphRun = pl?.graph_run_id ?? data.graph_run_id;
   const lineageIdentity = pl?.identity_id ?? data.identity_id;
 
+  const sourceStagingId = audit.sourceStagingSnapshotId;
+  let stagingForFacts: StagingDetail | null = null;
+  let stagingFactsErr: string | null = null;
+  if (sourceStagingId) {
+    const stUrl = `${origin}/api/staging/${encodeURIComponent(sourceStagingId)}`;
+    try {
+      const stRes = await fetch(stUrl, { cache: "no-store" });
+      if (stRes.ok) {
+        stagingForFacts = (await stRes.json()) as StagingDetail;
+      } else {
+        stagingFactsErr = `HTTP ${stRes.status}`;
+      }
+    } catch (e) {
+      stagingFactsErr = e instanceof Error ? e.message : String(e);
+    }
+  }
+
   return (
     <>
       <p className="muted small cp-crumb-line">
@@ -137,6 +156,18 @@ export default async function PublicationDetailPage({
         canon, publish from a <strong>new staging snapshot</strong> (staging id cannot publish
         twice).
       </p>
+
+      <p className="op-banner op-banner--neutral" style={{ marginBottom: "1rem" }}>
+        <strong>Review → Preview → Publish</strong> — You are on Publish (canon). To re-check images
+        or static bundles, open <Link href="/review">Review</Link> and use the same staging facts +
+        static preview as before publish.
+      </p>
+
+      {sourceStagingId ? (
+        <StagingFactsCard staging={stagingForFacts} error={stagingFactsErr} />
+      ) : null}
+
+      <SourceStagingImageFacts staging={stagingForFacts} error={stagingFactsErr} />
 
       <section className="pub-hero" aria-labelledby="pub-hero-heading">
         <div className="pub-hero__head">

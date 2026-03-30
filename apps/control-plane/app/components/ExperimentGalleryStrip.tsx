@@ -11,7 +11,11 @@ type Props = {
 export function ExperimentGalleryStrip({ data, contextLabel, stagingHref }: Props) {
   const label = contextLabel ?? "Gallery strip (experiment)";
   return (
-    <section className="op-gallery-strip" aria-labelledby="op-gallery-strip-h">
+    <section
+      className="op-gallery-strip"
+      id="op-gallery-strip-section"
+      aria-labelledby="op-gallery-strip-h"
+    >
       <div className="op-gallery-strip__head">
         <h2 id="op-gallery-strip-h" className="op-section-title" style={{ margin: 0 }}>
           {label}

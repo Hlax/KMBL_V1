@@ -53,7 +53,9 @@ def test_graph_run_detail_endpoint_shape(clear_singleton: None) -> None:
             thread_id=tid,
             role_type="planner",
             provider_config_key="local",
-            input_payload_json={},
+            input_payload_json={
+                "identity_context": {"identity_id": str(iden), "profile_summary": "x"},
+            },
             status="completed",
             iteration_index=0,
             started_at="2026-03-29T10:01:00+00:00",
@@ -76,6 +78,12 @@ def test_graph_run_detail_endpoint_shape(clear_singleton: None) -> None:
         assert body["summary"]["graph_run_id"] == str(gid)
         assert body["summary"]["thread_id"] == str(tid)
         assert body["summary"]["identity_id"] == str(iden)
+        assert body["summary"].get("graph_run_identity_id") is None
+        trace = body.get("identity_trace")
+        assert trace is not None
+        assert trace["thread_identity_id"] == str(iden)
+        pic = trace.get("planner_identity_context") or {}
+        assert pic.get("identity_id") == str(iden)
         assert body["summary"]["run_state_hint"] == "completed"
         assert body["summary"]["attention_state"] == "completed_no_staging"
         assert len(body["role_invocations"]) == 1
@@ -83,6 +91,67 @@ def test_graph_run_detail_endpoint_shape(clear_singleton: None) -> None:
         assert len(body["timeline"]) == 2
         kinds = [t["kind"] for t in body["timeline"]]
         assert "run_started" in kinds and "run_completed" in kinds
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_graph_run_detail_generator_routing_hints_persisted(clear_singleton: None) -> None:
+    tid = uuid4()
+    gid = uuid4()
+    iden = uuid4()
+    repo = InMemoryRepository()
+    repo.ensure_thread(
+        ThreadRecord(thread_id=tid, identity_id=iden, thread_kind="build", status="active")
+    )
+    repo.save_graph_run(
+        GraphRunRecord(
+            graph_run_id=gid,
+            thread_id=tid,
+            trigger_type="prompt",
+            status="completed",
+            started_at="2026-03-29T10:00:00+00:00",
+            ended_at="2026-03-29T10:05:00+00:00",
+        )
+    )
+    rid = uuid4()
+    repo.save_role_invocation(
+        RoleInvocationRecord(
+            role_invocation_id=rid,
+            graph_run_id=gid,
+            thread_id=tid,
+            role_type="generator",
+            provider_config_key="kmbl-generator-openai-image",
+            input_payload_json={},
+            status="completed",
+            iteration_index=0,
+            started_at="2026-03-29T10:01:00+00:00",
+            ended_at="2026-03-29T10:02:00+00:00",
+            routing_metadata_json={
+                "kmb_routing_version": 3,
+                "generator_route_kind": "kiloclaw_image_agent",
+                "openai_image_route_applied": True,
+                "image_generation_intent_kind": "gallery_strip",
+                "budget_denial_reason": None,
+                "route_reason": "kiloclaw_image_agent_route_applied",
+            },
+        )
+    )
+
+    def _ov() -> InMemoryRepository:
+        return repo
+
+    app.dependency_overrides[get_repo] = _ov
+    try:
+        client = TestClient(app)
+        r = client.get(f"/orchestrator/runs/{gid}/detail")
+        assert r.status_code == 200
+        body = r.json()
+        invs = body["role_invocations"]
+        assert len(invs) == 1
+        g0 = invs[0]
+        assert g0["routing_fact_source"] == "persisted"
+        assert g0["routing_hints"]["generator_route_kind"] == "kiloclaw_image_agent"
+        assert g0["routing_hints"]["openai_image_route_applied"] is True
     finally:
         app.dependency_overrides.clear()
 

@@ -19,6 +19,8 @@ import { galleryStripVisibilityFromStagingPayload } from "@/lib/gallery-strip-vi
 import { OperatorOutputSurface } from "@/app/components/OperatorOutputSurface";
 import { parseUIGalleryStripV1FromPayload } from "@/lib/ui-gallery-strip-v1";
 import { StagingReviewActions } from "./StagingReviewActions";
+import { StagingFactsCard } from "@/app/components/StagingFactsCard";
+import { ImageReviewSection } from "@/app/components/ImageReviewSection";
 
 export const dynamic = "force-dynamic";
 
@@ -385,6 +387,8 @@ export default async function StagingReviewPage({
       : "";
   const preview = (data.preview_url?.trim() || previewFromPayload || "") as string;
   const showIframe = preview && isSafePreviewUrl(preview);
+  const showStaticFePreview = data.has_previewable_html === true;
+  const staticPreviewSrc = `/api/staging/${encodeURIComponent(data.staging_snapshot_id)}/static-preview`;
   const rr = data.review_readiness ?? {};
   const linked = data.linked_publications ?? [];
   const timeline = data.lifecycle_timeline ?? [];
@@ -437,10 +441,39 @@ export default async function StagingReviewPage({
         </p>
       ) : null}
 
+      {showStaticFePreview ? (
+        <p className="op-banner op-banner--neutral" style={{ marginBottom: "0.75rem" }}>
+          <span className="op-badge op-badge--neutral" style={{ marginRight: "0.5rem" }}>
+            Static HTML/CSS/JS
+          </span>
+          <span className="muted small">
+            {data.static_frontend_file_count ?? 0} file(s) · {data.static_frontend_bundle_count ?? 0}{" "}
+            bundle(s) — assembled preview below
+          </span>
+        </p>
+      ) : null}
+
       <p className="op-banner op-banner--staging" style={{ marginBottom: "1rem" }}>
         <strong>Staging (review surface)</strong> — persisted snapshot for operator review. Canon
         is a separate <Link href="/publication">publication</Link> snapshot.
       </p>
+
+      <StagingFactsCard staging={data} publicationSnapshotId={primaryPub} />
+
+      {(showGalleryStripBanner || (data.gallery_image_artifact_count ?? 0) > 0) && (
+        <ImageReviewSection
+          hasGalleryStrip={data.has_gallery_strip === true || gv.hasGalleryStrip}
+          galleryStripItemCount={data.gallery_strip_item_count ?? gv.galleryStripItemCount}
+          galleryImageArtifactCount={data.gallery_image_artifact_count ?? gv.galleryImageArtifactCount}
+          galleryItemsWithArtifactKey={
+            data.gallery_items_with_artifact_key ?? gv.galleryItemsWithArtifactKey
+          }
+          hasPreviewableHtml={showStaticFePreview}
+          staticPreviewHref={staticPreviewSrc}
+          payload={payload && typeof payload === "object" ? (payload as Record<string, unknown>) : undefined}
+          galleryStrip={galleryStrip}
+        />
+      )}
 
       <section className="pub-hero" aria-labelledby="staging-hero-h">
         <div className="pub-hero__head">
@@ -581,6 +614,29 @@ export default async function StagingReviewPage({
         graphRunId={lineage?.graph_run_id ?? data.graph_run_id ?? null}
         variant="staging"
       />
+
+      {showStaticFePreview ? (
+        <div className="op-panel op-panel--embed">
+          <h2 className="op-section-title">Static front-end preview</h2>
+          <p className="muted small">
+            Assembled from persisted <code className="mono">static_frontend_file_v1</code> artifacts
+            (inlined CSS/JS from the same bundle). Same-origin iframe — scripts run sandboxed.
+          </p>
+          <p className="small" style={{ marginTop: "0.35rem" }}>
+            <a className="op-btn op-btn--secondary" href={staticPreviewSrc} target="_blank" rel="noreferrer">
+              Open preview in new tab
+            </a>
+          </p>
+          <div className="op-preview-frame">
+            <iframe
+              title="Static staging preview"
+              src={staticPreviewSrc}
+              sandbox="allow-scripts allow-same-origin"
+              loading="lazy"
+            />
+          </div>
+        </div>
+      ) : null}
 
       {showIframe ? (
         <div className="op-panel op-panel--embed">

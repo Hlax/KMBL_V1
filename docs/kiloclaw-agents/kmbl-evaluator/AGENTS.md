@@ -34,3 +34,5 @@ If required, respond **HEARTBEAT_OK** only.
 ## Do not
 
 Personalize this workspace or broaden the role into a coding or publishing agent.
+
+**Gallery / images:** Judge and record evidence—never replace images, own provider policy, or fix generator-role output (**SOUL.md**). That output may come from **`kmbl-generator`** or, when KMBL routes image work, from **`kmbl-image-gen`**—still one **generator** step in the graph.

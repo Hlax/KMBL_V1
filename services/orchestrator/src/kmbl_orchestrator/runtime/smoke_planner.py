@@ -20,6 +20,7 @@ from kmbl_orchestrator.contracts.normalized_errors import contract_validation_fa
 from kmbl_orchestrator.contracts.persistence_validate import validate_role_output_for_persistence
 from kmbl_orchestrator.contracts.planner_normalize import normalize_build_spec_for_persistence
 from kmbl_orchestrator.domain import CheckpointRecord
+from kmbl_orchestrator.identity.hydrate import build_planner_identity_context
 from kmbl_orchestrator.normalize import normalize_planner_output
 from kmbl_orchestrator.persistence.repository import Repository
 from kmbl_orchestrator.roles.invoke import DefaultRoleInvoker
@@ -55,9 +56,12 @@ def run_smoke_planner_only(
         graph_run_id,
     )
 
+    th = repo.get_thread(tid)
+    iid = th.identity_id if th else None
+    ic = build_planner_identity_context(repo, iid)
     payload: dict[str, Any] = {
         "thread_id": thread_id,
-        "identity_context": {},
+        "identity_context": ic,
         "memory_context": {},
         "event_input": event_input or {},
         "current_state_summary": {},

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { ControlPlaneNav } from "./components/ControlPlaneNav";
+import { OperatorFlowStrip } from "./components/OperatorFlowStrip";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -23,6 +24,7 @@ export default function RootLayout({
       <body>
         <main>
           <ControlPlaneNav />
+          <OperatorFlowStrip />
           {children}
         </main>
       </body>

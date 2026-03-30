@@ -58,12 +58,53 @@ class StagingPayloadArtifactsV1(BaseModel):
     artifact_refs: list[Any] = Field(default_factory=list)
 
 
+class StagingPayloadFrontendStaticFileV1(BaseModel):
+    """One normalized static file row (mirrors persisted ``static_frontend_file_v1``)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    path: str
+    language: Literal["html", "css", "js"]
+    bundle_id: str | None = None
+    previewable: bool
+    entry_for_preview: bool
+
+
+class StagingPayloadFrontendStaticBundleV1(BaseModel):
+    """Files grouped by ``bundle_id`` (``null`` = ungrouped)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    bundle_id: str | None = None
+    file_paths: list[str] = Field(default_factory=list)
+    preview_entry_path: str | None = None
+
+
+class StagingPayloadFrontendStaticV1(BaseModel):
+    """
+    Derived review hints for simple HTML/CSS/JS artifacts (no sandbox; additive to v1).
+
+    ``convention`` documents the path prefix rule for generator emitters.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    convention: Literal["component_paths_v1"] = "component_paths_v1"
+    file_count: int = 0
+    bundle_count: int = 0
+    has_previewable_html: bool = False
+    files: list[StagingPayloadFrontendStaticFileV1] = Field(default_factory=list)
+    bundles: list[StagingPayloadFrontendStaticBundleV1] = Field(default_factory=list)
+    patch_preview_entry_path: str | None = None
+
+
 class StagingPayloadMetadataV1(BaseModel):
     """Non-UI working state slice persisted on the candidate (no raw KiloClaw envelope)."""
 
     model_config = ConfigDict(extra="forbid")
 
     working_state_patch: dict[str, Any] = Field(default_factory=dict)
+    frontend_static: StagingPayloadFrontendStaticV1 | None = None
 
 
 class StagingSnapshotPayloadV1(BaseModel):
@@ -85,6 +126,92 @@ class StagingSnapshotPayloadV1(BaseModel):
     metadata: StagingPayloadMetadataV1
 
 
+def derive_frontend_static_v1(
+    artifact_refs: list[Any],
+    working_state_patch: dict[str, Any],
+) -> StagingPayloadFrontendStaticV1 | None:
+    """
+    Build a deterministic summary of ``static_frontend_file_v1`` artifacts for review UIs.
+
+    ``preview_entry_path`` per bundle: explicit ``entry_for_preview``, else
+    ``static_frontend_preview_v1.entry_path`` when it matches that bundle, else first
+    previewable HTML path in the bundle (sorted by ``path``).
+    """
+    static_rows: list[dict[str, Any]] = []
+    for a in artifact_refs:
+        if isinstance(a, dict) and a.get("role") == "static_frontend_file_v1":
+            static_rows.append(a)
+
+    if not static_rows:
+        return None
+
+    patch_preview: str | None = None
+    raw_pv = working_state_patch.get("static_frontend_preview_v1")
+    if isinstance(raw_pv, dict):
+        ep = raw_pv.get("entry_path")
+        if isinstance(ep, str) and ep.strip():
+            patch_preview = ep.strip().replace("\\", "/")
+
+    files_out: list[StagingPayloadFrontendStaticFileV1] = []
+    for row in sorted(static_rows, key=lambda r: str(r.get("path", ""))):
+        path = str(row["path"])
+        lang = row.get("language")
+        if lang not in ("html", "css", "js"):
+            continue
+        bid = row.get("bundle_id")
+        bkey = bid if isinstance(bid, str) else None
+        pv = row.get("previewable")
+        previewable = bool(pv) if pv is not None else (lang == "html")
+        ef = bool(row.get("entry_for_preview"))
+        files_out.append(
+            StagingPayloadFrontendStaticFileV1(
+                path=path,
+                language=lang,
+                bundle_id=bkey,
+                previewable=previewable,
+                entry_for_preview=ef,
+            )
+        )
+
+    has_html = any(f.language == "html" and f.previewable for f in files_out)
+    by_bundle: dict[str | None, list[StagingPayloadFrontendStaticFileV1]] = {}
+    for f in files_out:
+        by_bundle.setdefault(f.bundle_id, []).append(f)
+
+    bundles_out: list[StagingPayloadFrontendStaticBundleV1] = []
+    for bkey in sorted(by_bundle.keys(), key=lambda k: (k is None, k or "")):
+        group = sorted(by_bundle[bkey], key=lambda x: x.path)
+        paths = [g.path for g in group]
+        entry: str | None = None
+        for g in group:
+            if g.entry_for_preview and g.language == "html":
+                entry = g.path
+                break
+        if entry is None and patch_preview and patch_preview in paths:
+            entry = patch_preview
+        if entry is None:
+            for g in group:
+                if g.language == "html" and g.previewable:
+                    entry = g.path
+                    break
+        bundles_out.append(
+            StagingPayloadFrontendStaticBundleV1(
+                bundle_id=bkey,
+                file_paths=paths,
+                preview_entry_path=entry,
+            )
+        )
+
+    return StagingPayloadFrontendStaticV1(
+        file_count=len(files_out),
+        bundle_count=len(bundles_out),
+        has_previewable_html=has_html,
+        files=files_out,
+        bundles=bundles_out,
+        patch_preview_entry_path=patch_preview,
+    )
+
+
 def build_staging_snapshot_payload(
     *,
     build_candidate: BuildCandidateRecord,
@@ -98,6 +225,11 @@ def build_staging_snapshot_payload(
     No I/O, no generator calls, no raw ``raw_payload_json`` from roles.
     """
     sj: dict[str, Any] = build_spec.spec_json if build_spec is not None else {}
+    wsp = dict(build_candidate.working_state_patch_json)
+    fs = derive_frontend_static_v1(
+        list(build_candidate.artifact_refs_json),
+        wsp,
+    )
     spec_summary = StagingPayloadSummaryV1(
         type=sj.get("type") if isinstance(sj.get("type"), str) else None,
         title=sj.get("title") if isinstance(sj.get("title"), str) else None,
@@ -126,7 +258,8 @@ def build_staging_snapshot_payload(
             artifact_refs=list(build_candidate.artifact_refs_json),
         ),
         metadata=StagingPayloadMetadataV1(
-            working_state_patch=dict(build_candidate.working_state_patch_json),
+            working_state_patch=wsp,
+            frontend_static=fs,
         ),
     )
     return body.model_dump(mode="json")

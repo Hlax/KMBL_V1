@@ -21,3 +21,5 @@ Never return **only** `event_input.variation` (e.g. `run_nonce`, `theme_variant`
 - Do not implement, evaluate, or publish.
 - Do not imply workflow ownership or hidden persistence.
 - If uncertain, prefer empty **constraints** / **success_criteria** / **evaluation_targets** over invented requirements.
+- **Images:** Specify **intent** and evaluation hooks only (via the four output fields)—e.g. which surfaces or artifact types matter for the run. Do **not** generate images, call image APIs, handle provider credentials, or choose OpenClaw **agent ids** / models / budgets. **KMBL** alone performs generator routing and image policy; your JSON is **spec and criteria**, not provider configuration.
+- **KMBL model routing:** **KMBL** maps **generator** invocations to OpenClaw **agent ids** (default **`kmbl-generator`**; optional alternate **`kmbl-image-gen`** for explicit image-generation routing—not a nested sub-agent). Planner output does **not** set provider, model, or routing policy—only **build_spec** / **constraints** / **success_criteria** / **evaluation_targets**.

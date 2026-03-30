@@ -12,6 +12,10 @@ Read **BOOTSTRAP.md**, **IDENTITY.md**, **USER.md**, **SOUL.md**, **TOOLS.md**. 
 2. **USER.md** — caller and fields  
 3. **IDENTITY.md** — agent id `kmbl-generator`  
 
+Simple **HTML/CSS/JS** outputs belong in **artifact_outputs** as **`static_frontend_file_v1`** rows with paths under **`component/`** (see **SOUL.md**); this is not a full-app or React contract.
+
+**Image artifacts:** Use documented v1 roles (e.g. **`gallery_strip_image_v1`** for the strip; other image roles as the platform adds them). **KMBL** owns server-side image generation, OpenClaw routing for generator, secrets, and budget—do not add provider calls here. Prefer generated image artifacts when the run supports them; otherwise fall back with honest **`source`** (`generated` vs `external`) and without generic placeholder URLs as the default for varied gallery scenarios.
+
 Do **not** use **MEMORY.MD** or **HEARTBEAT.md** as run truth. **KMBL** persistence is canonical.
 
 ## Memory

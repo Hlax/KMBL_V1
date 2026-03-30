@@ -1,0 +1,145 @@
+"""
+Lightweight static front-end files for generator ``artifact_outputs``.
+
+Convention: paths under ``component/`` with ``.html`` / ``.css`` / ``.js`` suffixes
+(e.g. ``component/preview/index.html``). KMBL normalizes and persists these on
+``build_candidate.artifact_refs_json`` alongside other roles (e.g. gallery images).
+
+This is not a component framework — only a stable, review-friendly shape for
+simple HTML/CSS/JS bundles.
+"""
+
+from __future__ import annotations
+
+import re
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+_PATH_RE = re.compile(
+    r"^component/(?:[a-zA-Z0-9][a-zA-Z0-9_-]*/)*[a-zA-Z0-9][a-zA-Z0-9_-]*\.(html|css|js)$"
+)
+_KEY_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$")
+_MAX_CONTENT_BYTES = 256 * 1024
+
+
+def _infer_language_from_path(path: str) -> Literal["html", "css", "js"]:
+    lower = path.lower()
+    if lower.endswith(".html"):
+        return "html"
+    if lower.endswith(".css"):
+        return "css"
+    if lower.endswith(".js"):
+        return "js"
+    raise ValueError("cannot infer language from path")
+
+
+class StaticFrontendFileArtifactV1(BaseModel):
+    """One static file in a simple multi-file UI bundle."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    role: Literal["static_frontend_file_v1"]
+    path: str = Field(min_length=1, max_length=512)
+    language: Literal["html", "css", "js"]
+    content: str = Field(min_length=1, max_length=_MAX_CONTENT_BYTES)
+    bundle_id: str | None = Field(default=None, max_length=64)
+    previewable: bool | None = None
+    entry_for_preview: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_path_language_bundle(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        d = dict(data)
+        if isinstance(d.get("path"), str):
+            d["path"] = d["path"].strip().replace("\\", "/")
+        bid = d.get("bundle_id")
+        if bid is None or bid == "":
+            d["bundle_id"] = None
+        elif isinstance(bid, str):
+            s = bid.strip()
+            if not s:
+                d["bundle_id"] = None
+            elif not _KEY_RE.match(s):
+                raise ValueError(
+                    "bundle_id must match ^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$ or be null"
+                )
+            else:
+                d["bundle_id"] = s
+        if d.get("language") is None and isinstance(d.get("path"), str):
+            try:
+                d["language"] = _infer_language_from_path(d["path"])
+            except ValueError as e:
+                raise ValueError("language is required if path has no .html/.css/.js suffix") from e
+        return d
+
+    @model_validator(mode="after")
+    def path_shape_language_and_preview_defaults(self) -> StaticFrontendFileArtifactV1:
+        p = self.path
+        if ".." in p or p.startswith("/") or "//" in p:
+            raise ValueError("path must be a safe relative component/ path")
+        if not p.startswith("component/"):
+            raise ValueError('path must start with "component/"')
+        if not _PATH_RE.match(p):
+            raise ValueError(
+                "path must match component/<segments>/<name>.html|.css|.js "
+                "(no .., no absolute paths)"
+            )
+        inferred = _infer_language_from_path(p)
+        if self.language != inferred:
+            raise ValueError(f"language {self.language!r} does not match path extension")
+        pv = (self.language == "html") if self.previewable is None else self.previewable
+        return self.model_copy(update={"previewable": pv})
+
+
+def normalize_static_frontend_artifact_outputs_list(seq: list[Any]) -> list[Any]:
+    """
+    Validate ``static_frontend_file_v1`` dicts; pass through other entries unchanged.
+
+    Raises ``ValueError`` on duplicate paths, invalid bundle preview flags, or bad rows.
+    """
+    out: list[Any] = []
+    static_paths: set[str] = set()
+    # bundle_id -> list of (path, entry_for_preview)
+    by_bundle: dict[str | None, list[tuple[str, bool]]] = {}
+
+    for item in seq:
+        if isinstance(item, dict) and item.get("role") == "static_frontend_file_v1":
+            model = StaticFrontendFileArtifactV1.model_validate(item)
+            dumped = model.model_dump(mode="json")
+            path = str(dumped["path"])
+            if path in static_paths:
+                raise ValueError(f"duplicate static_frontend_file_v1 path: {path!r}")
+            static_paths.add(path)
+            bid = dumped.get("bundle_id")
+            bkey: str | None = bid if isinstance(bid, str) else None
+            by_bundle.setdefault(bkey, []).append((path, bool(dumped.get("entry_for_preview"))))
+            out.append(dumped)
+        else:
+            out.append(item)
+
+    for bkey, rows in by_bundle.items():
+        entries = [p for p, e in rows if e]
+        if len(entries) > 1:
+            label = "default" if bkey is None else repr(bkey)
+            raise ValueError(
+                f"at most one entry_for_preview per bundle ({label}), got: {entries!r}"
+            )
+
+    return out
+
+
+def normalize_combined_artifact_outputs_list(raw: Any) -> list[Any]:
+    """Gallery normalization first (image roles), then static front-end file roles."""
+    gal = _gallery_normalize(raw)
+    return normalize_static_frontend_artifact_outputs_list(gal)
+
+
+def _gallery_normalize(raw: Any) -> list[Any]:
+    from kmbl_orchestrator.contracts.gallery_image_artifact_v1 import (
+        normalize_gallery_artifact_outputs_list,
+    )
+
+    return normalize_gallery_artifact_outputs_list(raw)

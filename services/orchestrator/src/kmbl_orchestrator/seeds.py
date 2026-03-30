@@ -20,6 +20,10 @@ SEEDED_GALLERY_STRIP_SCENARIO_TAG: Final = "kmbl_seeded_gallery_strip_v1"
 SEEDED_GALLERY_STRIP_VARIED_SCENARIO_PRESET: Final = "seeded_gallery_strip_varied_v1"
 SEEDED_GALLERY_STRIP_VARIED_SCENARIO_TAG: Final = "kmbl_seeded_gallery_strip_varied_v1"
 
+# KiloClaw image agent only (kmbl-image-gen via routing) — 3–4 generated gallery_strip_image_v1 rows required.
+KILOCLAW_IMAGE_ONLY_TEST_SCENARIO_PRESET: Final = "kiloclaw_image_only_test_v1"
+KILOCLAW_IMAGE_ONLY_TEST_SCENARIO_TAG: Final = "kmbl_kiloclaw_image_only_test_v1"
+
 # Bounded vocabulary — selection uses (variation_seed + salt * 31) % len; auditable.
 GALLERY_VARIATION_THEME_VARIANTS: Final[tuple[str, ...]] = (
     "daylight",
@@ -59,6 +63,28 @@ SEEDED_LOCAL_EVENT_INPUT: dict[str, Any] = {
         "style": "numbered_checklist",
         "scope": "local_dev_only",
         "deterministic": True,
+    },
+}
+
+KILOCLAW_IMAGE_ONLY_TEST_EVENT_INPUT: dict[str, Any] = {
+    "scenario": KILOCLAW_IMAGE_ONLY_TEST_SCENARIO_TAG,
+    "task": (
+        "Integration test: **three or four** distinct `gallery_strip_image_v1` rows in artifact_outputs "
+        "with real generated URLs from the image pipeline (OpenClaw kmbl-image-gen). "
+        "Planner: build_spec must require gallery images and list success criteria. "
+        "Generator: emit `artifact_outputs`, `updated_state.ui_gallery_strip_v1`, and `proposed_changes`; "
+        "do not use placeholder image hosts. If images cannot be produced, surface failure in output — "
+        "do not substitute fake URLs. "
+        "Evaluator: FAIL if fewer than three `gallery_strip_image_v1` artifacts or any missing URLs."
+    ),
+    "constraints": {
+        "style": "integration_test",
+        "scope": "kiloclaw_image_agent_only",
+        "deterministic": True,
+        "ui_surface": "gallery_strip_v1",
+        "required_gallery_image_count_min": 3,
+        "required_gallery_image_count_max": 4,
+        "disallow_placeholder_image_hosts": True,
     },
 }
 

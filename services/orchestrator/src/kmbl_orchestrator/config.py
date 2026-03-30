@@ -3,6 +3,7 @@
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Resolve env files from repo layout so imports work no matter the process cwd.
@@ -54,6 +55,29 @@ class Settings(BaseSettings):
     kiloclaw_planner_config_key: str = "kmbl-planner"
     kiloclaw_generator_config_key: str = "kmbl-generator"
     kiloclaw_evaluator_config_key: str = "kmbl-evaluator"
+    # OpenClaw agent id for generator when KMBL routes explicit image-generation work (required for image intent).
+    # Default kmbl-image-gen; set empty only if image routes must be disabled (will fail closed when intent matches).
+    kiloclaw_generator_openai_image_config_key: str = Field(
+        default="kmbl-image-gen",
+        validation_alias=AliasChoices(
+            "KILOCLAW_GENERATOR_OPENAI_IMAGE_CONFIG_KEY",
+            "kiloclaw_generator_openai_image_config_key",
+        ),
+    )
+    # Rolling-hour estimated token budget for OpenAI-image generator routing (KMBL-side accounting).
+    kmb_openai_image_hourly_token_cap: int = Field(
+        default=1_500_000,
+        validation_alias=AliasChoices(
+            "KMB_OPENAI_IMAGE_HOURLY_TOKEN_CAP", "kmb_openai_image_hourly_token_cap"
+        ),
+    )
+    kmb_openai_image_route_estimated_tokens_per_invocation: int = Field(
+        default=12_000,
+        validation_alias=AliasChoices(
+            "KMB_OPENAI_IMAGE_ROUTE_ESTIMATED_TOKENS_PER_INVOCATION",
+            "kmb_openai_image_route_estimated_tokens_per_invocation",
+        ),
+    )
     # httpx client for KILOCLAW_TRANSPORT=http (chat completions POST).
     kiloclaw_http_connect_timeout_sec: float = 30.0
     kiloclaw_http_read_timeout_sec: float = 300.0
@@ -61,6 +85,33 @@ class Settings(BaseSettings):
     supabase_url: str = ""
     supabase_service_role_key: str = ""
     supabase_db_url: str = ""
+
+    # --- Legacy: orchestrator direct OpenAI Images API (disabled; use KiloClaw kmbl-image-gen only) ---
+    kmb_legacy_orchestrator_openai_images: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "KMB_LEGACY_ORCHESTRATOR_OPENAI_IMAGES",
+            "kmb_legacy_orchestrator_openai_images",
+        ),
+    )
+    kmb_image_generation_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("KMB_IMAGE_GENERATION_ENABLED", "kmb_image_generation_enabled"),
+    )
+    kmb_openai_image_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("KMB_OPENAI_IMAGE_API_KEY", "kmb_openai_image_api_key"),
+    )
+    kmb_openai_image_model: str = Field(
+        default="dall-e-3",
+        validation_alias=AliasChoices("KMB_OPENAI_IMAGE_MODEL", "kmb_openai_image_model"),
+    )
+    kmb_max_images_per_graph_run: int = Field(
+        default=4,
+        validation_alias=AliasChoices(
+            "KMB_MAX_IMAGES_PER_GRAPH_RUN", "kmb_max_images_per_graph_run"
+        ),
+    )
 
     def effective_kiloclaw_transport(self) -> str:
         """Resolve auto: http when API key set, else stub; otherwise return configured transport."""

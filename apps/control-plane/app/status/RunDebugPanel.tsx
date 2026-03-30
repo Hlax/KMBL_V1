@@ -424,7 +424,9 @@ export function RunDebugPanel() {
           ? {}
           : mode === "seeded"
             ? { scenario_preset: "seeded_local_v1" as const }
-            : { scenario_preset: "seeded_gallery_strip_v1" as const };
+            : mode === "gallery"
+              ? { scenario_preset: "seeded_gallery_strip_v1" as const }
+              : { scenario_preset: "seeded_gallery_strip_varied_v1" as const };
       let merged: ProxyPayload | null = null;
       try {
         const res = await fetch("/api/orchestrator/runs/start", {
@@ -508,8 +510,12 @@ export function RunDebugPanel() {
         <code>{"{ \"scenario_preset\": \"seeded_gallery_strip_v1\" }"}</code>{" "}
         for deterministic smoke. <strong>Gallery varied</strong> sends{" "}
         <code>{"{ \"scenario_preset\": \"seeded_gallery_strip_varied_v1\" }"}</code> with bounded
-        nonces and variants (see <code>effective_event_input</code>). Terminal outcome and errors
-        are on the GET panel after polling.
+        nonces and variants (see <code>effective_event_input</code>). With{" "}
+        <code>KILOCLAW_GENERATOR_OPENAI_IMAGE_CONFIG_KEY=kmbl-image-gen</code> in repo-root{" "}
+        <code>.env.local</code> (orchestrator restarted), KMBL routes the generator step to that
+        OpenClaw agent for explicit image intent; the gateway must have{" "}
+        <code>OPENAI_API_KEY</code> for Images API. Terminal outcome and errors are on the GET panel
+        after polling.
       </p>
       {lastStartMode && (
         <p style={{ fontSize: "0.88rem", marginBottom: "0.5rem" }}>
@@ -519,7 +525,9 @@ export function RunDebugPanel() {
               ? "smoke ({})"
               : lastStartMode === "seeded"
                 ? "seeded (preset)"
-                : "gallery strip (preset)"}
+                : lastStartMode === "gallery"
+                  ? "gallery strip (preset)"
+                  : "gallery varied (preset)"}
           </code>
         </p>
       )}

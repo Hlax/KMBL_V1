@@ -1440,3 +1440,373 @@ a.op-gallery-strip__label:hover {
   border: 1px solid #2a2a32;
   line-height: 1.45;
 }
+
+/* --- Operator flow + status pass --- */
+
+.cp-nav + .op-flow-strip {
+  margin-top: -0.5rem;
+}
+
+.op-flow-strip {
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: 0.65rem 1.25rem 1rem;
+  border-bottom: 1px solid #23232c;
+  box-sizing: border-box;
+}
+
+.op-flow-strip__title {
+  display: block;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin-bottom: 0.4rem;
+}
+
+.op-flow-strip__steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.35rem 0.5rem;
+  font-size: 0.9rem;
+}
+
+.op-flow-strip__steps > li {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.op-flow-strip__hint {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+}
+
+.op-flow-strip__preview {
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.op-flow-strip__arrow {
+  color: var(--muted);
+  align-self: center;
+  padding: 0 0.15rem;
+}
+
+.cp-health-compact {
+  margin-bottom: 1.25rem;
+}
+
+.op-section-title--sub {
+  font-size: 1rem;
+  margin-bottom: 0.35rem;
+}
+
+.cp-verify-section {
+  margin-top: 1.5rem;
+}
+
+.cp-recent-runs {
+  margin-top: 1.75rem;
+}
+
+.cp-recent-runs__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.cp-recent-runs__row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.25rem 0.75rem;
+  padding: 0.5rem 0.65rem;
+  background: #141418;
+  border: 1px solid #2a2a32;
+  border-radius: 6px;
+  font-size: 0.88rem;
+}
+
+.cp-recent-runs__main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.65rem;
+}
+
+.cp-recent-runs__meta {
+  grid-column: 2;
+  grid-row: 1;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.cp-recent-runs__links {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 520px) {
+  .cp-recent-runs__meta {
+    grid-column: 1 / -1;
+    text-align: left;
+  }
+}
+
+.cp-debug-details {
+  margin-top: 2rem;
+  padding: 0.5rem 0;
+  border-top: 1px dashed #333;
+}
+
+.cp-debug-details__summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.9rem;
+  padding: 0.35rem 0;
+}
+
+.cp-debug-details__summary:hover {
+  color: var(--fg);
+}
+
+.cp-debug-details section[aria-labelledby="run-debug-heading"] {
+  margin-top: 0.75rem;
+}
+
+.cp-spinner {
+  display: inline-block;
+  width: 0.85rem;
+  height: 0.85rem;
+  border: 2px solid #3a3a48;
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: cp-spin 0.7s linear infinite;
+  vertical-align: -0.1rem;
+  margin-right: 0.35rem;
+}
+
+@keyframes cp-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.cp-loading-line {
+  display: inline-flex;
+  align-items: center;
+}
+
+.cp-error-inline {
+  color: #f87171;
+  font-size: 0.88rem;
+  margin: 0.35rem 0;
+}
+
+.op-staging-facts {
+  margin-bottom: 1rem;
+}
+
+.op-staging-facts__title {
+  font-weight: 600;
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+}
+
+.op-staging-facts__dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.25rem 1rem;
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+}
+
+.op-staging-facts__dl dt {
+  margin: 0;
+  color: var(--muted);
+}
+
+.op-staging-facts__dl dd {
+  margin: 0;
+}
+
+.op-staging-facts__actions {
+  margin: 0;
+  font-size: 0.88rem;
+}
+
+.op-staging-facts--compact {
+  margin-top: 0.5rem;
+  margin-bottom: 0;
+}
+
+/* Image review (staging detail) */
+.op-image-review {
+  margin-bottom: 1.25rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.op-image-review__quick {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+  gap: 0.65rem 1rem;
+  margin: 0.85rem 0 1rem;
+}
+
+.op-image-review__stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.op-image-review__stat-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.op-image-review__stat-value {
+  font-size: 1.15rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.op-image-review__roles-block {
+  margin-bottom: 1rem;
+}
+
+.op-image-review__roles {
+  list-style: none;
+  margin: 0.35rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.75rem;
+}
+
+.op-image-review__roles li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem;
+}
+
+.op-image-review__role-raw {
+  opacity: 0.65;
+  font-size: 0.72rem;
+}
+
+.op-image-review__tiles {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(5.5rem, 1fr));
+  gap: 0.65rem;
+}
+
+.op-image-review__tile-link {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  text-decoration: none;
+  color: inherit;
+  border-radius: 6px;
+  padding: 0.25rem;
+  transition: background 0.12s ease;
+}
+
+.op-image-review__tile-link:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.op-image-review__tile-img {
+  aspect-ratio: 1;
+  border-radius: 4px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.op-image-review__tile-img img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.op-image-review__tile-cap {
+  margin: 0;
+  line-height: 1.3;
+  word-break: break-word;
+}
+
+.op-image-review__tile-note {
+  margin: 0;
+  line-height: 1.25;
+}
+
+.op-image-review__no-thumb {
+  margin: 0 0 1rem;
+}
+
+.op-image-review__next-list {
+  margin: 0.35rem 0 0;
+  padding-left: 1.2rem;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  color: #d4d4de;
+}
+
+.op-source-image-facts {
+  margin-bottom: 1rem;
+}
+
+.op-source-image-facts__roles {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.65rem;
+}
+
+.cp-routing-hints {
+  margin: 0.35rem 0 0;
+  padding-left: 1.15rem;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  color: #d4d4de;
+}
+
+.cp-routing-hints li {
+  margin: 0.25rem 0;
+}
+
+.op-badge--ok {
+  background: #14532d;
+  color: #bbf7d0;
+}
+
+.op-badge--fail {
+  background: #450a0a;
+  color: #fecaca;
+}
+
+.op-badge--warn {
+  background: #422006;
+  color: #fde68a;
+}

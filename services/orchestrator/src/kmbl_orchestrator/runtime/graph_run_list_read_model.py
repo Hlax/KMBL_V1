@@ -31,7 +31,12 @@ def build_graph_run_list_read_model(
     for gr in runs:
         count, max_iter = stats.get(gr.graph_run_id, (0, None))
         th = threads.get(gr.thread_id)
-        identity = str(th.identity_id) if th and th.identity_id else None
+        if gr.identity_id:
+            identity = str(gr.identity_id)
+        elif th and th.identity_id:
+            identity = str(th.identity_id)
+        else:
+            identity = None
         sid = staging.get(gr.graph_run_id)
         has_intr = gr.graph_run_id in interrupts
         hint = _run_state_hint(gr.status, has_interrupt_signal=has_intr)

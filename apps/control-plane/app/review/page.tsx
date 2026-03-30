@@ -8,6 +8,7 @@ import {
 } from "@/lib/operator-attention";
 import { buildProposalAuditHints } from "@/lib/review-publication-audit-read-model";
 import { serverOriginFromHeaders } from "@/lib/server-origin";
+import { StagingFactsCard } from "@/app/components/StagingFactsCard";
 
 export const dynamic = "force-dynamic";
 
@@ -130,6 +131,18 @@ function ProposalCard({ p }: { p: ProposalRow }) {
         ) : null}
       </p>
 
+      <StagingFactsCard
+        variant="compact"
+        facts={{
+          staging_snapshot_id: id,
+          status: statusLine,
+          has_static_frontend: p.has_static_frontend,
+          has_previewable_html: p.has_previewable_html,
+          has_gallery_strip: p.has_gallery_strip,
+          gallery_image_artifact_count: p.gallery_image_artifact_count,
+        }}
+      />
+
       <p className="op-card__foot" style={{ marginTop: "0.25rem" }}>
         <Link href={href}>Open staging review →</Link>
       </p>
@@ -217,7 +230,9 @@ export default async function ReviewPage({
       <h1 className="pub-page-title">Review queue</h1>
       <p className="muted" style={{ marginTop: "-0.25rem", marginBottom: "1rem" }}>
         Persisted staging snapshots — what needs operator attention next, and what is already
-        tied to canon.
+        tied to canon. Follow the header <strong>Flow</strong> strip: Run → Review → Preview →
+        Publish; each card below shows the same staging facts as run detail for quick image /
+        static checks.
       </p>
 
       {backendUnimplemented ? (

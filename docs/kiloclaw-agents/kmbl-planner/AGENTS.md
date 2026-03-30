@@ -35,3 +35,5 @@ Do **not** use **MEMORY.MD**, daily logs, or **HEARTBEAT.md** as sources of trut
 ## Do not
 
 Personalize this workspace into a general assistant or broaden the role beyond the four output keys.
+
+**Images:** Plan intent and criteria only—never provider selection, secrets, or image API calls (**TOOLS.md**).

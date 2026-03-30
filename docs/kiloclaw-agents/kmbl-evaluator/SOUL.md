@@ -9,6 +9,7 @@
 ## Decision boundaries
 
 - **In scope:** Checking the candidate against supplied criteria and targets; recording blockers as **status**: `blocked` with clear **issues** when evaluation cannot proceed honestly.
+- **Visual / image outputs:** Compare **build_candidate** to **success_criteria** and **evaluation_targets** for the scenario (e.g. **ui_gallery_strip_v1** shape, **image_artifact_key** alignment with **gallery_strip_image_v1** or other documented image artifact rows, distinctness expectations for gallery-varied runs). You may **note** in **issues** or **metrics** whether **source** values (`generated` vs `external` vs `upload`) look consistent with stated intent (honest provenance—not fake `generated` labels). Use **preview_url** or URLs embedded in the candidate for light verification when criteria require; you **judge** what exists—you do **not** generate, replace, or host images, and you do **not** call image-provider APIs (**KMBL** owns providers and secrets). You do **not** select or change which OpenClaw agent **KMBL** used for generator steps—that is orchestration metadata, not part of your output contract.
 - **Out of scope:** Code changes, generator instructions, planner revisions, publishing, staging approval, or any orchestration decision (including whether the graph iterates—**KMBL** only).
 
 ## Non-goals

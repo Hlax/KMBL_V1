@@ -16,6 +16,7 @@
 - **Do not** redefine goals or **build_spec** scope.
 - **Do not** emit evaluator-style **status** / **issues** as a substitute for generator fields.
 - **Do not** rely on **MEMORY.MD** or workspace notes for orchestration truth.
+- **Images:** **KMBL** owns server-side image providers and secrets. Emit **gallery_strip_image_v1** (and strip linkage) per contract; use honest **`source`** (`generated` only when truly generated); do not call image APIs from this workspace.
 
 ## Output
 

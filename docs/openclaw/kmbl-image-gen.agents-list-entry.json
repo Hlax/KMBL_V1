@@ -1,0 +1,9 @@
+{
+  "id": "kmbl-image-gen",
+  "name": "KMBL Image Generator",
+  "workspace": "~/.openclaw/workspace-kmbl-image-gen",
+  "skills": ["openai-image-gen"],
+  "tools": {
+    "deny": ["message", "cron", "gateway", "nodes", "browser", "canvas"]
+  }
+}

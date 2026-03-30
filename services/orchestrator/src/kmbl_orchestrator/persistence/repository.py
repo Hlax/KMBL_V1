@@ -13,6 +13,8 @@ from kmbl_orchestrator.domain import (
     EvaluationReportRecord,
     GraphRunEventRecord,
     GraphRunRecord,
+    IdentityProfileRecord,
+    IdentitySourceRecord,
     PublicationSnapshotRecord,
     RoleInvocationRecord,
     StagingSnapshotRecord,
@@ -195,6 +197,15 @@ class Repository(Protocol):
     ) -> PublicationSnapshotRecord | None:
         """Most recent published row, optionally scoped to ``identity_id``."""
 
+    def create_identity_source(self, record: IdentitySourceRecord) -> None: ...
+
+    def list_identity_sources(self, identity_id: UUID) -> list[IdentitySourceRecord]:
+        """Newest ``created_at`` first."""
+
+    def get_identity_profile(self, identity_id: UUID) -> IdentityProfileRecord | None: ...
+
+    def upsert_identity_profile(self, record: IdentityProfileRecord) -> None: ...
+
 
 class InMemoryRepository:
     """Development / unit tests — no external DB."""
@@ -211,6 +222,8 @@ class InMemoryRepository:
         self._graph_run_events: list[GraphRunEventRecord] = []
         self._staging_snapshots: dict[str, StagingSnapshotRecord] = {}
         self._publications: dict[str, PublicationSnapshotRecord] = {}
+        self._identity_sources: list[IdentitySourceRecord] = []
+        self._identity_profiles: dict[str, IdentityProfileRecord] = {}
 
     def ensure_thread(self, record: ThreadRecord) -> None:
         key = str(record.thread_id)
@@ -260,7 +273,11 @@ class InMemoryRepository:
                 for t in self._threads.values()
                 if t.identity_id == identity_id
             }
-            rows = [r for r in rows if str(r.thread_id) in allowed]
+            rows = [
+                r
+                for r in rows
+                if str(r.thread_id) in allowed or r.identity_id == identity_id
+            ]
         rows.sort(key=lambda r: r.started_at, reverse=True)
         return rows[: max(0, limit)]
 
@@ -630,3 +647,17 @@ class InMemoryRepository:
             return None
         rows.sort(key=lambda r: r.published_at, reverse=True)
         return rows[0]
+
+    def create_identity_source(self, record: IdentitySourceRecord) -> None:
+        self._identity_sources.append(record)
+
+    def list_identity_sources(self, identity_id: UUID) -> list[IdentitySourceRecord]:
+        rows = [r for r in self._identity_sources if r.identity_id == identity_id]
+        rows.sort(key=lambda r: r.created_at, reverse=True)
+        return rows
+
+    def get_identity_profile(self, identity_id: UUID) -> IdentityProfileRecord | None:
+        return self._identity_profiles.get(str(identity_id))
+
+    def upsert_identity_profile(self, record: IdentityProfileRecord) -> None:
+        self._identity_profiles[str(record.identity_id)] = record

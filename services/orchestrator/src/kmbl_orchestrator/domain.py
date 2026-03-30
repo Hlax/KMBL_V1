@@ -23,6 +23,28 @@ class ThreadRecord(BaseModel):
     current_checkpoint_id: UUID | None = None
 
 
+class IdentitySourceRecord(BaseModel):
+    """identity_source table — raw identity material (docs/07 §1.1)."""
+
+    identity_source_id: UUID
+    identity_id: UUID
+    source_type: str
+    source_uri: str | None = None
+    raw_text: str | None = None
+    metadata_json: dict[str, Any] = Field(default_factory=dict)
+    created_at: str = Field(default_factory=_utc_now_iso)
+
+
+class IdentityProfileRecord(BaseModel):
+    """identity_profile table — working synthesis for an identity (docs/07 §1.2)."""
+
+    identity_id: UUID
+    profile_summary: str | None = None
+    facets_json: dict[str, Any] = Field(default_factory=dict)
+    open_questions_json: list[Any] = Field(default_factory=list)
+    updated_at: str = Field(default_factory=_utc_now_iso)
+
+
 class RoleInvocationRecord(BaseModel):
     role_invocation_id: UUID
     graph_run_id: UUID
@@ -32,6 +54,10 @@ class RoleInvocationRecord(BaseModel):
     provider_config_key: str
     input_payload_json: dict[str, Any]
     output_payload_json: dict[str, Any] | None = None
+    routing_metadata_json: dict[str, Any] = Field(
+        default_factory=dict,
+        description="KMBL routing/budget decisions for this invocation (not model output).",
+    )
     status: Literal["queued", "running", "completed", "failed"]
     iteration_index: int = 0
     started_at: str = Field(default_factory=_utc_now_iso)
@@ -41,6 +67,7 @@ class RoleInvocationRecord(BaseModel):
 class GraphRunRecord(BaseModel):
     graph_run_id: UUID
     thread_id: UUID
+    identity_id: UUID | None = None
     trigger_type: Literal["prompt", "resume", "schedule", "system"]
     status: Literal["running", "paused", "completed", "failed"]
     started_at: str = Field(default_factory=_utc_now_iso)

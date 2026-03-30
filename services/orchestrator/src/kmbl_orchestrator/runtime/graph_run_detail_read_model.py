@@ -24,6 +24,38 @@ from kmbl_orchestrator.runtime.operator_action_read_model import (
 )
 from kmbl_orchestrator.runtime.run_events import RunEventType
 
+# Subset of persisted role_invocation.routing_metadata_json (generator only) for operator UI.
+_ROUTING_HINT_KEYS: tuple[str, ...] = (
+    "kmb_routing_version",
+    "generator_route_kind",
+    "provider_config_key",
+    "openai_image_route_applied",
+    "budget_denial_reason",
+    "image_generation_intent_kind",
+    "route_reason",
+    "image_generation_requested",
+    "image_requested",
+    "openai_image_route_requested",
+    "estimated_tokens_reserved",
+    "budget_cap_tokens",
+    "budget_remaining_tokens",
+)
+
+
+def _routing_hints_payload(
+    r: RoleInvocationRecord,
+) -> tuple[dict[str, Any] | None, str]:
+    """Return (hints dict or None, routing_fact_source: persisted | none)."""
+    if r.role_type != "generator":
+        return None, "none"
+    rm = dict(r.routing_metadata_json or {})
+    if not rm:
+        return None, "none"
+    hints = {k: rm[k] for k in _ROUTING_HINT_KEYS if k in rm}
+    if not hints:
+        return None, "none"
+    return hints, "persisted"
+
 
 def _max_iteration(invocations: list[RoleInvocationRecord]) -> int | None:
     if not invocations:
@@ -119,8 +151,10 @@ def build_graph_run_detail_read_model(
 ) -> dict[str, Any]:
     """Assemble structured dict for GraphRunDetailResponse (no raw role payloads)."""
     inv_sorted = sorted(invocations, key=lambda r: r.started_at)
-    inv_out = [
-        {
+    inv_out = []
+    for r in inv_sorted:
+        rh, rsrc = _routing_hints_payload(r)
+        row: dict[str, Any] = {
             "role_invocation_id": str(r.role_invocation_id),
             "role_type": r.role_type,
             "status": r.status,
@@ -129,9 +163,11 @@ def build_graph_run_detail_read_model(
             "ended_at": r.ended_at,
             "provider": r.provider,
             "provider_config_key": r.provider_config_key,
+            "routing_fact_source": rsrc,
         }
-        for r in inv_sorted
-    ]
+        if rh is not None:
+            row["routing_hints"] = rh
+        inv_out.append(row)
 
     events_sorted = sorted(events, key=lambda e: e.created_at)
     timeline = [_timeline_item_from_event(e) for e in events_sorted]
@@ -142,7 +178,9 @@ def build_graph_run_detail_read_model(
     staging_id = str(staging_rows[0].staging_snapshot_id) if staging_rows else None
     pub_id = str(publications[0].publication_snapshot_id) if publications else None
 
-    identity_s = str(thread.identity_id) if thread and thread.identity_id else None
+    eff_id = gr.identity_id or (thread.identity_id if thread else None)
+    identity_s = str(eff_id) if eff_id else None
+    graph_run_identity_s = str(gr.identity_id) if gr.identity_id else None
 
     hint = _run_state_hint(gr.status, has_interrupt_signal=has_interrupt_signal)
     att_state, att_reason = derive_graph_run_attention(
@@ -156,6 +194,7 @@ def build_graph_run_detail_read_model(
             "graph_run_id": str(gr.graph_run_id),
             "thread_id": str(gr.thread_id),
             "identity_id": identity_s,
+            "graph_run_identity_id": graph_run_identity_s,
             "trigger_type": gr.trigger_type,
             "status": gr.status,
             "started_at": gr.started_at,

@@ -31,6 +31,7 @@ from kmbl_orchestrator.contracts.planner_normalize import (
 from kmbl_orchestrator.domain import CheckpointRecord, GraphRunRecord, StagingSnapshotRecord
 from kmbl_orchestrator.errors import RoleInvocationFailed, StagingIntegrityFailed
 from kmbl_orchestrator.graph.state import GraphState
+from kmbl_orchestrator.identity.hydrate import build_planner_identity_context
 from kmbl_orchestrator.normalize import (
     normalize_evaluator_output,
     normalize_generator_output,
@@ -47,6 +48,11 @@ from kmbl_orchestrator.staging.integrity import (
     validate_preview_integrity,
 )
 from kmbl_orchestrator.roles.invoke import DefaultRoleInvoker
+from kmbl_orchestrator.runtime.kilo_model_routing import (
+    ImageRouteBudgetExceededError,
+    ImageRouteConfigurationError,
+    select_generator_provider_config,
+)
 from kmbl_orchestrator.runtime.run_events import RunEventType, append_graph_run_event
 
 _log = logging.getLogger(__name__)
@@ -119,9 +125,16 @@ def build_compiled_graph(ctx: GraphContext):
         return {"thread_id": tid, "graph_run_id": gid, "status": "running"}
 
     def context_hydrator(state: GraphState) -> dict[str, Any]:
-        # TODO: load identity_profile + identity_memory from Supabase (docs/07, docs/08 §3.3).
+        iid_raw = state.get("identity_id")
+        if iid_raw:
+            try:
+                ic = build_planner_identity_context(ctx.repo, UUID(str(iid_raw)))
+            except ValueError:
+                ic = {}
+        else:
+            ic = state.get("identity_context") or {}
         return {
-            "identity_context": state.get("identity_context") or {},
+            "identity_context": ic,
             "memory_context": state.get("memory_context") or {},
             "current_state": state.get("current_state") or {},
             "compacted_context": state.get("compacted_context") or {},
@@ -285,14 +298,34 @@ def build_compiled_graph(ctx: GraphContext):
             "iteration_feedback": feedback,
             "event_input": state.get("event_input") or {},
         }
+        try:
+            gen_key, routing_meta = select_generator_provider_config(
+                ctx.settings,
+                build_spec=state.get("build_spec") or {},
+                event_input=state.get("event_input") or {},
+                generator_payload=payload,
+            )
+        except (ImageRouteConfigurationError, ImageRouteBudgetExceededError) as e:
+            detail = contract_validation_failure(
+                phase="generator",
+                message=str(e),
+                pydantic_errors=None,
+            )
+            raise RoleInvocationFailed(
+                phase="generator",
+                graph_run_id=gid,
+                thread_id=tid,
+                detail=detail,
+            ) from e
         t_gen = time.perf_counter()
         inv, raw = ctx.invoker.invoke(
             graph_run_id=gid,
             thread_id=tid,
             role_type="generator",
-            provider_config_key=ctx.settings.kiloclaw_generator_config_key,
+            provider_config_key=gen_key,
             input_payload=payload,
             iteration_index=iteration,
+            routing_metadata=routing_meta,
         )
         _log.info(
             "graph_run graph_run_id=%s stage=generator_invocation_finished elapsed_ms=%.1f",
@@ -484,11 +517,11 @@ def build_compiled_graph(ctx: GraphContext):
         step_state = {
             **dict(state),
             "evaluation_report": {
-                "status": raw.get("status"),
-                "summary": raw.get("summary"),
-                "issues": raw.get("issues"),
-                "metrics": raw.get("metrics"),
-                "artifacts": raw.get("artifacts"),
+                "status": report.status,
+                "summary": report.summary,
+                "issues": report.issues_json,
+                "metrics": report.metrics_json,
+                "artifacts": report.artifacts_json,
             },
             "evaluation_report_id": str(report.evaluation_report_id),
         }
@@ -941,6 +974,7 @@ def persist_graph_run_start(
     gr = GraphRunRecord(
         graph_run_id=UUID(gid),
         thread_id=tid_u,
+        identity_id=UUID(identity_id) if identity_id else None,
         trigger_type=cast(
             Literal["prompt", "resume", "schedule", "system"], trigger_type
         ),

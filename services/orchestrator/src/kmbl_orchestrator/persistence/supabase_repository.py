@@ -21,6 +21,8 @@ from kmbl_orchestrator.domain import (
     EvaluationReportRecord,
     GraphRunEventRecord,
     GraphRunRecord,
+    IdentityProfileRecord,
+    IdentitySourceRecord,
     PublicationSnapshotRecord,
     RoleInvocationRecord,
     StagingSnapshotRecord,
@@ -61,9 +63,11 @@ def _ts_to_iso(value: Any) -> str | None:
 
 
 def _row_to_graph_run(row: dict[str, Any]) -> GraphRunRecord:
+    iid = row.get("identity_id")
     return GraphRunRecord(
         graph_run_id=UUID(row["graph_run_id"]),
         thread_id=UUID(row["thread_id"]),
+        identity_id=UUID(iid) if iid else None,
         trigger_type=cast(
             Literal["prompt", "resume", "schedule", "system"], row["trigger_type"]
         ),
@@ -235,6 +239,7 @@ def _row_to_checkpoint(row: dict[str, Any]) -> CheckpointRecord:
 
 def _row_to_role_invocation(row: dict[str, Any]) -> RoleInvocationRecord:
     out = row.get("output_payload_json")
+    rm = row.get("routing_metadata_json")
     return RoleInvocationRecord(
         role_invocation_id=UUID(row["role_invocation_id"]),
         graph_run_id=UUID(row["graph_run_id"]),
@@ -244,6 +249,7 @@ def _row_to_role_invocation(row: dict[str, Any]) -> RoleInvocationRecord:
         provider_config_key=str(row.get("provider_config_key", "")),
         input_payload_json=row.get("input_payload_json") or {},
         output_payload_json=out if isinstance(out, dict) else None,
+        routing_metadata_json=rm if isinstance(rm, dict) else {},
         status=cast(
             Literal["queued", "running", "completed", "failed"], row["status"]
         ),
@@ -359,6 +365,7 @@ class SupabaseRepository:
             "trigger_type": record.trigger_type,
             "status": record.status,
             "started_at": record.started_at,
+            "identity_id": str(record.identity_id) if record.identity_id else None,
         }
         if record.ended_at is not None:
             row["ended_at"] = record.ended_at
@@ -396,33 +403,68 @@ class SupabaseRepository:
     ) -> list[GraphRunRecord]:
         lim = max(1, min(limit, 500))
         if identity_id is not None:
+            id_s = str(identity_id)
             tr = self._run(
                 "list_graph_runs_thread_filter",
                 "thread",
                 lambda: self._client.table("thread")
                 .select("thread_id")
-                .eq("identity_id", str(identity_id))
+                .eq("identity_id", id_s)
                 .execute(),
-                identity_id=str(identity_id),
+                identity_id=id_s,
             )
-            if not tr.data:
-                return []
-            tids = [r["thread_id"] for r in tr.data]
+            tids = [r["thread_id"] for r in tr.data] if tr.data else []
+            rows_by_key: dict[str, dict[str, Any]] = {}
 
-            def _q() -> Any:
-                b = self._client.table("graph_run").select("*").in_("thread_id", tids)
+            def _apply_filters(b: Any) -> Any:
                 if status is not None:
                     b = b.eq("status", status)
                 if trigger_type is not None:
                     b = b.eq("trigger_type", trigger_type)
-                return b.order("started_at", desc=True).limit(lim).execute()
+                return b
 
-            res = self._run(
+            if tids:
+
+                def _q_thread() -> Any:
+                    return _apply_filters(
+                        self._client.table("graph_run")
+                        .select("*")
+                        .in_("thread_id", tids)
+                    ).order("started_at", desc=True).limit(lim).execute()
+
+                res = self._run(
+                    "list_graph_runs",
+                    "graph_run",
+                    _q_thread,
+                    identity_id=id_s,
+                )
+                if res.data:
+                    for r in res.data:
+                        rows_by_key[str(r["graph_run_id"])] = r
+
+            def _q_direct() -> Any:
+                return _apply_filters(
+                    self._client.table("graph_run").select("*").eq("identity_id", id_s)
+                ).order("started_at", desc=True).limit(lim).execute()
+
+            res_d = self._run(
                 "list_graph_runs",
                 "graph_run",
-                _q,
-                identity_id=str(identity_id),
+                _q_direct,
+                identity_id=id_s,
             )
+            if res_d.data:
+                for r in res_d.data:
+                    rows_by_key[str(r["graph_run_id"])] = r
+
+            if not rows_by_key:
+                return []
+            merged = sorted(
+                rows_by_key.values(),
+                key=lambda x: str(x.get("started_at") or ""),
+                reverse=True,
+            )[:lim]
+            return [_row_to_graph_run(r) for r in merged]
         else:
 
             def _q2() -> Any:
@@ -618,6 +660,13 @@ class SupabaseRepository:
         )
 
     def save_role_invocation(self, record: RoleInvocationRecord) -> None:
+        """
+        Persist a role_invocation row.
+
+        Uses upsert with ``ignore_duplicates`` on ``role_invocation_id`` so a retry after an
+        ambiguous transport disconnect does not raise duplicate-key ``23505`` on
+        ``role_invocation_pkey``.
+        """
         row: dict[str, Any] = {
             "role_invocation_id": str(record.role_invocation_id),
             "graph_run_id": str(record.graph_run_id),
@@ -626,6 +675,7 @@ class SupabaseRepository:
             "provider": record.provider,
             "provider_config_key": record.provider_config_key,
             "input_payload_json": record.input_payload_json,
+            "routing_metadata_json": record.routing_metadata_json or {},
             "status": record.status,
             "iteration_index": record.iteration_index,
             "started_at": record.started_at,
@@ -637,13 +687,26 @@ class SupabaseRepository:
         self._run(
             "save_role_invocation",
             "role_invocation",
-            lambda: self._client.table("role_invocation").insert(row).execute(),
+            lambda: self._client.table("role_invocation")
+            .upsert(
+                row,
+                on_conflict="role_invocation_id",
+                ignore_duplicates=True,
+            )
+            .execute(),
             role_invocation_id=str(record.role_invocation_id),
             graph_run_id=str(record.graph_run_id),
             role_type=record.role_type,
         )
 
     def save_build_spec(self, record: BuildSpecRecord) -> None:
+        """
+        Persist a build_spec row.
+
+        Uses upsert with ``ignore_duplicates`` on ``build_spec_id`` so a retry after an
+        ambiguous transport disconnect (first insert committed, client saw failure) does
+        not raise duplicate-key ``23505`` on ``build_spec_pkey``.
+        """
         # normalized columns are product truth; raw_payload_json for KiloClaw trace (optional)
         row: dict[str, Any] = {
             "build_spec_id": str(record.build_spec_id),
@@ -661,7 +724,13 @@ class SupabaseRepository:
         self._run(
             "save_build_spec",
             "build_spec",
-            lambda: self._client.table("build_spec").insert(row).execute(),
+            lambda: self._client.table("build_spec")
+            .upsert(
+                row,
+                on_conflict="build_spec_id",
+                ignore_duplicates=True,
+            )
+            .execute(),
             build_spec_id=str(record.build_spec_id),
             graph_run_id=str(record.graph_run_id),
         )
@@ -682,6 +751,13 @@ class SupabaseRepository:
         return _row_to_build_spec(res.data[0])
 
     def save_build_candidate(self, record: BuildCandidateRecord) -> None:
+        """
+        Persist a build_candidate row.
+
+        Uses upsert with ``ignore_duplicates`` on ``build_candidate_id`` so a retry after an
+        ambiguous transport disconnect does not raise duplicate-key ``23505`` on
+        ``build_candidate_pkey``.
+        """
         # raw_payload_json optional — wire when KiloClaw returns live payloads
         row: dict[str, Any] = {
             "build_candidate_id": str(record.build_candidate_id),
@@ -703,7 +779,13 @@ class SupabaseRepository:
         self._run(
             "save_build_candidate",
             "build_candidate",
-            lambda: self._client.table("build_candidate").insert(row).execute(),
+            lambda: self._client.table("build_candidate")
+            .upsert(
+                row,
+                on_conflict="build_candidate_id",
+                ignore_duplicates=True,
+            )
+            .execute(),
             build_candidate_id=str(record.build_candidate_id),
             graph_run_id=str(record.graph_run_id),
         )
@@ -724,6 +806,13 @@ class SupabaseRepository:
         return _row_to_build_candidate(res.data[0])
 
     def save_evaluation_report(self, record: EvaluationReportRecord) -> None:
+        """
+        Persist an evaluation_report row.
+
+        Uses upsert with ``ignore_duplicates`` on ``evaluation_report_id`` so a retry after an
+        ambiguous transport disconnect does not raise duplicate-key ``23505`` on
+        ``evaluation_report_pkey``.
+        """
         # raw_payload_json optional — debug/trace only; logic uses issues/metrics/status
         row: dict[str, Any] = {
             "evaluation_report_id": str(record.evaluation_report_id),
@@ -742,7 +831,13 @@ class SupabaseRepository:
         self._run(
             "save_evaluation_report",
             "evaluation_report",
-            lambda: self._client.table("evaluation_report").insert(row).execute(),
+            lambda: self._client.table("evaluation_report")
+            .upsert(
+                row,
+                on_conflict="evaluation_report_id",
+                ignore_duplicates=True,
+            )
+            .execute(),
             evaluation_report_id=str(record.evaluation_report_id),
             graph_run_id=str(record.graph_run_id),
         )
@@ -881,6 +976,13 @@ class SupabaseRepository:
         return _row_to_evaluation_report(res.data[0])
 
     def save_graph_run_event(self, record: GraphRunEventRecord) -> None:
+        """
+        Persist an append-only timeline row.
+
+        Uses upsert with ``ignore_duplicates`` on ``graph_run_event_id`` (same pattern as
+        :meth:`save_checkpoint`) so a retry after an ambiguous transport disconnect does
+        not raise duplicate-key ``23505`` on ``graph_run_event_pkey``.
+        """
         row: dict[str, Any] = {
             "graph_run_event_id": str(record.graph_run_event_id),
             "graph_run_id": str(record.graph_run_id),
@@ -891,7 +993,13 @@ class SupabaseRepository:
         self._run(
             "save_graph_run_event",
             "graph_run_event",
-            lambda: self._client.table("graph_run_event").insert(row).execute(),
+            lambda: self._client.table("graph_run_event")
+            .upsert(
+                row,
+                on_conflict="graph_run_event_id",
+                ignore_duplicates=True,
+            )
+            .execute(),
             graph_run_event_id=str(record.graph_run_event_id),
             graph_run_id=str(record.graph_run_id),
         )
@@ -1006,6 +1114,13 @@ class SupabaseRepository:
         return [UUID(r["graph_run_id"]) for r in res.data]
 
     def save_staging_snapshot(self, record: StagingSnapshotRecord) -> None:
+        """
+        Persist a staging_snapshot row.
+
+        Uses upsert with ``ignore_duplicates`` on ``staging_snapshot_id`` so a retry after an
+        ambiguous transport disconnect does not raise duplicate-key ``23505`` on
+        ``staging_snapshot_pkey``.
+        """
         row: dict[str, Any] = {
             "staging_snapshot_id": str(record.staging_snapshot_id),
             "thread_id": str(record.thread_id),
@@ -1033,7 +1148,13 @@ class SupabaseRepository:
         self._run(
             "save_staging_snapshot",
             "staging_snapshot",
-            lambda: self._client.table("staging_snapshot").insert(row).execute(),
+            lambda: self._client.table("staging_snapshot")
+            .upsert(
+                row,
+                on_conflict="staging_snapshot_id",
+                ignore_duplicates=True,
+            )
+            .execute(),
             staging_snapshot_id=str(record.staging_snapshot_id),
             thread_id=str(record.thread_id),
         )
@@ -1124,6 +1245,13 @@ class SupabaseRepository:
         return _row_to_staging_snapshot(res.data[0])
 
     def save_publication_snapshot(self, record: PublicationSnapshotRecord) -> None:
+        """
+        Persist a publication_snapshot row.
+
+        Uses upsert with ``ignore_duplicates`` on ``publication_snapshot_id`` so a retry after an
+        ambiguous transport disconnect does not raise duplicate-key ``23505`` on
+        ``publication_snapshot_pkey``.
+        """
         row: dict[str, Any] = {
             "publication_snapshot_id": str(record.publication_snapshot_id),
             "source_staging_snapshot_id": str(record.source_staging_snapshot_id),
@@ -1146,7 +1274,13 @@ class SupabaseRepository:
         self._run(
             "save_publication_snapshot",
             "publication_snapshot",
-            lambda: self._client.table("publication_snapshot").insert(row).execute(),
+            lambda: self._client.table("publication_snapshot")
+            .upsert(
+                row,
+                on_conflict="publication_snapshot_id",
+                ignore_duplicates=True,
+            )
+            .execute(),
             publication_snapshot_id=str(record.publication_snapshot_id),
         )
 
@@ -1250,3 +1384,103 @@ class SupabaseRepository:
     ) -> PublicationSnapshotRecord | None:
         rows = self.list_publication_snapshots(limit=1, identity_id=identity_id)
         return rows[0] if rows else None
+
+    def create_identity_source(self, record: IdentitySourceRecord) -> None:
+        """
+        Persist an identity_source row.
+
+        Uses upsert with ``ignore_duplicates`` on ``identity_source_id`` so a retry after an
+        ambiguous transport disconnect does not raise duplicate-key ``23505`` on
+        ``identity_source_pkey``.
+        """
+        row: dict[str, Any] = {
+            "identity_source_id": str(record.identity_source_id),
+            "identity_id": str(record.identity_id),
+            "source_type": record.source_type,
+            "source_uri": record.source_uri,
+            "raw_text": record.raw_text,
+            "metadata_json": record.metadata_json,
+            "created_at": record.created_at,
+        }
+        self._run(
+            "create_identity_source",
+            "identity_source",
+            lambda: self._client.table("identity_source")
+            .upsert(
+                row,
+                on_conflict="identity_source_id",
+                ignore_duplicates=True,
+            )
+            .execute(),
+            identity_source_id=str(record.identity_source_id),
+        )
+
+    def list_identity_sources(self, identity_id: UUID) -> list[IdentitySourceRecord]:
+        res = self._run(
+            "list_identity_sources",
+            "identity_source",
+            lambda: self._client.table("identity_source")
+            .select("*")
+            .eq("identity_id", str(identity_id))
+            .order("created_at", desc=True)
+            .execute(),
+            identity_id=str(identity_id),
+        )
+        if not res.data:
+            return []
+        return [_row_to_identity_source(r) for r in res.data]
+
+    def get_identity_profile(self, identity_id: UUID) -> IdentityProfileRecord | None:
+        res = self._run(
+            "get_identity_profile",
+            "identity_profile",
+            lambda: self._client.table("identity_profile")
+            .select("*")
+            .eq("identity_id", str(identity_id))
+            .limit(1)
+            .execute(),
+            identity_id=str(identity_id),
+        )
+        if not res.data:
+            return None
+        return _row_to_identity_profile(res.data[0])
+
+    def upsert_identity_profile(self, record: IdentityProfileRecord) -> None:
+        row: dict[str, Any] = {
+            "identity_id": str(record.identity_id),
+            "profile_summary": record.profile_summary,
+            "facets_json": record.facets_json,
+            "open_questions_json": record.open_questions_json,
+            "updated_at": record.updated_at,
+        }
+        self._run(
+            "upsert_identity_profile",
+            "identity_profile",
+            lambda: self._client.table("identity_profile")
+            .upsert(row, on_conflict="identity_id")
+            .execute(),
+            identity_id=str(record.identity_id),
+        )
+
+
+def _row_to_identity_source(row: dict[str, Any]) -> IdentitySourceRecord:
+    return IdentitySourceRecord(
+        identity_source_id=UUID(row["identity_source_id"]),
+        identity_id=UUID(row["identity_id"]),
+        source_type=str(row["source_type"]),
+        source_uri=row.get("source_uri"),
+        raw_text=row.get("raw_text"),
+        metadata_json=row.get("metadata_json") or {},
+        created_at=_ts_to_iso(row.get("created_at")) or "",
+    )
+
+
+def _row_to_identity_profile(row: dict[str, Any]) -> IdentityProfileRecord:
+    oq = row.get("open_questions_json")
+    return IdentityProfileRecord(
+        identity_id=UUID(row["identity_id"]),
+        profile_summary=row.get("profile_summary"),
+        facets_json=row.get("facets_json") if isinstance(row.get("facets_json"), dict) else {},
+        open_questions_json=oq if isinstance(oq, list) else [],
+        updated_at=_ts_to_iso(row.get("updated_at")) or "",
+    )

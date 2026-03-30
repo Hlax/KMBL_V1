@@ -9,6 +9,7 @@ from typing import Any
 
 from kmbl_orchestrator.runtime.scenario_visibility import (
     gallery_strip_visibility_from_staging_payload,
+    static_frontend_visibility_from_staging_payload,
 )
 
 from kmbl_orchestrator.domain import PublicationSnapshotRecord, StagingSnapshotRecord
@@ -83,7 +84,17 @@ def staging_snapshot_list_item(rec: StagingSnapshotRecord) -> dict[str, Any]:
     title = compact_title_from_payload(p, staging_snapshot_id=sid)
     ih = identity_hint_from_uuid(rec.identity_id)
     gv = gallery_strip_visibility_from_staging_payload(p)
-    ck = "gallery_strip" if gv.get("has_gallery_strip") else None
+    fv = static_frontend_visibility_from_staging_payload(p)
+    has_g = bool(gv.get("has_gallery_strip"))
+    has_f = bool(fv.get("has_static_frontend"))
+    if has_g and has_f:
+        ck = "mixed"
+    elif has_g:
+        ck = "gallery_strip"
+    elif has_f:
+        ck = "static_frontend"
+    else:
+        ck = None
     out: dict[str, Any] = {
         "staging_snapshot_id": sid,
         "thread_id": str(rec.thread_id),
@@ -96,7 +107,11 @@ def staging_snapshot_list_item(rec: StagingSnapshotRecord) -> dict[str, Any]:
         "title": title,
         "payload_version": payload_version_from_payload(p),
         "content_kind": ck,
-        "has_gallery_strip": bool(gv.get("has_gallery_strip")),
+        "has_gallery_strip": has_g,
+        "has_static_frontend": has_f,
+        "static_frontend_file_count": int(fv.get("static_frontend_file_count") or 0),
+        "static_frontend_bundle_count": int(fv.get("static_frontend_bundle_count") or 0),
+        "has_previewable_html": bool(fv.get("has_previewable_html")),
     }
     if ih:
         out["identity_hint"] = ih
@@ -111,7 +126,17 @@ def proposal_read_model(rec: StagingSnapshotRecord) -> dict[str, Any]:
     title = compact_title_from_payload(p, staging_snapshot_id=sid)
     rr = review_readiness_for_staging_record(rec)
     gv = gallery_strip_visibility_from_staging_payload(p)
-    content_kind = "gallery_strip" if gv.get("has_gallery_strip") else None
+    fv = static_frontend_visibility_from_staging_payload(p)
+    has_g = bool(gv.get("has_gallery_strip"))
+    has_f = bool(fv.get("has_static_frontend"))
+    if has_g and has_f:
+        content_kind = "mixed"
+    elif has_g:
+        content_kind = "gallery_strip"
+    elif has_f:
+        content_kind = "static_frontend"
+    else:
+        content_kind = None
     out: dict[str, Any] = {
         "proposal_id": sid,
         "staging_snapshot_id": sid,
@@ -131,6 +156,10 @@ def proposal_read_model(rec: StagingSnapshotRecord) -> dict[str, Any]:
         "gallery_strip_item_count": gv.get("gallery_strip_item_count", 0),
         "gallery_image_artifact_count": gv.get("gallery_image_artifact_count", 0),
         "gallery_items_with_artifact_key": gv.get("gallery_items_with_artifact_key", 0),
+        "has_static_frontend": has_f,
+        "static_frontend_file_count": int(fv.get("static_frontend_file_count") or 0),
+        "static_frontend_bundle_count": int(fv.get("static_frontend_bundle_count") or 0),
+        "has_previewable_html": bool(fv.get("has_previewable_html")),
     }
     return out
 

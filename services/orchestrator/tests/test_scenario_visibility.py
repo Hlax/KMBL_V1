@@ -23,6 +23,9 @@ def test_scenario_badge() -> None:
     assert (
         scenario_badge_from_tag("kmbl_seeded_gallery_strip_varied_v1") == "gallery_varied"
     )
+    assert (
+        scenario_badge_from_tag("kmbl_kiloclaw_image_only_test_v1") == "kiloclaw_image_test"
+    )
     assert scenario_badge_from_tag("kmbl_seeded_local_v1") == "local_seed"
     assert scenario_badge_from_tag("other") == "other"
 

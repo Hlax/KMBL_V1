@@ -5,7 +5,8 @@ import { identityOverviewPath } from "@/lib/identity-nav";
 
 import { serverOriginFromHeaders } from "@/lib/server-origin";
 
-import type { PublicationDetail, PublicationListResponse } from "@/lib/api-types";
+import type { PublicationDetail, PublicationListResponse, StagingDetail } from "@/lib/api-types";
+import { StagingFactsCard } from "@/app/components/StagingFactsCard";
 
 export const dynamic = "force-dynamic";
 
@@ -119,6 +120,23 @@ export default async function PublicationIndexPage({
   const hasFilters = scopedByIdentity || Boolean(visibility) || (limitRaw && limitRaw !== "20");
   const currentPubId = current?.publication_snapshot_id ?? null;
 
+  let currentStagingFacts: StagingDetail | null = null;
+  let currentStagingFactsErr: string | null = null;
+  const currentSourceStaging = current?.source_staging_snapshot_id;
+  if (currentSourceStaging) {
+    const stUrl = `${origin}/api/staging/${encodeURIComponent(currentSourceStaging)}`;
+    try {
+      const stRes = await fetch(stUrl, { cache: "no-store" });
+      if (stRes.ok) {
+        currentStagingFacts = (await stRes.json()) as StagingDetail;
+      } else {
+        currentStagingFactsErr = `HTTP ${stRes.status}`;
+      }
+    } catch (e) {
+      currentStagingFactsErr = e instanceof Error ? e.message : String(e);
+    }
+  }
+
   return (
     <>
       <h1 className="pub-page-title">Publication</h1>
@@ -130,6 +148,11 @@ export default async function PublicationIndexPage({
             "List and/or current publication require GET /orchestrator/publication and GET /orchestrator/publication/current."}
         </p>
       ) : null}
+
+      <p className="op-banner op-banner--neutral" style={{ marginBottom: "0.75rem" }}>
+        <strong>Review → Preview → Publish</strong> — Publication is the last step. Use{" "}
+        <Link href="/review">Review</Link> for staging + previews, then return here for canon rows.
+      </p>
 
       <p className="op-banner op-banner--canon">
         <strong>Canon / live read surface</strong> — immutable snapshots created when you publish an
@@ -255,6 +278,15 @@ export default async function PublicationIndexPage({
               Open full detail →
             </Link>
           </p>
+          {currentSourceStaging ? (
+            <div style={{ marginTop: "0.85rem" }}>
+              <StagingFactsCard
+                staging={currentStagingFacts}
+                error={currentStagingFactsErr}
+                publicationSnapshotId={current.publication_snapshot_id ?? null}
+              />
+            </div>
+          ) : null}
         </div>
       )}
 
@@ -340,7 +372,9 @@ export default async function PublicationIndexPage({
       </div>
 
       <p className="muted small cp-crumb-line" style={{ marginBottom: 0 }}>
-        <Link href="/review">← Staging review</Link>
+        <Link href="/review">← Review (staging)</Link>
+        {" · "}
+        <Link href="/runs">Runs</Link>
       </p>
     </>
   );

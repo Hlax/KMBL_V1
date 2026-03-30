@@ -9,10 +9,13 @@ No change to staging_snapshot payload schema version; nested under existing ``wo
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+
+logger = logging.getLogger(__name__)
 
 _ITEM_KEY_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$")
 
@@ -157,17 +160,31 @@ def normalize_ui_gallery_strip_v1_in_patch(patch: dict[str, Any]) -> dict[str, A
     """
     If ``patch`` contains ``ui_gallery_strip_v1``, validate and replace with normalized JSON.
 
-    Raises ``ValueError`` on invalid shape (fail generator persistence).
+    Valid strips are normalized. Invalid shapes (metadata-only stubs, wrong types, schema
+    errors) are **dropped** from the patch so generator persistence does not fail — real
+    ``gallery_strip_image_v1`` rows in ``artifact_outputs`` are unchanged.
     """
     raw = patch.get("ui_gallery_strip_v1")
     if raw is None:
         return patch
-    if not isinstance(raw, (dict, list)):
-        raise ValueError("ui_gallery_strip_v1 must be an object")
-    # Allow LLM to send list at wrong level — reject clearly
-    if isinstance(raw, list):
-        raise ValueError("ui_gallery_strip_v1 must be an object with headline/items, not a list")
-    model = UIGalleryStripV1.model_validate(raw)
+    if not isinstance(raw, dict):
+        logger.warning(
+            "invalid ui_gallery_strip_v1 dropped during normalization: expected object, got %s",
+            type(raw).__name__,
+        )
+        out = dict(patch)
+        out.pop("ui_gallery_strip_v1", None)
+        return out
+    try:
+        model = UIGalleryStripV1.model_validate(raw)
+    except ValidationError as exc:
+        logger.warning(
+            "invalid ui_gallery_strip_v1 dropped during normalization: %s",
+            exc.errors(),
+        )
+        out = dict(patch)
+        out.pop("ui_gallery_strip_v1", None)
+        return out
     out = dict(patch)
     out["ui_gallery_strip_v1"] = model.model_dump(mode="json")
     return out

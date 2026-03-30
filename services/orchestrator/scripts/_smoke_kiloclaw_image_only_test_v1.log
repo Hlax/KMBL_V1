@@ -1,0 +1,120 @@
+INFO:     Started server process [70056]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8010 (Press CTRL+C to quit)
+INFO:     127.0.0.1:52409 - "GET /health HTTP/1.1" 200 OK
+run_start stage=request_received elapsed_ms=0.0
+run_start stage=event_input_resolved elapsed_ms=0.1
+persist_graph_run_start graph_run_id=74877f3b-8419-4328-b958-b3e57a7a4559 thread_id=89a0f34b-2e22-4965-8a53-d50bd0dbdd73 stage=thread_resolved elapsed_ms=872.5
+persist_graph_run_start graph_run_id=74877f3b-8419-4328-b958-b3e57a7a4559 thread_id=89a0f34b-2e22-4965-8a53-d50bd0dbdd73 stage=graph_run_persisted elapsed_ms=1221.6
+run_start stage=graph_run_persisted thread_id=89a0f34b-2e22-4965-8a53-d50bd0dbdd73 graph_run_id=74877f3b-8419-4328-b958-b3e57a7a4559 elapsed_ms=1222.5
+run_start stage=response_returning thread_id=89a0f34b-2e22-4965-8a53-d50bd0dbdd73 graph_run_id=74877f3b-8419-4328-b958-b3e57a7a4559 total_elapsed_ms=1222.7
+INFO:     127.0.0.1:57644 - "POST /orchestrator/runs/start HTTP/1.1" 200 OK
+run_start_background graph_run_id=74877f3b-8419-4328-b958-b3e57a7a4559 stage=background_graph_enter elapsed_ms=0.0
+run_graph graph_run_id=74877f3b-8419-4328-b958-b3e57a7a4559 stage=langgraph_invoke_start elapsed_ms=0.0
+graph_run graph_run_id=74877f3b-8419-4328-b958-b3e57a7a4559 stage=planner_invocation_start elapsed_ms=0.0
+kiloclaw_http_outbound start url=http://100.102.80.113:18789/v1/chat/completions path=/v1/chat/completions role_type=planner model=openclaw:kmbl-planner connect_timeout_sec=30.0 read_timeout_sec=300.0 user_content_len=1090 elapsed_ms=0.0
+INFO:     127.0.0.1:51046 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50164 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62638 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54641 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62545 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62546 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55418 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49197 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+kiloclaw_http_outbound done url=http://100.102.80.113:18789/v1/chat/completions path=/v1/chat/completions role_type=planner http_status=200 elapsed_ms=15864.2
+graph_run graph_run_id=74877f3b-8419-4328-b958-b3e57a7a4559 stage=planner_invocation_finished elapsed_ms=15864.5
+SupabaseRepository.get_latest_evaluation_report_for_graph_run retry attempt=1 table=evaluation_report err=RemoteProtocolError
+SupabaseRepository.save_graph_run_event retry attempt=1 table=graph_run_event err=RemoteProtocolError
+SupabaseRepository.save_checkpoint retry attempt=1 table=checkpoint err=RemoteProtocolError
+SupabaseRepository.list_graph_run_events retry attempt=1 table=graph_run_event err=RemoteProtocolError
+INFO:     127.0.0.1:65254 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+graph_run graph_run_id=74877f3b-8419-4328-b958-b3e57a7a4559 stage=generator_invocation_start elapsed_ms=0.0
+openai_hourly_budget consume tokens=12945 used=12945 cap=1500000 remaining=1487055
+generator routing: using KiloClaw image agent config key=kmbl-image-gen
+kiloclaw_http_outbound start url=http://100.102.80.113:18789/v1/chat/completions path=/v1/chat/completions role_type=generator model=openclaw:kmbl-image-gen connect_timeout_sec=30.0 read_timeout_sec=300.0 user_content_len=1961 elapsed_ms=0.0
+INFO:     127.0.0.1:54474 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59846 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62610 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55482 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50498 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50499 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53803 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61997 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64953 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56016 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56018 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56187 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49962 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52740 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53585 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65085 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65086 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62732 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64033 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59071 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65365 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60485 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52922 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52923 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62654 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63493 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53768 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60253 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65235 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65242 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50107 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55772 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57838 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56188 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56189 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49414 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59934 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50277 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57363 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57364 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55672 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49281 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59842 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57361 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57362 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63271 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49556 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59122 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63490 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63491 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63149 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50871 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57490 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+kiloclaw_http_outbound done url=http://100.102.80.113:18789/v1/chat/completions path=/v1/chat/completions role_type=generator http_status=200 elapsed_ms=101620.0
+graph_run graph_run_id=74877f3b-8419-4328-b958-b3e57a7a4559 stage=generator_invocation_finished elapsed_ms=101620.5
+invalid ui_gallery_strip_v1 dropped during normalization: [{'type': 'missing', 'loc': ('items',), 'msg': 'Field required', 'input': {'surface': 'ui_gallery_strip_v1', 'status': 'populated', 'item_count': 4, 'model': 'dall-e-3', 'size': '1024x1024', 'quality': 'standard'}, 'url': 'https://errors.pydantic.dev/2.10/v/missing'}, {'type': 'extra_forbidden', 'loc': ('surface',), 'msg': 'Extra inputs are not permitted', 'input': 'ui_gallery_strip_v1', 'url': 'https://errors.pydantic.dev/2.10/v/extra_forbidden'}, {'type': 'extra_forbidden', 'loc': ('status',), 'msg': 'Extra inputs are not permitted', 'input': 'populated', 'url': 'https://errors.pydantic.dev/2.10/v/extra_forbidden'}, {'type': 'extra_forbidden', 'loc': ('item_count',), 'msg': 'Extra inputs are not permitted', 'input': 4, 'url': 'https://errors.pydantic.dev/2.10/v/extra_forbidden'}, {'type': 'extra_forbidden', 'loc': ('model',), 'msg': 'Extra inputs are not permitted', 'input': 'dall-e-3', 'url': 'https://errors.pydantic.dev/2.10/v/extra_forbidden'}, {'type': 'extra_forbidden', 'loc': ('size',), 'msg': 'Extra inputs are not permitted', 'input': '1024x1024', 'url': 'https://errors.pydantic.dev/2.10/v/extra_forbidden'}, {'type': 'extra_forbidden', 'loc': ('quality',), 'msg': 'Extra inputs are not permitted', 'input': 'standard', 'url': 'https://errors.pydantic.dev/2.10/v/extra_forbidden'}]
+SupabaseRepository.list_graph_run_events retry attempt=1 table=graph_run_event err=RemoteProtocolError
+SupabaseRepository.save_graph_run_event retry attempt=1 table=graph_run_event err=RemoteProtocolError
+INFO:     127.0.0.1:57324 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+graph_run graph_run_id=74877f3b-8419-4328-b958-b3e57a7a4559 stage=evaluator_invocation_start elapsed_ms=0.0
+kiloclaw_http_outbound start url=http://100.102.80.113:18789/v1/chat/completions path=/v1/chat/completions role_type=evaluator model=openclaw:kmbl-evaluator connect_timeout_sec=30.0 read_timeout_sec=300.0 user_content_len=4214 elapsed_ms=0.0
+INFO:     127.0.0.1:58964 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58371 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60252 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49386 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49387 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59588 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51720 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60612 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59343 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59344 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60507 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64763 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53405 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+kiloclaw_http_outbound done url=http://100.102.80.113:18789/v1/chat/completions path=/v1/chat/completions role_type=evaluator http_status=200 elapsed_ms=25303.9
+graph_run graph_run_id=74877f3b-8419-4328-b958-b3e57a7a4559 stage=evaluator_invocation_finished elapsed_ms=25304.3
+INFO:     127.0.0.1:58275 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+graph_run graph_run_id=74877f3b-8419-4328-b958-b3e57a7a4559 stage=staging_snapshot_creation_start elapsed_ms=0.0
+graph_run graph_run_id=74877f3b-8419-4328-b958-b3e57a7a4559 stage=staging_snapshot_creation_done staging_snapshot_id=6e8415c5-6463-453f-b74c-282d7b38e127 elapsed_ms=239.4
+run_graph graph_run_id=74877f3b-8419-4328-b958-b3e57a7a4559 stage=response_returning elapsed_ms=149738.8
+run_start_background graph_run_id=74877f3b-8419-4328-b958-b3e57a7a4559 stage=background_graph_exit_ok elapsed_ms=149887.1
+INFO:     127.0.0.1:58276 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57789 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61533 - "GET /orchestrator/runs/74877f3b-8419-4328-b958-b3e57a7a4559/detail HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52616 - "GET /orchestrator/staging/6e8415c5-6463-453f-b74c-282d7b38e127 HTTP/1.1" 200 OK

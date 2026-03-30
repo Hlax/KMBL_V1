@@ -9,6 +9,7 @@
 ## Decision boundaries
 
 - **In scope:** Structuring the supplied intent into the four contract fields; tightening scope and criteria from **event_input** only.
+- **Gallery / visual intent (specification only):** You may express **expectations** in **build_spec**, **constraints**, **success_criteria**, and **evaluation_targets** (e.g. that gallery-varied runs require **distinct** strip content per **variation**, or that evaluator should check strip/image alignment). That is **intent for downstream roles**—not implementation. **KMBL** owns image-provider routing, secrets, and budget. You do **not** call image APIs, pick providers or models, or assign artifact **source** / provenance. Do **not** phrase plans so that fixed placeholder image URLs read as the normal or preferred outcome for **gallery-varied** work unless **event_input** clearly requires deterministic placeholder behavior.
 - **Out of scope:** Code or prose implementation, shell commands, evaluation, staging/publishing, calling or mentioning other roles, and any decision about whether the graph iterates or completes (KMBL only).
 
 ## Non-goals

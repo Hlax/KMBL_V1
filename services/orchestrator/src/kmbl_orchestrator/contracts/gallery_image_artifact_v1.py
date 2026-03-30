@@ -6,6 +6,10 @@ Generator ``artifact_outputs`` may include entries with
 ``build_candidate.artifact_refs_json``, and referenced from strip items via
 ``image_artifact_key`` matching ``key``.
 
+Static HTML/CSS/JS files use ``role: "static_frontend_file_v1"`` and are
+normalized in :mod:`kmbl_orchestrator.contracts.static_frontend_artifact_v1`
+after gallery rows (see :func:`normalize_combined_artifact_outputs_list`).
+
 Other artifact shapes pass through unchanged (list position preserved).
 """
 
@@ -37,6 +41,11 @@ class GalleryStripImageArtifactV1(BaseModel):
     thumb_url: str | None = Field(default=None, max_length=2048)
     alt: str | None = Field(default=None, max_length=500)
     source: Literal["generated", "external", "upload"] | None = None
+    # Optional KMBL server-side provenance (image provider pass) — omitted for purely external rows.
+    kmbl_generation_status: Literal["ok", "fallback", "skipped"] | None = None
+    kmbl_provider: str | None = Field(default=None, max_length=64)
+    kmbl_provider_model: str | None = Field(default=None, max_length=128)
+    kmbl_fallback_reason: str | None = Field(default=None, max_length=500)
 
     @field_validator("key", mode="before")
     @classmethod

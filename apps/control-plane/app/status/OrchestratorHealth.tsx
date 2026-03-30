@@ -66,9 +66,11 @@ export function OrchestratorHealth({
         : "unreachable";
 
   return (
-    <section aria-labelledby="orchestrator-health-heading">
-      <h2 id="orchestrator-health-heading">Orchestrator health</h2>
-      <p className="muted">
+    <section aria-labelledby="orchestrator-health-heading" className="cp-health-compact">
+      <h2 id="orchestrator-health-heading" className="op-section-title op-section-title--sub">
+        Orchestrator health
+      </h2>
+      <p className="muted small" style={{ marginBottom: "0.35rem" }}>
         <code>NEXT_PUBLIC_ORCHESTRATOR_URL</code>:{" "}
         {configuredBaseUrl ? (
           <code>{configuredBaseUrl}</code>
@@ -76,12 +78,16 @@ export function OrchestratorHealth({
           <strong>not set</strong>
         )}
       </p>
-      <p>
-        Status:{" "}
+      <p className="cp-loading-line" style={{ marginBottom: "0.5rem" }}>
         {loading ? (
-          <span>loading…</span>
+          <>
+            <span className="cp-spinner" aria-hidden />
+            Checking…
+          </>
         ) : (
-          <strong>{summary}</strong>
+          <>
+            Status: <strong>{summary}</strong>
+          </>
         )}
         {readinessRec && typeof readinessRec.ready_for_full_local_run === "boolean" && (
           <>
@@ -101,63 +107,47 @@ export function OrchestratorHealth({
       </p>
       {data && (
         <>
-          <p className="muted">
-            Probed URL: <code>{data.urlChecked}</code>
+          <p className="muted small">
+            Probed: <code>{data.urlChecked}</code>
+            {data.httpStatus != null ? (
+              <>
+                {" "}
+                · HTTP <code>{data.httpStatus}</code>
+              </>
+            ) : null}
+            {repoBackend != null ? (
+              <>
+                {" "}
+                · repo <code>{String(repoBackend)}</code>
+              </>
+            ) : null}
           </p>
-          {data.httpStatus != null && (
-            <p className="muted">
-              HTTP: <code>{data.httpStatus}</code>
-            </p>
-          )}
-          {repoBackend != null && (
-            <p className="muted">
-              repository_backend: <code>{String(repoBackend)}</code>
-            </p>
-          )}
           {readinessRec && (
-            <dl className="debug-kv" style={{ marginTop: "0.5rem" }}>
-              <dt>readiness.supabase_configured</dt>
-              <dd>
-                {String(readinessRec.supabase_configured ?? "—")}
-              </dd>
-              <dt>readiness.kiloclaw_configured</dt>
-              <dd>
-                {String(readinessRec.kiloclaw_configured ?? "—")}
-              </dd>
-              <dt>readiness.persisted_runs_available</dt>
-              <dd>
-                {String(readinessRec.persisted_runs_available ?? "—")}
-              </dd>
-            </dl>
+            <p className="muted small" style={{ marginBottom: "0.35rem" }}>
+              Supabase: {String(readinessRec.supabase_configured ?? "—")} · KiloClaw:{" "}
+              {String(readinessRec.kiloclaw_configured ?? "—")} · persisted runs:{" "}
+              {String(readinessRec.persisted_runs_available ?? "—")}
+            </p>
           )}
           {data.error && (
-            <p role="alert">
-              Error: <code>{data.error}</code>
+            <p role="alert" className="cp-error-inline">
+              {data.error}
             </p>
           )}
           {data.body != null && (
-            <pre
-              style={{
-                marginTop: "0.75rem",
-                padding: "0.75rem",
-                overflow: "auto",
-                fontSize: "0.85rem",
-                background: "#16161a",
-                borderRadius: "6px",
-              }}
-            >
-              {typeof data.body === "string"
-                ? data.body
-                : JSON.stringify(data.body, null, 2)}
-            </pre>
+            <details className="cp-raw-details" style={{ marginTop: "0.5rem" }}>
+              <summary className="muted small">Raw health JSON</summary>
+              <pre className="op-pre small-pre" style={{ marginTop: "0.35rem" }}>
+                {typeof data.body === "string"
+                  ? data.body
+                  : JSON.stringify(data.body, null, 2)}
+              </pre>
+            </details>
           )}
         </>
       )}
-      <p className="muted" style={{ fontSize: "0.85rem" }}>
-        The browser calls this app&apos;s{" "}
-        <code>/api/orchestrator-health</code>; that route performs{" "}
-        <code>GET {configuredBaseUrl || "…"}/health</code> from the Next.js server
-        (avoids CORS from the browser to FastAPI).
+      <p className="muted" style={{ fontSize: "0.8rem", marginTop: "0.5rem" }}>
+        Server-side <code>/api/orchestrator-health</code> → orchestrator <code>/health</code>.
       </p>
     </section>
   );

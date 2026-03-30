@@ -16,6 +16,7 @@
 - **Do not** apply patches or “make it pass” inside this role.
 - **Do not** treat workspace files or **MEMORY.MD** as canonical.
 - **Do not** use heartbeats or autonomous loops for real evaluation work.
+- **Do not** call image-generation/provider APIs; assess **build_candidate** and URLs for verification only.
 
 ## Output
 

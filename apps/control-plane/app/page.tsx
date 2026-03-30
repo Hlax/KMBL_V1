@@ -57,16 +57,20 @@ export default async function HomePage() {
       <h1 className="pub-page-title">Operator summary</h1>
       <p className="muted" style={{ marginTop: "-0.2rem", marginBottom: "0.85rem" }}>
         Your command view over persisted orchestrator rows — bounded windows, not a live stream.
-        Refresh to update counts; execution stays in the Python service.
+        Refresh to update counts; execution stays in the Python service. Use the global{" "}
+        <strong>Flow</strong> strip in the header: <strong>Run</strong> → <strong>Review</strong> →{" "}
+        <strong>Preview</strong> → <strong>Publish</strong> — then drill into a run or staging row
+        for image and static output.
       </p>
 
       <p className="op-banner op-banner--neutral">
         <strong>What you are seeing.</strong> Aggregates from stored staging, publication, and
-        graph_run tables only. Use <Link href="/review">Review</Link>,{" "}
-        <Link href="/publication">Publication</Link>, and <Link href="/runs">Runs</Link> for full
-        rows; optional <code className="mono">identity_id</code> filters tie the same lineage
-        across surfaces. Where a row shows <code className="mono">identity_id</code>, follow its
-        overview link for a compact cross-surface view.
+        graph_run tables only. Use <Link href="/runs">Runs</Link> to find a graph run,{" "}
+        <Link href="/review">Review</Link> for staging snapshots and previews,{" "}
+        <Link href="/publication">Publication</Link> for canon; optional{" "}
+        <code className="mono">identity_id</code> filters tie the same lineage across surfaces.
+        Where a row shows <code className="mono">identity_id</code>, follow its overview link for a
+        compact cross-surface view.
       </p>
 
       <nav className="op-home-surface-links" aria-label="Primary operator surfaces">

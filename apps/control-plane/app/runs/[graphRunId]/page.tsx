@@ -1,9 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import type { GraphRunDetail } from "@/lib/api-types";
+import { StagingFactsCard } from "@/app/components/StagingFactsCard";
 import { IdentityContextLinks, IdentityNavExtras } from "@/app/components/IdentityNavExtras";
+import type { GraphRunDetail, StagingDetail } from "@/lib/api-types";
 import { identityOverviewPath } from "@/lib/identity-nav";
 import { scenarioBadgeLabel } from "@/lib/gallery-strip-visibility";
+import { buildGeneratorRoutingView } from "@/lib/operator-routing-hints";
 import { graphRunAttentionBannerClass } from "@/lib/operator-attention";
 import { serverOriginFromHeaders } from "@/lib/server-origin";
 import { RunResumeActions } from "./RunResumeActions";
@@ -116,6 +118,24 @@ export default async function GraphRunDetailPage({
   const invocations = data.role_invocations ?? [];
   const operatorActions = data.operator_actions ?? [];
   const scen = scenarioBadgeLabel(data.scenario_badge);
+  const routingView = buildGeneratorRoutingView(data.scenario_tag, invocations);
+
+  let stagingDetail: StagingDetail | null = null;
+  let stagingFetchErr: string | null = null;
+  const sid = out.staging_snapshot_id;
+  if (sid) {
+    const stUrl = `${origin}/api/staging/${encodeURIComponent(sid)}`;
+    const stRes = await fetch(stUrl, { cache: "no-store" });
+    if (stRes.ok) {
+      try {
+        stagingDetail = (await stRes.json()) as StagingDetail;
+      } catch {
+        stagingFetchErr = "Invalid JSON from staging API";
+      }
+    } else {
+      stagingFetchErr = `HTTP ${stRes.status}`;
+    }
+  }
 
   return (
     <>
@@ -214,14 +234,62 @@ export default async function GraphRunDetailPage({
         </div>
       </section>
 
-      {out.staging_snapshot_id ? (
-        <p className="op-run-output-hint">
-          <strong>Preview and artifacts</strong> are on the staging snapshot (not on this run page).{" "}
-          <Link href={`/review/staging/${encodeURIComponent(out.staging_snapshot_id)}`}>
-            Open staging snapshot →
-          </Link>
+      {sid ? (
+        <StagingFactsCard
+          staging={stagingDetail}
+          error={stagingFetchErr}
+          publicationSnapshotId={out.publication_snapshot_id ?? null}
+        />
+      ) : (
+        <p className="muted small" style={{ marginBottom: "0.85rem" }}>
+          No staging snapshot linked yet — continue when the graph produces one.
         </p>
-      ) : null}
+      )}
+
+      <div className="op-card op-card--compact" style={{ marginBottom: "1rem" }}>
+        <h2 className="op-section-title" style={{ marginBottom: "0.35rem" }}>
+          Generator routing (KMBL)
+        </h2>
+        <p className="muted small" style={{ marginTop: 0 }}>
+          <span className="op-badge op-badge--neutral" title="Combined persisted vs scenario-tag notes">
+            routing facts: {routingView.routingFactSource}
+          </span>{" "}
+          — Persisted <code>routing_metadata_json</code> on generator rows when present; OpenClaw{" "}
+          <code>provider_config_key</code> is always persisted; scenario tag lines are heuristic.
+        </p>
+        {routingView.persistedRoutingLines.length > 0 ? (
+          <>
+            <h3 className="op-subtitle" style={{ marginBottom: "0.35rem" }}>
+              Persisted routing metadata
+            </h3>
+            <ul className="cp-routing-hints">
+              {routingView.persistedRoutingLines.map((line, i) => (
+                <li key={`p-${i}`}>{line}</li>
+              ))}
+            </ul>
+          </>
+        ) : null}
+        <h3 className="op-subtitle" style={{ marginBottom: "0.35rem", marginTop: "0.65rem" }}>
+          OpenClaw provider config (persisted)
+        </h3>
+        <ul className="cp-routing-hints">
+          {routingView.providerConfigLines.map((line, i) => (
+            <li key={`c-${i}`}>{line}</li>
+          ))}
+        </ul>
+        {routingView.heuristicScenarioLines.length > 0 ? (
+          <>
+            <h3 className="op-subtitle" style={{ marginBottom: "0.35rem", marginTop: "0.65rem" }}>
+              Scenario tag (heuristic)
+            </h3>
+            <ul className="cp-routing-hints">
+              {routingView.heuristicScenarioLines.map((line, i) => (
+                <li key={`h-${i}`}>{line}</li>
+              ))}
+            </ul>
+          </>
+        ) : null}
+      </div>
 
       <RunResumeActions
         graphRunId={graphRunId}

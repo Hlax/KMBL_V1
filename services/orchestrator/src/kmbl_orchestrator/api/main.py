@@ -9,6 +9,7 @@ import os
 import time
 from datetime import datetime, timezone
 from typing import Annotated, Any, Literal
+from urllib.parse import urlencode
 from uuid import UUID, uuid4
 
 from fastapi import BackgroundTasks, Body, Depends, FastAPI, HTTPException, Query
@@ -120,7 +121,6 @@ from kmbl_orchestrator.identity import (
 )
 from kmbl_orchestrator.seeds import (
     IDENTITY_URL_STATIC_FRONTEND_PRESET,
-    IDENTITY_URL_STATIC_FRONTEND_TAG,
     KILOCLAW_IMAGE_ONLY_TEST_EVENT_INPUT,
     KILOCLAW_IMAGE_ONLY_TEST_SCENARIO_PRESET,
     KILOCLAW_IMAGE_ONLY_TEST_SCENARIO_TAG,

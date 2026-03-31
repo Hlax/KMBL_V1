@@ -12,7 +12,6 @@ from __future__ import annotations
 import html
 import re
 from html.parser import HTMLParser
-from typing import Any
 
 BLOCKED_TAGS: set[str] = {
     "script",

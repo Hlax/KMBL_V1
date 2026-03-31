@@ -65,11 +65,9 @@ from kmbl_orchestrator.staging.integrity import (
 )
 from kmbl_orchestrator.staging.working_staging_ops import (
     apply_generator_to_working_staging,
-    choose_update_mode,
     choose_update_mode_with_pressure,
     create_pre_rebuild_checkpoint,
     create_staging_checkpoint,
-    should_auto_checkpoint,
     should_auto_checkpoint_with_policy,
 )
 from kmbl_orchestrator.staging.facts import (
@@ -163,7 +161,6 @@ def _apply_html_blocks_to_candidate(
     """
     from kmbl_orchestrator.contracts.html_block_artifact_v1 import (
         HtmlBlockArtifactV1,
-        normalize_html_block_artifact,
     )
     from kmbl_orchestrator.staging.block_merge import apply_blocks_to_static_files
 
@@ -233,12 +230,6 @@ def _apply_html_blocks_to_candidate(
             "bundle_id": bundle_id,
         }
 
-    # Other non-static-html artifacts not in merged_map stay unchanged
-    other_refs = [
-        ref for ref in non_block_refs
-        if not (isinstance(ref, dict) and ref.get("path", "") in existing_by_path)
-           or not (isinstance(ref, dict) and ref.get("language") == "html")
-    ]
     # Build the final list: non-HTML non-block refs + all (updated) static refs + block provenance
     static_refs = list(existing_by_path.values())
     updated_refs = (

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import html
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 

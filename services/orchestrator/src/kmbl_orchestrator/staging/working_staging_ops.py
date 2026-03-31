@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import copy
-import json
 from datetime import datetime, timezone
 from typing import Any, Literal
 from uuid import UUID, uuid4
@@ -26,12 +25,10 @@ from kmbl_orchestrator.staging.checkpoint_policy import (
     decide_pre_update_checkpoint,
 )
 from kmbl_orchestrator.staging.guardrails import (
-    GuardrailEvaluation,
     compute_stagnation_count,
     evaluate_guardrails,
 )
 from kmbl_orchestrator.staging.mutation_intent import (
-    MutationPlan,
     apply_mutation_plan_to_refs,
     extract_mutation_intent,
     resolve_mutation_plan,
@@ -42,7 +39,6 @@ from kmbl_orchestrator.staging.pressure import (
     evaluate_staging_pressure,
 )
 from kmbl_orchestrator.staging.revision_journal import (
-    RevisionSummary,
     build_revision_summary,
     compute_artifact_delta,
     extract_issue_categories,
@@ -263,7 +259,6 @@ def apply_generator_to_working_staging(
     """
     previous_revision = working_staging.revision
     before_refs = _extract_artifact_refs(working_staging.payload_json)
-    before_has_html = _payload_has_previewable_html(working_staging.payload_json)
 
     new_payload = build_payload_from_candidate(
         build_candidate=build_candidate,

@@ -17,14 +17,14 @@ from typing import Any
 
 from kmbl_orchestrator.config import Settings
 import kmbl_orchestrator.runtime.image_generation_intent as _image_intent
-
-extract_image_generation_intent = _image_intent.extract_image_generation_intent
-should_use_openai_for_image_generation = _image_intent.should_use_openai_for_image_generation
 from kmbl_orchestrator.runtime.openai_hourly_budget import (
     OpenAIImageBudgetStore,
     check_or_consume_openai_image_budget,
     get_openai_hourly_budget_guard,
 )
+
+extract_image_generation_intent = _image_intent.extract_image_generation_intent
+should_use_openai_for_image_generation = _image_intent.should_use_openai_for_image_generation
 
 _LOG = logging.getLogger(__name__)
 
@@ -105,7 +105,6 @@ def select_generator_provider_config(
         generator_payload=generator_payload,
     )
     image_requested = intent.kind != "none"
-    openai_requested = image_requested
 
     intent_kind = intent.kind if image_requested else "none"
     default_key = (settings.kiloclaw_generator_config_key or "kmbl-generator").strip()

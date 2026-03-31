@@ -11,8 +11,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Literal, Protocol
 from uuid import UUID
 
-_log = logging.getLogger(__name__)
-
 from kmbl_orchestrator.domain import (
     AutonomousLoopRecord,
     BuildCandidateRecord,
@@ -30,6 +28,8 @@ from kmbl_orchestrator.domain import (
     ThreadRecord,
     WorkingStagingRecord,
 )
+
+_log = logging.getLogger(__name__)
 
 
 class Repository(Protocol):

@@ -1454,7 +1454,6 @@ class SupabaseRepository:
     # --- Autonomous Loop ---
 
     def save_autonomous_loop(self, record: "AutonomousLoopRecord") -> None:
-        from kmbl_orchestrator.domain import AutonomousLoopRecord
 
         row = {
             "loop_id": str(record.loop_id),

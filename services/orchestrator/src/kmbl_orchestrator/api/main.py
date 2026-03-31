@@ -6,6 +6,8 @@ import asyncio
 import logging
 import os
 import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Annotated, Any, Literal
 from urllib.parse import urlencode
@@ -87,9 +89,31 @@ from kmbl_orchestrator.seeds import (
     build_seeded_gallery_strip_varied_v1_event_input,
 )
 
-app = FastAPI(title="KMBL Orchestrator", version="0.1.0")
-app.middleware("http")(optional_api_key_middleware)
 _log = logging.getLogger(__name__)
+
+
+def _orchestrator_verbose_logging() -> None:
+    """Opt-in: emit INFO from kmbl_orchestrator.* (root may stay WARNING under uvicorn)."""
+    if os.environ.get("ORCHESTRATOR_VERBOSE_LOGS", "").strip().lower() not in ("1", "true", "yes"):
+        return
+    pkg = logging.getLogger("kmbl_orchestrator")
+    pkg.setLevel(logging.INFO)
+    if not getattr(pkg, "_kmb_verbose_handler", None):
+        h = logging.StreamHandler()
+        h.setFormatter(logging.Formatter("%(message)s"))
+        pkg.addHandler(h)
+        pkg._kmb_verbose_handler = h  # type: ignore[attr-defined]
+
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """Lifespan handler — replaces deprecated ``@app.on_event("startup")``."""
+    _orchestrator_verbose_logging()
+    yield
+
+
+app = FastAPI(title="KMBL Orchestrator", version="0.1.0", lifespan=_lifespan)
+app.middleware("http")(optional_api_key_middleware)
 
 # Register extracted route modules
 from kmbl_orchestrator.api.loops import router as _loops_router  # noqa: E402
@@ -102,20 +126,6 @@ app.include_router(_identity_router)
 app.include_router(_publication_router)
 app.include_router(_staging_router)
 app.include_router(_ws_router)
-
-
-@app.on_event("startup")
-async def _orchestrator_verbose_logging() -> None:
-    """Opt-in: emit INFO from kmbl_orchestrator.* (root may stay WARNING under uvicorn)."""
-    if os.environ.get("ORCHESTRATOR_VERBOSE_LOGS", "").strip().lower() not in ("1", "true", "yes"):
-        return
-    pkg = logging.getLogger("kmbl_orchestrator")
-    pkg.setLevel(logging.INFO)
-    if not getattr(pkg, "_kmb_verbose_handler", None):
-        h = logging.StreamHandler()
-        h.setFormatter(logging.Formatter("%(message)s"))
-        pkg.addHandler(h)
-        pkg._kmb_verbose_handler = h  # type: ignore[attr-defined]
 
 
 # Dependency callables — single source from deps, re-exported for test compatibility.

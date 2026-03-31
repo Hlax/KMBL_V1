@@ -17,6 +17,7 @@ Design intent:
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -246,7 +247,6 @@ def build_identity_brief_from_repo(
 
     Returns None if no identity profile exists and fallback is not appropriate.
     """
-    from uuid import UUID
 
     profile = repo.get_identity_profile(identity_id)
     sources = repo.list_identity_sources(identity_id)

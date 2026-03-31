@@ -318,7 +318,6 @@ def _render_generated_text_section(section: dict[str, Any], context: RenderConte
     Note: Actual text generation happens during habitat assembly.
     This renders a placeholder if content is not yet available.
     """
-    section_key = section.get("key", "text")
     config = section.get("config", {})
     
     content = config.get("content", "")

@@ -36,6 +36,16 @@ from kmbl_orchestrator.domain import (
     WorkingStagingRecord,
 )
 from kmbl_orchestrator.errors import RoleInvocationFailed, StagingIntegrityFailed
+from kmbl_orchestrator.graph.helpers import (
+    _apply_html_blocks_to_candidate as _apply_html_blocks_to_candidate_impl,
+    _extract_html_file_map_from_working_staging,  # noqa: F401  re-export for tests
+    _iteration_plan_extras_from_ws_facts,
+    _persist_invocation_failure,
+    _save_checkpoint_with_event,
+    _uuid,
+    compute_evaluator_decision,
+    maybe_suppress_duplicate_staging,
+)
 from kmbl_orchestrator.graph.state import GraphState
 from kmbl_orchestrator.identity.hydrate import (
     build_planner_identity_context,
@@ -65,11 +75,9 @@ from kmbl_orchestrator.staging.integrity import (
 )
 from kmbl_orchestrator.staging.working_staging_ops import (
     apply_generator_to_working_staging,
-    choose_update_mode,
     choose_update_mode_with_pressure,
     create_pre_rebuild_checkpoint,
     create_staging_checkpoint,
-    should_auto_checkpoint,
     should_auto_checkpoint_with_policy,
 )
 from kmbl_orchestrator.staging.facts import (
@@ -96,10 +104,6 @@ from kmbl_orchestrator.runtime.session_staging_links import (
 _log = logging.getLogger(__name__)
 
 
-def _uuid() -> str:
-    return str(uuid4())
-
-
 class GraphContext:
     """Closure dependencies for graph nodes."""
 
@@ -114,157 +118,14 @@ class GraphContext:
         self.settings = settings
 
 
-def _extract_html_file_map_from_working_staging(
-    ws: Any,
-) -> dict[str, str]:
-    """Extract ``path → html_content`` from a working_staging record.
-
-    Returns only HTML files so they can be used as block merge targets.
-    """
-    file_map: dict[str, str] = {}
-    if ws is None:
-        return file_map
-    refs = (
-        ws.payload_json.get("artifacts", {}).get("artifact_refs", [])
-        if isinstance(ws.payload_json, dict)
-        else []
-    )
-    for ref in refs:
-        if not isinstance(ref, dict):
-            continue
-        if ref.get("role") != "static_frontend_file_v1":
-            continue
-        if ref.get("language") != "html":
-            continue
-        path = ref.get("path", "")
-        content = ref.get("content", "")
-        if isinstance(path, str) and path and isinstance(content, str) and content:
-            file_map[path] = content
-    return file_map
-
-
 def _apply_html_blocks_to_candidate(
-    ctx: "GraphContext",
+    ctx_or_repo: "GraphContext | Repository",
     cand: "BuildCandidateRecord",
     tid: UUID,
 ) -> "BuildCandidateRecord":
-    """If the build candidate contains ``html_block_v1`` artifacts, apply them.
-
-    Fetches the current working_staging for ``tid``, applies each block to the
-    corresponding HTML file (creating a minimal skeleton if the file doesn't exist
-    yet), and returns an updated ``BuildCandidateRecord`` where:
-
-    - The merged ``static_frontend_file_v1`` artifacts are added to ``artifact_refs_json``
-      alongside the original ``html_block_v1`` artifacts (kept for provenance).
-    - ``working_state_patch_json["block_preview_anchors"]`` lists the applied block
-      anchors so the staging snapshot metadata can expose a direct preview link.
-
-    When there are no ``html_block_v1`` artifacts, the candidate is returned unchanged.
-    """
-    from kmbl_orchestrator.contracts.html_block_artifact_v1 import (
-        HtmlBlockArtifactV1,
-        normalize_html_block_artifact,
-    )
-    from kmbl_orchestrator.staging.block_merge import apply_blocks_to_static_files
-
-    raw_refs = list(cand.artifact_refs_json)
-    raw_blocks = [r for r in raw_refs if isinstance(r, dict) and r.get("role") == "html_block_v1"]
-    if not raw_blocks:
-        return cand
-
-    # Validate blocks — skip malformed ones
-    blocks: list[HtmlBlockArtifactV1] = []
-    for raw in raw_blocks:
-        try:
-            blocks.append(HtmlBlockArtifactV1.model_validate(raw))
-        except Exception as exc:
-            _log.warning(
-                "graph_run block application: invalid html_block_v1 block_id=%s err=%s",
-                raw.get("block_id", "?"),
-                exc,
-            )
-
-    if not blocks:
-        return cand
-
-    # Get the current working staging HTML for block targets
-    ws = ctx.repo.get_working_staging_for_thread(tid)
-    file_map = _extract_html_file_map_from_working_staging(ws)
-
-    # Apply blocks
-    merged_map, anchors = apply_blocks_to_static_files(blocks, file_map)
-
-    if not merged_map:
-        _log.info(
-            "graph_run block_application: no files were changed (all blocks returned identical content)"
-        )
-        return cand
-
-    # Build updated artifact_refs:
-    # - existing non-block artifacts unchanged
-    # - merged static files replace existing ones at the same path (or are added)
-    # - original html_block_v1 artifacts retained as provenance
-    non_block_refs = [r for r in raw_refs if isinstance(r, dict) and r.get("role") != "html_block_v1"]
-    existing_by_path: dict[str, Any] = {}
-    for ref in non_block_refs:
-        if isinstance(ref, dict):
-            p = ref.get("path", "")
-            if p:
-                existing_by_path[p] = ref
-
-    # Merge new static files
-    for path, html_content in merged_map.items():
-        # Try to inherit bundle_id from the existing file or the first block targeting this path
-        bundle_id: str | None = None
-        if path in existing_by_path:
-            bundle_id = existing_by_path[path].get("bundle_id")
-        if bundle_id is None:
-            for blk in blocks:
-                if blk.target_path == path and blk.bundle_id:
-                    bundle_id = blk.bundle_id
-                    break
-
-        existing_by_path[path] = {
-            "role": "static_frontend_file_v1",
-            "path": path,
-            "language": "html",
-            "content": html_content,
-            "entry_for_preview": True,
-            "bundle_id": bundle_id,
-        }
-
-    # Other non-static-html artifacts not in merged_map stay unchanged
-    other_refs = [
-        ref for ref in non_block_refs
-        if not (isinstance(ref, dict) and ref.get("path", "") in existing_by_path)
-           or not (isinstance(ref, dict) and ref.get("language") == "html")
-    ]
-    # Build the final list: non-HTML non-block refs + all (updated) static refs + block provenance
-    static_refs = list(existing_by_path.values())
-    updated_refs = (
-        [r for r in non_block_refs if not (isinstance(r, dict) and r.get("path", "") in merged_map)]
-        + static_refs
-        + raw_blocks  # provenance
-    )
-
-    # Record anchors in working_state_patch
-    updated_wsp = dict(cand.working_state_patch_json)
-    if anchors:
-        updated_wsp["block_preview_anchors"] = anchors
-
-    _log.info(
-        "graph_run block_application: applied %d block(s) to %d file(s) anchors=%s",
-        len(blocks),
-        len(merged_map),
-        anchors,
-    )
-
-    return cand.model_copy(
-        update={
-            "artifact_refs_json": updated_refs,
-            "working_state_patch_json": updated_wsp,
-        }
-    )
+    """Backward-compat wrapper: accepts GraphContext or bare Repository."""
+    repo = ctx_or_repo.repo if isinstance(ctx_or_repo, GraphContext) else ctx_or_repo
+    return _apply_html_blocks_to_candidate_impl(repo, cand, tid)
 
 
 def build_graph_context(
@@ -284,104 +145,6 @@ def get_compiled_graph(ctx: "GraphContext"):
     / ``.astream()`` (async) — use the appropriate form depending on your call site.
     """
     return build_compiled_graph(ctx)
-
-
-def _save_checkpoint_with_event(
-    ctx: GraphContext,
-    record: CheckpointRecord,
-) -> None:
-    ctx.repo.save_checkpoint(record)
-    append_graph_run_event(
-        ctx.repo,
-        record.graph_run_id,
-        RunEventType.CHECKPOINT_WRITTEN,
-        {
-            "checkpoint_kind": record.checkpoint_kind,
-            "checkpoint_id": str(record.checkpoint_id),
-        },
-        thread_id=record.thread_id,
-    )
-
-
-def _persist_invocation_failure(
-    *,
-    inv: Any,
-    raw_detail: dict[str, Any],
-    phase: Literal["planner", "generator", "evaluator"],
-    graph_run_id: UUID,
-    thread_id: UUID,
-    repo: Repository,
-) -> None:
-    ended = datetime.now(timezone.utc).isoformat()
-    failed = inv.model_copy(
-        update={
-            "output_payload_json": raw_detail,
-            "status": "failed",
-            "ended_at": ended,
-        }
-    )
-    repo.save_role_invocation(failed)
-    raise RoleInvocationFailed(
-        phase=phase,
-        graph_run_id=graph_run_id,
-        thread_id=thread_id,
-        detail=raw_detail,
-    )
-
-
-def compute_evaluator_decision(
-    status: str,
-    iteration: int,
-    max_iterations: int,
-) -> tuple[Literal["stage", "iterate", "interrupt"], str | None]:
-    """Pure decision logic: maps evaluator status + iteration to a routing decision.
-
-    Alignment scores do **not** affect this branch — see ``docs/19_EVALUATOR_DECISION_POLICY.md``.
-
-    Returns (decision, interrupt_reason).
-
-    - pass: always stage (no retry needed)
-    - partial/fail: iterate if under max_iterations, otherwise stage
-    - blocked: interrupt (no staging)
-    """
-    if status == "pass":
-        return "stage", None
-    if status == "blocked":
-        return "interrupt", "evaluator_blocked"
-    if status in ("fail", "partial"):
-        if iteration < max_iterations:
-            return "iterate", None
-        return "stage", None
-    return "interrupt", "unknown_eval_status"
-
-
-def maybe_suppress_duplicate_staging(
-    decision: Literal["stage", "iterate", "interrupt"],
-    interrupt_reason: str | None,
-    status: str,
-    metrics: dict[str, Any] | None,
-) -> tuple[Literal["stage", "iterate", "interrupt"], str | None, bool]:
-    """After max iterations, fail+duplicate_rejection would otherwise stage a useless duplicate snapshot."""
-    m = metrics if isinstance(metrics, dict) else {}
-    if (
-        decision == "stage"
-        and status == "fail"
-        and m.get("duplicate_rejection") is True
-    ):
-        return "interrupt", "duplicate_output_after_max_iterations", True
-    return decision, interrupt_reason, False
-
-
-def _iteration_plan_extras_from_ws_facts(
-    ws_facts: dict[str, Any] | None,
-) -> tuple[int, str | None]:
-    if not ws_facts:
-        return 0, None
-    rh = ws_facts.get("revision_history") or {}
-    st = int(rh.get("stagnation_count") or 0)
-    ps = ws_facts.get("pressure_summary") or {}
-    rec = ps.get("recommendation") if isinstance(ps, dict) else None
-    return st, str(rec) if rec else None
 
 
 def build_compiled_graph(ctx: GraphContext):
@@ -441,7 +204,7 @@ def build_compiled_graph(ctx: GraphContext):
             state_json={**dict(state), "_role_checkpoint_gate": "pre_graph"},
             context_compaction_json=None,
         )
-        _save_checkpoint_with_event(ctx, cp)
+        _save_checkpoint_with_event(ctx.repo, cp)
         return {}
 
     def planner_node(state: GraphState) -> dict[str, Any]:
@@ -455,7 +218,7 @@ def build_compiled_graph(ctx: GraphContext):
             state_json={**dict(state), "_role_checkpoint_gate": "pre_planner"},
             context_compaction_json=None,
         )
-        _save_checkpoint_with_event(ctx, cp0)
+        _save_checkpoint_with_event(ctx.repo, cp0)
         append_graph_run_event(ctx.repo, gid, RunEventType.PLANNER_INVOCATION_STARTED, {}, thread_id=tid)
         _log.info(
             "graph_run graph_run_id=%s stage=planner_invocation_start elapsed_ms=0.0",
@@ -594,29 +357,30 @@ def build_compiled_graph(ctx: GraphContext):
             planner_invocation_id=inv.role_invocation_id,
         )
         spec = spec.model_copy(update={"raw_payload_json": raw})
-        ctx.repo.save_build_spec(spec)
-        step_state = {
-            **dict(state),
-            "build_spec": raw.get("build_spec"),
-            "build_spec_id": str(spec.build_spec_id),
-        }
-        _save_checkpoint_with_event(
-            ctx,
-            CheckpointRecord(
-                checkpoint_id=uuid4(),
-                thread_id=tid,
-                graph_run_id=gid,
-                checkpoint_kind="post_step",
-                state_json=step_state,
-                context_compaction_json=None,
-            ),
-        )
-        append_graph_run_event(
-            ctx.repo,
-            gid,
-            RunEventType.PLANNER_INVOCATION_COMPLETED,
-            {"build_spec_id": str(spec.build_spec_id)},
-        )
+        with ctx.repo.transaction():
+            ctx.repo.save_build_spec(spec)
+            step_state = {
+                **dict(state),
+                "build_spec": raw.get("build_spec"),
+                "build_spec_id": str(spec.build_spec_id),
+            }
+            _save_checkpoint_with_event(
+                ctx.repo,
+                CheckpointRecord(
+                    checkpoint_id=uuid4(),
+                    thread_id=tid,
+                    graph_run_id=gid,
+                    checkpoint_kind="post_step",
+                    state_json=step_state,
+                    context_compaction_json=None,
+                ),
+            )
+            append_graph_run_event(
+                ctx.repo,
+                gid,
+                RunEventType.PLANNER_INVOCATION_COMPLETED,
+                {"build_spec_id": str(spec.build_spec_id)},
+            )
         return {
             "build_spec": raw.get("build_spec"),
             "build_spec_id": str(spec.build_spec_id),
@@ -636,7 +400,7 @@ def build_compiled_graph(ctx: GraphContext):
             state_json={**dict(state), "_role_checkpoint_gate": "pre_generator"},
             context_compaction_json=None,
         )
-        _save_checkpoint_with_event(ctx, cp0)
+        _save_checkpoint_with_event(ctx.repo, cp0)
         append_graph_run_event(ctx.repo, gid, RunEventType.GENERATOR_INVOCATION_STARTED, {}, thread_id=tid)
         _log.info(
             "graph_run graph_run_id=%s stage=generator_invocation_start elapsed_ms=0.0",
@@ -884,40 +648,41 @@ def build_compiled_graph(ctx: GraphContext):
             )
 
         # Apply html_block_v1 artifacts to the current working staging (if any)
-        cand = _apply_html_blocks_to_candidate(ctx, cand, tid)
+        cand = _apply_html_blocks_to_candidate(ctx.repo, cand, tid)
 
-        ctx.repo.save_build_candidate(cand)
-        block_anchors = (cand.working_state_patch_json or {}).get("block_preview_anchors") or []
-        step_state = {
-            **dict(state),
-            "build_candidate": {
-                "proposed_changes": raw.get("proposed_changes"),
-                "artifact_outputs": raw.get("artifact_outputs"),
-                "updated_state": raw.get("updated_state"),
-                "sandbox_ref": raw.get("sandbox_ref"),
-                "preview_url": raw.get("preview_url"),
-                "block_anchors": block_anchors if block_anchors else None,
-            },
-            "build_candidate_id": str(cand.build_candidate_id),
-            "current_state": raw.get("updated_state") or state.get("current_state") or {},
-        }
-        _save_checkpoint_with_event(
-            ctx,
-            CheckpointRecord(
-                checkpoint_id=uuid4(),
-                thread_id=tid,
-                graph_run_id=gid,
-                checkpoint_kind="post_step",
-                state_json=step_state,
-                context_compaction_json=None,
-            ),
-        )
-        append_graph_run_event(
-            ctx.repo,
-            gid,
-            RunEventType.GENERATOR_INVOCATION_COMPLETED,
-            {"build_candidate_id": str(cand.build_candidate_id)},
-        )
+        with ctx.repo.transaction():
+            ctx.repo.save_build_candidate(cand)
+            block_anchors = (cand.working_state_patch_json or {}).get("block_preview_anchors") or []
+            step_state = {
+                **dict(state),
+                "build_candidate": {
+                    "proposed_changes": raw.get("proposed_changes"),
+                    "artifact_outputs": raw.get("artifact_outputs"),
+                    "updated_state": raw.get("updated_state"),
+                    "sandbox_ref": raw.get("sandbox_ref"),
+                    "preview_url": raw.get("preview_url"),
+                    "block_anchors": block_anchors if block_anchors else None,
+                },
+                "build_candidate_id": str(cand.build_candidate_id),
+                "current_state": raw.get("updated_state") or state.get("current_state") or {},
+            }
+            _save_checkpoint_with_event(
+                ctx.repo,
+                CheckpointRecord(
+                    checkpoint_id=uuid4(),
+                    thread_id=tid,
+                    graph_run_id=gid,
+                    checkpoint_kind="post_step",
+                    state_json=step_state,
+                    context_compaction_json=None,
+                ),
+            )
+            append_graph_run_event(
+                ctx.repo,
+                gid,
+                RunEventType.GENERATOR_INVOCATION_COMPLETED,
+                {"build_candidate_id": str(cand.build_candidate_id)},
+            )
         return {
             "build_candidate": step_state["build_candidate"],
             "build_candidate_id": str(cand.build_candidate_id),
@@ -939,7 +704,7 @@ def build_compiled_graph(ctx: GraphContext):
             state_json={**dict(state), "_role_checkpoint_gate": "pre_evaluator"},
             context_compaction_json=None,
         )
-        _save_checkpoint_with_event(ctx, cp0)
+        _save_checkpoint_with_event(ctx.repo, cp0)
         append_graph_run_event(ctx.repo, gid, RunEventType.EVALUATOR_INVOCATION_STARTED, {}, thread_id=tid)
         _log.info(
             "graph_run graph_run_id=%s stage=evaluator_invocation_start elapsed_ms=0.0",
@@ -1130,7 +895,6 @@ def build_compiled_graph(ctx: GraphContext):
             "alignment_score": alignment_score,
             "alignment_signals_json": alignment_signals,
         })
-        ctx.repo.save_evaluation_report(report)
 
         # Update alignment score history in state
         alignment_history: list[dict[str, Any]] = list(
@@ -1158,23 +922,25 @@ def build_compiled_graph(ctx: GraphContext):
             "alignment_score_history": alignment_history,
             "last_alignment_score": alignment_score,
         }
-        _save_checkpoint_with_event(
-            ctx,
-            CheckpointRecord(
-                checkpoint_id=uuid4(),
-                thread_id=tid,
-                graph_run_id=gid,
-                checkpoint_kind="post_step",
-                state_json=step_state,
-                context_compaction_json=None,
-            ),
-        )
-        append_graph_run_event(
-            ctx.repo,
-            gid,
-            RunEventType.EVALUATOR_INVOCATION_COMPLETED,
-            {"evaluation_report_id": str(report.evaluation_report_id)},
-        )
+        with ctx.repo.transaction():
+            ctx.repo.save_evaluation_report(report)
+            _save_checkpoint_with_event(
+                ctx.repo,
+                CheckpointRecord(
+                    checkpoint_id=uuid4(),
+                    thread_id=tid,
+                    graph_run_id=gid,
+                    checkpoint_kind="post_step",
+                    state_json=step_state,
+                    context_compaction_json=None,
+                ),
+            )
+            append_graph_run_event(
+                ctx.repo,
+                gid,
+                RunEventType.EVALUATOR_INVOCATION_COMPLETED,
+                {"evaluation_report_id": str(report.evaluation_report_id)},
+            )
         return {
             "evaluation_report": step_state["evaluation_report"],
             "evaluation_report_id": str(report.evaluation_report_id),
@@ -1651,6 +1417,30 @@ def run_graph(
         "run_graph graph_run_id=%s stage=langgraph_invoke_start elapsed_ms=0.0",
         gid0,
     )
+    # Acquire thread-level advisory lock to prevent interleaved writes
+    _tid_raw = base.get("thread_id")
+    _thread_lock_ctx = (
+        repo.thread_lock(UUID(str(_tid_raw))) if _tid_raw else _noop_ctx()
+    )
+    with _thread_lock_ctx:
+        return _run_graph_inner(repo, ctx, app, base, gid0, t_run)
+
+
+def _noop_ctx():
+    """Trivial context manager for the no-thread-id case."""
+    from contextlib import nullcontext
+    return nullcontext()
+
+
+def _run_graph_inner(
+    repo: Repository,
+    ctx: GraphContext,
+    app,
+    base: dict[str, Any],
+    gid0,
+    t_run: float,
+) -> GraphState:
+    """Inner body of ``run_graph`` — runs inside the optional thread lock."""
     try:
         final = app.invoke(base)
     except RoleInvocationFailed as e:
@@ -1659,7 +1449,7 @@ def run_graph(
             tid_u = e.thread_id
             ek = error_kind_from_detail(e.detail) or "role_invocation"
             _save_checkpoint_with_event(
-                ctx,
+                ctx.repo,
                 CheckpointRecord(
                     checkpoint_id=uuid4(),
                     thread_id=tid_u,
@@ -1700,7 +1490,7 @@ def run_graph(
                 details=e.detail if e.detail else None,
             )
             _save_checkpoint_with_event(
-                ctx,
+                ctx.repo,
                 CheckpointRecord(
                     checkpoint_id=uuid4(),
                     thread_id=tid_u,
@@ -1739,7 +1529,7 @@ def run_graph(
             if tid_s:
                 tid_u = UUID(str(tid_s))
                 _save_checkpoint_with_event(
-                    ctx,
+                    ctx.repo,
                     CheckpointRecord(
                         checkpoint_id=uuid4(),
                         thread_id=tid_u,
@@ -1775,27 +1565,28 @@ def run_graph(
         gid_u = UUID(gid)
         tid_u = UUID(tid_s) if tid_s else None
         try:
-            if tid_s:
-                post = CheckpointRecord(
-                    checkpoint_id=uuid4(),
-                    thread_id=UUID(tid_s),
-                    graph_run_id=gid_u,
-                    checkpoint_kind="post_role",
-                    state_json=dict(final),
-                    context_compaction_json=None,
+            with repo.transaction():
+                if tid_s:
+                    post = CheckpointRecord(
+                        checkpoint_id=uuid4(),
+                        thread_id=UUID(tid_s),
+                        graph_run_id=gid_u,
+                        checkpoint_kind="post_role",
+                        state_json=dict(final),
+                        context_compaction_json=None,
+                    )
+                    _save_checkpoint_with_event(ctx.repo, post)
+                    repo.update_thread_current_checkpoint(UUID(tid_s), post.checkpoint_id)
+                ended = datetime.now(timezone.utc).isoformat()
+                repo.update_graph_run_status(gid_u, "completed", ended)
+                repo.attach_run_snapshot(gid_u, dict(final))
+                append_graph_run_event(
+                    repo,
+                    gid_u,
+                    RunEventType.GRAPH_RUN_COMPLETED,
+                    {},
+                    thread_id=tid_u,
                 )
-                _save_checkpoint_with_event(ctx, post)
-                repo.update_thread_current_checkpoint(UUID(tid_s), post.checkpoint_id)
-            ended = datetime.now(timezone.utc).isoformat()
-            repo.update_graph_run_status(gid_u, "completed", ended)
-            repo.attach_run_snapshot(gid_u, dict(final))
-            append_graph_run_event(
-                repo,
-                gid_u,
-                RunEventType.GRAPH_RUN_COMPLETED,
-                {},
-                thread_id=tid_u,
-            )
         except Exception as post_exc:
             _log.exception(
                 "run_graph post-invoke persistence failed graph_run_id=%s exc=%s",

@@ -10,7 +10,7 @@ Provides image generation via:
 from __future__ import annotations
 
 import logging
-from typing import Any, Literal
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field

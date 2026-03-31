@@ -2809,67 +2809,96 @@ async def cron_tick(
 ) -> dict[str, Any]:
     """
     Cron tick endpoint - called every minute.
-    
+
     Acquires lock on next pending loop and runs one tick.
     If no loops pending or all locked, returns immediately.
     """
     import asyncio
-    from kmbl_orchestrator.autonomous import tick_loop
+    from functools import partial
 
-    loop = repo.get_next_pending_loop()
-    if loop is None:
+    from kmbl_orchestrator.autonomous import tick_loop
+    from kmbl_orchestrator.graph.app import (
+        build_graph_context,
+        persist_graph_run_start,
+        run_graph,
+    )
+
+    loop_record = repo.get_next_pending_loop()
+    if loop_record is None:
         return {"status": "no_pending_loops", "action": None}
 
     worker_id = f"cron-{uuid4().hex[:8]}"
-    acquired = repo.try_acquire_loop_lock(loop.loop_id, worker_id, lock_timeout_seconds=300)
+    acquired = repo.try_acquire_loop_lock(loop_record.loop_id, worker_id, lock_timeout_seconds=300)
     if not acquired:
-        return {"status": "lock_contention", "loop_id": str(loop.loop_id), "action": None}
+        return {"status": "lock_contention", "loop_id": str(loop_record.loop_id), "action": None}
 
     try:
-        async def run_graph(
+        async def _run_graph_for_loop(
             *,
             identity_url: str,
             identity_id: UUID,
             event_input: dict[str, Any],
             thread_id: UUID | None = None,
         ) -> dict[str, Any]:
-            from kmbl_orchestrator.graph.app import build_graph_context, get_compiled_graph
+            """Async bridge: wraps the synchronous ``run_graph`` in a thread-pool executor.
 
-            ctx = build_graph_context(settings, repo)
-            graph = get_compiled_graph(ctx)
+            ``run_graph`` is CPU + I/O bound (HTTP calls to KiloClaw + Supabase writes).
+            Running it in an executor keeps the event-loop responsive during cron ticks.
+            Returns the dict shape expected by ``tick_loop._tick_graph_run``.
+            """
+            # Persist thread + graph_run rows first (must exist before run_graph is called)
+            t_str, gid_str = persist_graph_run_start(
+                repo,
+                thread_id=str(thread_id) if thread_id else None,
+                graph_run_id=None,
+                identity_id=str(identity_id),
+                trigger_type="autonomous_loop",
+                event_input=event_input,
+            )
 
-            input_state = {
-                "thread_id": str(thread_id) if thread_id else str(uuid4()),
-                "identity_url": identity_url,
+            initial: dict[str, Any] = {
+                "thread_id": t_str,
+                "graph_run_id": gid_str,
                 "identity_id": str(identity_id),
-                "event_input": event_input,
                 "trigger_type": "autonomous_loop",
+                "event_input": event_input,
+                "max_iterations": settings.graph_max_iterations_default,
             }
 
-            final_state = None
-            async for state in graph.astream(input_state):
-                final_state = state
+            invoker = DefaultRoleInvoker(settings=settings)
 
-            if final_state is None:
-                return {"error": "Graph produced no output"}
+            def _sync_run() -> dict[str, Any]:
+                final = run_graph(repo=repo, invoker=invoker, settings=settings, initial=initial)
+                ev = final.get("evaluation_report") or {}
+                ev_status = ev.get("status") if isinstance(ev, dict) else None
+                ev_metrics = ev.get("metrics") if isinstance(ev, dict) else {}
+                ev_score: float | None = None
+                if isinstance(ev_metrics, dict):
+                    raw_score = ev_metrics.get("evaluator_confidence") or ev_metrics.get("overall_score")
+                    if raw_score is not None:
+                        try:
+                            ev_score = float(raw_score)
+                        except (TypeError, ValueError):
+                            pass
+                return {
+                    "graph_run_id": final.get("graph_run_id"),
+                    "thread_id": final.get("thread_id"),
+                    "staging_snapshot_id": final.get("staging_snapshot_id"),
+                    "evaluator_status": ev_status,
+                    "evaluator_score": ev_score,
+                }
 
-            last_state = list(final_state.values())[-1] if final_state else {}
-            return {
-                "graph_run_id": last_state.get("graph_run_id"),
-                "thread_id": last_state.get("thread_id"),
-                "staging_snapshot_id": last_state.get("staging_snapshot_id"),
-                "evaluator_status": last_state.get("evaluator_status"),
-                "evaluator_score": last_state.get("evaluator_confidence"),
-            }
+            loop_ev = asyncio.get_event_loop()
+            return await loop_ev.run_in_executor(None, _sync_run)
 
-        result = await tick_loop(repo, loop, run_graph_fn=run_graph)
+        result = await tick_loop(repo, loop_record, run_graph_fn=_run_graph_for_loop)
         return {
             "status": "tick_completed",
             **result.to_dict(),
         }
 
     finally:
-        repo.release_loop_lock(loop.loop_id)
+        repo.release_loop_lock(loop_record.loop_id)
 
 
 @app.post("/orchestrator/loops/{loop_id}/pause")

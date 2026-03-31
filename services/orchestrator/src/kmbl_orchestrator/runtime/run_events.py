@@ -44,6 +44,12 @@ class RunEventType:
     DECISION_ITERATE = "decision_iterate"
     DECISION_STAGE = "decision_stage"
 
+    # Normalization observability
+    NORMALIZATION_RESCUE = "normalization_rescue"
+
+    # Identity feedback loop
+    IDENTITY_FEEDBACK_UPSERT = "identity_feedback_upsert"
+
 
 def append_graph_run_event(
     repo: Repository,

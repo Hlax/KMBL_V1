@@ -18,6 +18,10 @@ build/
 .pytest_cache/
 .ruff_cache/
 
+# Log files (never commit runtime logs)
+*.log
+logs/
+
 # Node
 node_modules/
 .next/

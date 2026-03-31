@@ -1,8 +1,6 @@
 """
 LangGraph application — minimal v1: thread → context → checkpoint → planner → generator
 → evaluator → decision → (iterate | staging | end).
-
-TODO: interrupt_node, publication_node, richer context compaction (docs/08 §8).
 """
 
 from __future__ import annotations
@@ -38,7 +36,10 @@ from kmbl_orchestrator.domain import (
 )
 from kmbl_orchestrator.errors import RoleInvocationFailed, StagingIntegrityFailed
 from kmbl_orchestrator.graph.state import GraphState
-from kmbl_orchestrator.identity.hydrate import build_planner_identity_context
+from kmbl_orchestrator.identity.hydrate import (
+    build_planner_identity_context,
+    upsert_identity_evolution_signal,
+)
 from kmbl_orchestrator.normalize import (
     normalize_evaluator_output,
     normalize_generator_output,
@@ -101,6 +102,25 @@ class GraphContext:
         self.repo = repo
         self.invoker = invoker
         self.settings = settings
+
+
+def build_graph_context(
+    settings: Settings,
+    repo: Repository,
+    invoker: DefaultRoleInvoker | None = None,
+) -> "GraphContext":
+    """Public factory: create a ``GraphContext`` from settings and repo."""
+    inv = invoker or DefaultRoleInvoker(settings=settings)
+    return GraphContext(repo, inv, settings)
+
+
+def get_compiled_graph(ctx: "GraphContext"):
+    """Public factory: compile and return the LangGraph graph for a given context.
+
+    The returned object supports both ``.invoke()`` (synchronous) and ``.ainvoke()``
+    / ``.astream()`` (async) — use the appropriate form depending on your call site.
+    """
+    return build_compiled_graph(ctx)
 
 
 def _save_checkpoint_with_event(
@@ -265,10 +285,19 @@ def build_compiled_graph(ctx: GraphContext):
         ws = ctx.repo.get_working_staging_for_thread(tid)
         ws_facts: dict[str, Any] | None = None
         user_rating_context: dict[str, Any] | None = None
-        
+
         if ws is not None:
             checkpoints = ctx.repo.list_staging_checkpoints(ws.working_staging_id, limit=5)
             latest_cp = checkpoints[0] if checkpoints else None
+
+            # Collect recent user ratings for trend signal
+            staging_snapshots = ctx.repo.list_staging_snapshots_for_thread(tid, limit=5)
+            recent_ratings = [
+                s.user_rating for s in staging_snapshots if s.user_rating is not None
+            ]
+            # Most-recent-first from DB → reverse so oldest→newest for trend calc
+            recent_ratings = list(reversed(recent_ratings))
+
             facts = build_working_staging_facts(
                 ws,
                 checkpoint_count=len(checkpoints),
@@ -276,11 +305,11 @@ def build_compiled_graph(ctx: GraphContext):
                 latest_checkpoint_trigger=latest_cp.trigger if latest_cp else None,
                 patches_since_rebuild=(ws.revision - (ws.last_rebuild_revision or 0)),
                 stagnation_count=ws.stagnation_count,
+                recent_user_ratings=recent_ratings if recent_ratings else None,
             )
             ws_facts = working_staging_facts_to_payload(facts)
-            
-            # Get latest staging snapshot for user rating context
-            staging_snapshots = ctx.repo.list_staging_snapshots_for_thread(tid, limit=1)
+
+            # Build user_rating_context from most recent rated snapshot
             if staging_snapshots:
                 latest_staging = staging_snapshots[0]
                 if latest_staging.user_rating is not None:
@@ -609,7 +638,7 @@ def build_compiled_graph(ctx: GraphContext):
             )
 
         ctx.repo.save_role_invocation(inv)
-        
+
         # Get identity_id from state for image generation context
         iid_raw = state.get("identity_id")
         identity_id: UUID | None = None
@@ -618,7 +647,7 @@ def build_compiled_graph(ctx: GraphContext):
                 identity_id = UUID(str(iid_raw))
             except (ValueError, TypeError):
                 pass
-        
+
         cand = normalize_generator_output(
             raw,
             thread_id=tid,
@@ -628,7 +657,24 @@ def build_compiled_graph(ctx: GraphContext):
             identity_id=identity_id,
             enable_image_generation=ctx.settings.habitat_image_generation_enabled,
         )
-        cand = cand.model_copy(update={"raw_payload_json": raw})
+        # Emit normalization rescue event when the normalizer had to recover
+        rescue_paths = (cand.raw_payload_json or {}).get("_normalization_rescues")
+        if rescue_paths:
+            append_graph_run_event(
+                ctx.repo,
+                gid,
+                RunEventType.NORMALIZATION_RESCUE,
+                {
+                    "rescue_paths": rescue_paths,
+                    "build_candidate_id": str(cand.build_candidate_id),
+                },
+                thread_id=tid,
+            )
+            _log.info(
+                "graph_run graph_run_id=%s normalization_rescues=%s",
+                gid,
+                rescue_paths,
+            )
         ctx.repo.save_build_candidate(cand)
         step_state = {
             **dict(state),
@@ -902,6 +948,15 @@ def build_compiled_graph(ctx: GraphContext):
         out: dict[str, Any] = {"decision": decision}
         if interrupt_reason:
             out["interrupt_reason"] = interrupt_reason
+
+        # Track pass_count for quality-based visibility (currently informational;
+        # enables future policy: "require N consecutive passes before staging").
+        current_pass_count = int(state.get("pass_count") or 0)
+        if status == "pass":
+            out["pass_count"] = current_pass_count + 1
+        else:
+            out["pass_count"] = 0
+
         if decision == "iterate":
             next_iteration = iteration + 1
             out["iteration_index"] = next_iteration
@@ -919,7 +974,12 @@ def build_compiled_graph(ctx: GraphContext):
             ctx.repo,
             gid,
             RunEventType.DECISION_MADE,
-            {"decision": decision, "interrupt_reason": interrupt_reason},
+            {
+                "decision": decision,
+                "interrupt_reason": interrupt_reason,
+                "pass_count": out["pass_count"],
+                "evaluation_status": status,
+            },
         )
         return out
 
@@ -1129,6 +1189,41 @@ def build_compiled_graph(ctx: GraphContext):
                 else None,
             },
         )
+
+        # --- Evaluator → identity feedback loop ---
+        # Upsert evaluation signals back into identity_profile so future planner
+        # invocations on the same identity receive richer context about what has
+        # and hasn't worked across runs.
+        if thread.identity_id is not None:
+            try:
+                upsert_identity_evolution_signal(
+                    ctx.repo,
+                    thread.identity_id,
+                    graph_run_id=gid,
+                    evaluation_status=ev.status,
+                    evaluation_summary=ev.summary or "",
+                    issue_count=len(ev.issues_json),
+                    staging_snapshot_id=ssid,
+                )
+                append_graph_run_event(
+                    ctx.repo,
+                    gid,
+                    RunEventType.IDENTITY_FEEDBACK_UPSERT,
+                    {
+                        "identity_id": str(thread.identity_id),
+                        "evaluation_status": ev.status,
+                        "issue_count": len(ev.issues_json),
+                        "staging_snapshot_id": str(ssid),
+                    },
+                    thread_id=tid,
+                )
+            except Exception as fb_exc:
+                _log.warning(
+                    "identity_feedback_upsert failed (non-fatal) identity_id=%s exc=%s",
+                    thread.identity_id,
+                    type(fb_exc).__name__,
+                )
+
         _log.info(
             "graph_run graph_run_id=%s stage=staging_done working_staging_id=%s mode=%s revision=%d snapshot_id=%s elapsed_ms=%.1f",
             gid, ws.working_staging_id, mode, ws.revision, ssid,

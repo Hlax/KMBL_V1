@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+import logging
+from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID, uuid4
 
 from kmbl_orchestrator.domain import IdentityProfileRecord, IdentitySourceRecord
 from kmbl_orchestrator.persistence.repository import Repository
+
+_log = logging.getLogger(__name__)
+
+# Max evolution signals to retain in identity_profile.facets_json
+_MAX_EVOLUTION_SIGNALS = 20
 
 DEFAULT_FALLBACK_PROFILE: dict[str, Any] = {
     "profile_summary": "Creative Architect — versatile digital creator with a modern aesthetic sensibility",
@@ -107,3 +114,79 @@ def persist_identity_from_seed(
     repo.upsert_identity_profile(profile)
 
     return iid
+
+
+def upsert_identity_evolution_signal(
+    repo: Repository,
+    identity_id: UUID,
+    *,
+    graph_run_id: UUID,
+    evaluation_status: str,
+    evaluation_summary: str,
+    issue_count: int,
+    user_rating: int | None = None,
+    user_feedback: str | None = None,
+    staging_snapshot_id: UUID | None = None,
+) -> None:
+    """Upsert a structured evaluation signal into identity_profile.facets_json.
+
+    This closes the evaluator→identity feedback loop so future planner invocations
+    receive a richer context reflecting what has/hasn't worked across prior runs.
+    Retains the most recent ``_MAX_EVOLUTION_SIGNALS`` entries.
+    """
+    profile = repo.get_identity_profile(identity_id)
+    facets: dict[str, Any] = dict(profile.facets_json) if profile else {}
+    signals: list[dict[str, Any]] = list(facets.get("evolution_signals") or [])
+
+    signal: dict[str, Any] = {
+        "graph_run_id": str(graph_run_id),
+        "evaluation_status": evaluation_status,
+        "evaluation_summary": evaluation_summary[:300] if evaluation_summary else "",
+        "issue_count": issue_count,
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if user_rating is not None:
+        signal["user_rating"] = user_rating
+    if user_feedback:
+        signal["user_feedback"] = user_feedback[:300]
+    if staging_snapshot_id:
+        signal["staging_snapshot_id"] = str(staging_snapshot_id)
+
+    signals.append(signal)
+    # Retain only the most recent N signals
+    signals = signals[-_MAX_EVOLUTION_SIGNALS:]
+    facets["evolution_signals"] = signals
+
+    # Derive a simple trend label the planner can use directly
+    recent_statuses = [s.get("evaluation_status", "fail") for s in signals[-5:]]
+    pass_count = sum(1 for s in recent_statuses if s == "pass")
+    partial_count = sum(1 for s in recent_statuses if s == "partial")
+    if pass_count >= 2:
+        facets["recent_quality_trend"] = "improving"
+    elif partial_count >= 3:
+        facets["recent_quality_trend"] = "partial_plateau"
+    elif recent_statuses.count("fail") >= 3:
+        facets["recent_quality_trend"] = "stuck"
+    else:
+        facets["recent_quality_trend"] = "mixed"
+
+    # Persist recent ratings trend
+    recent_ratings = [
+        s["user_rating"] for s in signals[-5:] if s.get("user_rating") is not None
+    ]
+    if recent_ratings:
+        facets["recent_user_ratings"] = recent_ratings
+
+    updated_profile = IdentityProfileRecord(
+        identity_id=identity_id,
+        profile_summary=profile.profile_summary if profile else None,
+        facets_json=facets,
+        open_questions_json=list(profile.open_questions_json) if profile else [],
+    )
+    repo.upsert_identity_profile(updated_profile)
+    _log.info(
+        "identity_evolution_signal upserted identity_id=%s status=%s trend=%s",
+        identity_id,
+        evaluation_status,
+        facets.get("recent_quality_trend", "unknown"),
+    )

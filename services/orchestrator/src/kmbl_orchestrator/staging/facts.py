@@ -83,6 +83,10 @@ class WorkingStagingFacts(BaseModel):
     # Set during multi-iteration loop to provide fresh context
     iteration_context: dict[str, Any] | None = None
 
+    # Rating trend derived from recent user ratings on this thread (improving/flat/declining/none)
+    rating_trend: str | None = None
+    recent_user_ratings: list[int] = Field(default_factory=list)
+
 
 def build_working_staging_facts(
     working_staging: WorkingStagingRecord | None,
@@ -98,6 +102,7 @@ def build_working_staging_facts(
     pressure_concerns: list[str] | None = None,
     patches_since_rebuild: int = 0,
     stagnation_count: int = 0,
+    recent_user_ratings: list[int] | None = None,
 ) -> WorkingStagingFacts:
     """Build structured facts from a working staging record and supplementary data."""
     if working_staging is None:
@@ -185,6 +190,12 @@ def build_working_staging_facts(
     can_patch = working_staging.revision > 0 and evaluator_status in ("pass", "partial", None)
     needs_rebuild = is_empty or evaluator_status == "fail"
 
+    # Derive a rating trend label from the supplied recent ratings
+    rating_trend: str | None = None
+    ratings: list[int] = recent_user_ratings or []
+    if len(ratings) >= 2:
+        rating_trend = _compute_rating_trend(ratings)
+
     return WorkingStagingFacts(
         working_staging_id=str(working_staging.working_staging_id),
         thread_id=str(working_staging.thread_id),
@@ -198,7 +209,29 @@ def build_working_staging_facts(
         is_empty=is_empty,
         can_patch=can_patch,
         needs_rebuild=needs_rebuild,
+        rating_trend=rating_trend,
+        recent_user_ratings=ratings[-5:],
     )
+
+
+def _compute_rating_trend(ratings: list[int]) -> str:
+    """Derive a trend label from a list of user ratings (1-5 scale).
+
+    Compares first-half average to second-half average.
+    """
+    if not ratings:
+        return "none"
+    if len(ratings) == 1:
+        return "none"
+    mid = len(ratings) // 2
+    first_avg = sum(ratings[:mid]) / mid
+    second_avg = sum(ratings[mid:]) / (len(ratings) - mid)
+    delta = second_avg - first_avg
+    if delta >= 0.5:
+        return "improving"
+    if delta <= -0.5:
+        return "declining"
+    return "flat"
 
 
 def working_staging_facts_to_payload(facts: WorkingStagingFacts) -> dict[str, Any]:

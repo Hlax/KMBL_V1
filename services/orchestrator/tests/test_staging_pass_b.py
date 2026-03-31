@@ -10,7 +10,10 @@ from fastapi.testclient import TestClient
 
 from kmbl_orchestrator.api.main import app, get_repo
 from kmbl_orchestrator.config import Settings, get_settings
-from kmbl_orchestrator.contracts.planner_normalize import normalize_build_spec_for_persistence
+from kmbl_orchestrator.contracts.planner_normalize import (
+    compact_planner_wire_output,
+    normalize_build_spec_for_persistence,
+)
 from kmbl_orchestrator.domain import (
     BuildCandidateRecord,
     BuildSpecRecord,
@@ -47,6 +50,33 @@ def test_normalize_build_spec_defaults_missing_type_title() -> None:
     assert out["type"] == "generic"
     assert out["title"] == "Untitled Build"
     assert set(missing) == {"type", "title"}
+
+
+def test_compact_planner_wire_output_caps_lists() -> None:
+    long_list = [f"criterion-{i}" for i in range(40)]
+    raw = {
+        "build_spec": {
+            "type": "static_frontend_file_v1",
+            "title": "T",
+            "identity_source": {
+                "url": "https://example.com/",
+                "profile_summary": "x" * 400,
+                "crawled_pages": [f"https://example.com/p{i}" for i in range(20)],
+                "image_refs": [f"https://img{i}.example/x.png" for i in range(20)],
+            },
+        },
+        "constraints": {},
+        "success_criteria": long_list,
+        "evaluation_targets": long_list,
+    }
+    out = compact_planner_wire_output(raw)
+    assert len(out["success_criteria"]) == 14
+    assert len(out["evaluation_targets"]) == 18
+    iso = out["build_spec"]["identity_source"]
+    assert len(iso["crawled_pages"]) == 6
+    assert len(iso["image_refs"]) == 8
+    assert len(iso["profile_summary"]) <= 240
+    assert out["_kmbl_planner_metadata"]["compact_wire_output"] is True
 
 
 def test_validate_generator_rejects_empty_payload() -> None:
@@ -106,7 +136,12 @@ def test_build_staging_snapshot_payload_deterministic() -> None:
     assert a["ids"]["thread_id"] == str(tid)
 
 
-def test_evaluator_fail_no_staging_snapshot_row() -> None:
+def test_evaluator_fail_stages_after_max_iterations() -> None:
+    """Evaluator fail iterates through max_iterations, then stages with fail status.
+
+    Generator-first principle: usable output always reaches staging so operators
+    can review it, even when the evaluator reports failure.
+    """
     class EvalAlwaysFail:
         def invoke_role(
             self,
@@ -156,16 +191,17 @@ def test_evaluator_fail_no_staging_snapshot_row() -> None:
         repo=repo,
         invoker=invoker,
         settings=settings,
-        initial={"thread_id": tid, "graph_run_id": gid, "event_input": {}},
+        initial={
+            "thread_id": tid,
+            "graph_run_id": gid,
+            "event_input": {},
+            "max_iterations": 1,
+        },
     )
-    assert final.get("staging_snapshot_id") is None
-    evs = repo.list_graph_run_events(UUID(gid), limit=50)
+    assert final.get("staging_snapshot_id") is not None
+    evs = repo.list_graph_run_events(UUID(gid), limit=80)
     types = [e.event_type for e in evs]
-    assert "staging_snapshot_blocked" in types
-    assert "staging_snapshot_created" not in types
-    blocked = next(e for e in evs if e.event_type == "staging_snapshot_blocked")
-    assert (blocked.payload_json or {}).get("reason") == "evaluator_not_pass"
-    assert (blocked.payload_json or {}).get("error_kind") == "staging_integrity"
+    assert "staging_snapshot_created" in types
 
 
 def test_stub_pass_creates_persisted_staging_snapshot() -> None:

@@ -7,6 +7,7 @@ TODO: interrupt_node, publication_node, richer context compaction (docs/08 §8).
 
 from __future__ import annotations
 
+import copy
 import logging
 import time
 from typing import Any, Literal, cast
@@ -26,9 +27,15 @@ from kmbl_orchestrator.contracts.persistence_validate import (
     validate_role_output_for_persistence,
 )
 from kmbl_orchestrator.contracts.planner_normalize import (
+    compact_planner_wire_output,
     normalize_build_spec_for_persistence,
 )
-from kmbl_orchestrator.domain import CheckpointRecord, GraphRunRecord, StagingSnapshotRecord
+from kmbl_orchestrator.domain import (
+    CheckpointRecord,
+    GraphRunRecord,
+    StagingSnapshotRecord,
+    WorkingStagingRecord,
+)
 from kmbl_orchestrator.errors import RoleInvocationFailed, StagingIntegrityFailed
 from kmbl_orchestrator.graph.state import GraphState
 from kmbl_orchestrator.identity.hydrate import build_planner_identity_context
@@ -43,9 +50,26 @@ from kmbl_orchestrator.normalize.gallery_strip_harness import (
 from kmbl_orchestrator.domain import ThreadRecord
 from kmbl_orchestrator.persistence.repository import Repository
 from kmbl_orchestrator.staging.build_snapshot import build_staging_snapshot_payload
+from kmbl_orchestrator.staging.duplicate_rejection import apply_duplicate_staging_rejection
 from kmbl_orchestrator.staging.integrity import (
     validate_generator_output_for_candidate,
     validate_preview_integrity,
+)
+from kmbl_orchestrator.staging.working_staging_ops import (
+    apply_generator_to_working_staging,
+    choose_update_mode,
+    choose_update_mode_with_pressure,
+    create_pre_rebuild_checkpoint,
+    create_staging_checkpoint,
+    should_auto_checkpoint,
+    should_auto_checkpoint_with_policy,
+)
+from kmbl_orchestrator.staging.facts import (
+    build_working_staging_facts,
+    working_staging_facts_to_payload,
+)
+from kmbl_orchestrator.staging.pressure import (
+    pressure_evaluation_to_event_payload,
 )
 from kmbl_orchestrator.roles.invoke import DefaultRoleInvoker
 from kmbl_orchestrator.runtime.kilo_model_routing import (
@@ -53,7 +77,10 @@ from kmbl_orchestrator.runtime.kilo_model_routing import (
     ImageRouteConfigurationError,
     select_generator_provider_config,
 )
+from kmbl_orchestrator.runtime.evaluation_surface_gate import apply_preview_surface_gate
+from kmbl_orchestrator.runtime.iteration_plan import build_iteration_plan_for_generator
 from kmbl_orchestrator.runtime.run_events import RunEventType, append_graph_run_event
+from kmbl_orchestrator.runtime.session_staging_links import merge_session_staging_into_event_input
 
 _log = logging.getLogger(__name__)
 
@@ -89,6 +116,7 @@ def _save_checkpoint_with_event(
             "checkpoint_kind": record.checkpoint_kind,
             "checkpoint_id": str(record.checkpoint_id),
         },
+        thread_id=record.thread_id,
     )
 
 
@@ -118,6 +146,59 @@ def _persist_invocation_failure(
     )
 
 
+def compute_evaluator_decision(
+    status: str,
+    iteration: int,
+    max_iterations: int,
+) -> tuple[Literal["stage", "iterate", "interrupt"], str | None]:
+    """Pure decision logic: maps evaluator status + iteration to a routing decision.
+
+    Returns (decision, interrupt_reason).
+
+    - pass: always stage (no retry needed)
+    - partial/fail: iterate if under max_iterations, otherwise stage
+    - blocked: interrupt (no staging)
+    """
+    if status == "pass":
+        return "stage", None
+    if status == "blocked":
+        return "interrupt", "evaluator_blocked"
+    if status in ("fail", "partial"):
+        if iteration < max_iterations:
+            return "iterate", None
+        return "stage", None
+    return "interrupt", "unknown_eval_status"
+
+
+def maybe_suppress_duplicate_staging(
+    decision: Literal["stage", "iterate", "interrupt"],
+    interrupt_reason: str | None,
+    status: str,
+    metrics: dict[str, Any] | None,
+) -> tuple[Literal["stage", "iterate", "interrupt"], str | None, bool]:
+    """After max iterations, fail+duplicate_rejection would otherwise stage a useless duplicate snapshot."""
+    m = metrics if isinstance(metrics, dict) else {}
+    if (
+        decision == "stage"
+        and status == "fail"
+        and m.get("duplicate_rejection") is True
+    ):
+        return "interrupt", "duplicate_output_after_max_iterations", True
+    return decision, interrupt_reason, False
+
+
+def _iteration_plan_extras_from_ws_facts(
+    ws_facts: dict[str, Any] | None,
+) -> tuple[int, str | None]:
+    if not ws_facts:
+        return 0, None
+    rh = ws_facts.get("revision_history") or {}
+    st = int(rh.get("stagnation_count") or 0)
+    ps = ws_facts.get("pressure_summary") or {}
+    rec = ps.get("recommendation") if isinstance(ps, dict) else None
+    return st, str(rec) if rec else None
+
+
 def build_compiled_graph(ctx: GraphContext):
     def thread_resolver(state: GraphState) -> dict[str, Any]:
         tid = state.get("thread_id") or _uuid()
@@ -133,11 +214,20 @@ def build_compiled_graph(ctx: GraphContext):
                 ic = {}
         else:
             ic = state.get("identity_context") or {}
+        gid = state.get("graph_run_id")
+        tid = state.get("thread_id")
+        ei = merge_session_staging_into_event_input(
+            ctx.settings,
+            state.get("event_input") if isinstance(state.get("event_input"), dict) else None,
+            graph_run_id=str(gid) if gid else None,
+            thread_id=str(tid) if tid else None,
+        )
         return {
             "identity_context": ic,
             "memory_context": state.get("memory_context") or {},
             "current_state": state.get("current_state") or {},
             "compacted_context": state.get("compacted_context") or {},
+            "event_input": ei,
         }
 
     def checkpoint_pre(state: GraphState) -> dict[str, Any]:
@@ -165,11 +255,54 @@ def build_compiled_graph(ctx: GraphContext):
             context_compaction_json=None,
         )
         _save_checkpoint_with_event(ctx, cp0)
-        append_graph_run_event(ctx.repo, gid, RunEventType.PLANNER_INVOCATION_STARTED, {})
+        append_graph_run_event(ctx.repo, gid, RunEventType.PLANNER_INVOCATION_STARTED, {}, thread_id=tid)
         _log.info(
             "graph_run graph_run_id=%s stage=planner_invocation_start elapsed_ms=0.0",
             gid,
         )
+
+        # Build working staging facts for planner's habitat strategy decision
+        ws = ctx.repo.get_working_staging_for_thread(tid)
+        ws_facts: dict[str, Any] | None = None
+        user_rating_context: dict[str, Any] | None = None
+        
+        if ws is not None:
+            checkpoints = ctx.repo.list_staging_checkpoints(ws.working_staging_id, limit=5)
+            latest_cp = checkpoints[0] if checkpoints else None
+            facts = build_working_staging_facts(
+                ws,
+                checkpoint_count=len(checkpoints),
+                latest_checkpoint_revision=latest_cp.revision_at_checkpoint if latest_cp else None,
+                latest_checkpoint_trigger=latest_cp.trigger if latest_cp else None,
+                patches_since_rebuild=(ws.revision - (ws.last_rebuild_revision or 0)),
+                stagnation_count=ws.stagnation_count,
+            )
+            ws_facts = working_staging_facts_to_payload(facts)
+            
+            # Get latest staging snapshot for user rating context
+            staging_snapshots = ctx.repo.list_staging_snapshots_for_thread(tid, limit=1)
+            if staging_snapshots:
+                latest_staging = staging_snapshots[0]
+                if latest_staging.user_rating is not None:
+                    user_rating_context = {
+                        "rating": latest_staging.user_rating,
+                        "feedback": latest_staging.user_feedback,
+                        "rated_at": latest_staging.rated_at,
+                    }
+
+        # Check for user interrupts from autonomous loop
+        user_interrupts: list[dict[str, Any]] = []
+        identity_id_str = state.get("identity_id")
+        if identity_id_str:
+            try:
+                loop = ctx.repo.get_autonomous_loop_for_identity(UUID(identity_id_str))
+                if loop and loop.exploration_directions:
+                    user_interrupts = [
+                        d for d in loop.exploration_directions
+                        if d.get("type") == "user_interrupt"
+                    ]
+            except Exception:
+                pass
 
         payload = {
             "thread_id": state["thread_id"],
@@ -177,6 +310,9 @@ def build_compiled_graph(ctx: GraphContext):
             "memory_context": state.get("memory_context") or {},
             "event_input": state.get("event_input") or {},
             "current_state_summary": state.get("current_state") or {},
+            "working_staging_facts": ws_facts,
+            "user_rating_context": user_rating_context,
+            "user_interrupts": user_interrupts if user_interrupts else None,
         }
         t_pl = time.perf_counter()
         inv, raw = ctx.invoker.invoke(
@@ -200,6 +336,7 @@ def build_compiled_graph(ctx: GraphContext):
                 thread_id=tid,
                 detail=raw,
             )
+        raw = compact_planner_wire_output(raw)
         if not isinstance(raw.get("build_spec"), dict):
             raw["build_spec"] = {}
         norm_bs, normalized_fields = normalize_build_spec_for_persistence(raw["build_spec"])
@@ -281,7 +418,7 @@ def build_compiled_graph(ctx: GraphContext):
             context_compaction_json=None,
         )
         _save_checkpoint_with_event(ctx, cp0)
-        append_graph_run_event(ctx.repo, gid, RunEventType.GENERATOR_INVOCATION_STARTED, {})
+        append_graph_run_event(ctx.repo, gid, RunEventType.GENERATOR_INVOCATION_STARTED, {}, thread_id=tid)
         _log.info(
             "graph_run graph_run_id=%s stage=generator_invocation_start elapsed_ms=0.0",
             gid,
@@ -291,12 +428,79 @@ def build_compiled_graph(ctx: GraphContext):
         feedback: Any = None
         if iteration > 0:
             feedback = state.get("evaluation_report")
+
+        ws = ctx.repo.get_working_staging_for_thread(tid)
+        ws_facts: dict[str, Any] | None = None
+
+        # On iteration > 0, build facts from the current build_candidate in state
+        # so generator sees fresh context from this run's candidate
+        ev_status = feedback.get("status") if isinstance(feedback, dict) else None
+        ev_issues = feedback.get("issues") if isinstance(feedback, dict) else None
+
+        if iteration > 0 and state.get("build_candidate"):
+            # Build facts from in-progress candidate (not stale DB state)
+            candidate = state.get("build_candidate") or {}
+            candidate_artifacts = candidate.get("artifact_outputs", [])
+            artifact_count = len(candidate_artifacts)
+            has_html = any(
+                a.get("artifact_type") == "static_file" and 
+                str(a.get("path", "")).endswith((".html", ".htm"))
+                for a in candidate_artifacts
+            )
+            facts = build_working_staging_facts(
+                ws,
+                checkpoint_count=0,
+                latest_checkpoint_revision=None,
+                latest_checkpoint_trigger=None,
+                evaluator_status=ev_status,
+                evaluator_issues=ev_issues,
+                patches_since_rebuild=iteration,
+                stagnation_count=(ws.stagnation_count if ws is not None else 0),
+            )
+            # Override with fresh candidate info
+            facts.artifact_inventory.total_count = artifact_count
+            facts.artifact_inventory.has_previewable_html = has_html
+            facts.iteration_context = {
+                "iteration_index": iteration,
+                "previous_status": ev_status,
+                "issue_count": len(ev_issues) if ev_issues else 0,
+            }
+            ws_facts = working_staging_facts_to_payload(facts)
+        elif ws is not None:
+            checkpoints = ctx.repo.list_staging_checkpoints(ws.working_staging_id, limit=5)
+            latest_cp = checkpoints[0] if checkpoints else None
+
+            facts = build_working_staging_facts(
+                ws,
+                checkpoint_count=len(checkpoints),
+                latest_checkpoint_revision=latest_cp.revision_at_checkpoint if latest_cp else None,
+                latest_checkpoint_trigger=latest_cp.trigger if latest_cp else None,
+                evaluator_status=ev_status,
+                evaluator_issues=ev_issues,
+                patches_since_rebuild=(ws.revision - (ws.last_rebuild_revision or 0)),
+                stagnation_count=ws.stagnation_count,
+            )
+            ws_facts = working_staging_facts_to_payload(facts)
+
+        st_plan, pr_plan = _iteration_plan_extras_from_ws_facts(ws_facts)
+        iteration_plan = (
+            build_iteration_plan_for_generator(
+                feedback,
+                stagnation_count=st_plan,
+                pressure_recommendation=pr_plan,
+            )
+            if iteration > 0 and isinstance(feedback, dict)
+            else None
+        )
+
         payload = {
             "thread_id": state["thread_id"],
             "build_spec": state.get("build_spec") or {},
             "current_working_state": state.get("current_state") or {},
             "iteration_feedback": feedback,
+            "iteration_plan": iteration_plan,
             "event_input": state.get("event_input") or {},
+            "working_staging_facts": ws_facts,
         }
         try:
             gen_key, routing_meta = select_generator_provider_config(
@@ -310,6 +514,36 @@ def build_compiled_graph(ctx: GraphContext):
                 phase="generator",
                 message=str(e),
                 pydantic_errors=None,
+            )
+            raise RoleInvocationFailed(
+                phase="generator",
+                graph_run_id=gid,
+                thread_id=tid,
+                detail=detail,
+            ) from e
+        except Exception as e:
+            # Catch any other routing configuration errors
+            _log.error(
+                "generator routing failed unexpectedly: exc_type=%s message=%s",
+                type(e).__name__,
+                str(e)[:200],
+            )
+            detail = contract_validation_failure(
+                phase="generator",
+                message=f"generator routing configuration error: {type(e).__name__}: {e!s}",
+                pydantic_errors=None,
+            )
+            append_graph_run_event(
+                ctx.repo,
+                gid,
+                RunEventType.CONTRACT_WARNING,
+                {
+                    "role": "generator",
+                    "phase": "routing_configuration",
+                    "error_type": type(e).__name__,
+                    "error_message": str(e)[:500],
+                },
+                thread_id=tid,
             )
             raise RoleInvocationFailed(
                 phase="generator",
@@ -359,33 +593,40 @@ def build_compiled_graph(ctx: GraphContext):
         try:
             validate_role_output_for_persistence("generator", raw)
         except (ValidationError, ValueError) as e:
-            pe = e.errors() if isinstance(e, ValidationError) else None
-            msg = (
-                "Persist-time validation failed"
-                if isinstance(e, ValidationError)
-                else str(e)
+            _log.warning(
+                "generator persist-time validation issue (non-fatal, normalization proceeds): %s", e,
             )
-            detail = contract_validation_failure(
-                phase="generator",
-                message=msg,
-                pydantic_errors=pe,
-            )
-            _persist_invocation_failure(
-                inv=inv,
-                raw_detail=detail,
-                phase="generator",
-                graph_run_id=gid,
+            append_graph_run_event(
+                ctx.repo,
+                gid,
+                RunEventType.CONTRACT_WARNING,
+                {
+                    "role": "generator",
+                    "phase": "persist_validation",
+                    "warning": str(e),
+                },
                 thread_id=tid,
-                repo=ctx.repo,
             )
 
         ctx.repo.save_role_invocation(inv)
+        
+        # Get identity_id from state for image generation context
+        iid_raw = state.get("identity_id")
+        identity_id: UUID | None = None
+        if iid_raw:
+            try:
+                identity_id = UUID(str(iid_raw))
+            except (ValueError, TypeError):
+                pass
+        
         cand = normalize_generator_output(
             raw,
             thread_id=tid,
             graph_run_id=gid,
             generator_invocation_id=inv.role_invocation_id,
             build_spec_id=UUID(bsid),
+            identity_id=identity_id,
+            enable_image_generation=ctx.settings.habitat_image_generation_enabled,
         )
         cand = cand.model_copy(update={"raw_payload_json": raw})
         ctx.repo.save_build_candidate(cand)
@@ -440,21 +681,61 @@ def build_compiled_graph(ctx: GraphContext):
             context_compaction_json=None,
         )
         _save_checkpoint_with_event(ctx, cp0)
-        append_graph_run_event(ctx.repo, gid, RunEventType.EVALUATOR_INVOCATION_STARTED, {})
+        append_graph_run_event(ctx.repo, gid, RunEventType.EVALUATOR_INVOCATION_STARTED, {}, thread_id=tid)
         _log.info(
             "graph_run graph_run_id=%s stage=evaluator_invocation_start elapsed_ms=0.0",
             gid,
         )
 
         spec = ctx.repo.get_build_spec(UUID(bsid))
-        success = spec.success_criteria_json if spec else []
-        targets = spec.evaluation_targets_json if spec else []
+        if spec is None:
+            raise RoleInvocationFailed(
+                phase="evaluator",
+                detail={
+                    "error_kind": "configuration_error",
+                    "message": f"build_spec not found for build_spec_id={bsid}",
+                },
+                thread_id=tid,
+            )
+        success = spec.success_criteria_json
+        targets = spec.evaluation_targets_json
+
+        ws = ctx.repo.get_working_staging_for_thread(tid)
+        ws_facts: dict[str, Any] | None = None
+        user_rating_context: dict[str, Any] | None = None
+        if ws is not None:
+            checkpoints = ctx.repo.list_staging_checkpoints(ws.working_staging_id, limit=5)
+            latest_cp = checkpoints[0] if checkpoints else None
+            facts = build_working_staging_facts(
+                ws,
+                checkpoint_count=len(checkpoints),
+                latest_checkpoint_revision=latest_cp.revision_at_checkpoint if latest_cp else None,
+                latest_checkpoint_trigger=latest_cp.trigger if latest_cp else None,
+                patches_since_rebuild=(ws.revision - (ws.last_rebuild_revision or 0)),
+                stagnation_count=ws.stagnation_count,
+            )
+            ws_facts = working_staging_facts_to_payload(facts)
+        
+        # Get user rating context for evaluator
+        staging_snapshots = ctx.repo.list_staging_snapshots_for_thread(tid, limit=5)
+        for snap in staging_snapshots:
+            if snap.user_rating is not None:
+                user_rating_context = {
+                    "rating": snap.user_rating,
+                    "feedback": snap.user_feedback,
+                    "rated_at": snap.rated_at,
+                    "from_staging_id": str(snap.staging_snapshot_id),
+                }
+                break
+
         payload = {
             "thread_id": state["thread_id"],
             "build_candidate": state.get("build_candidate") or {},
             "success_criteria": success,
             "evaluation_targets": targets,
             "iteration_hint": state.get("iteration_index", 0),
+            "working_staging_facts": ws_facts,
+            "user_rating_context": user_rating_context,
         }
         t_ev = time.perf_counter()
         inv, raw = ctx.invoker.invoke(
@@ -510,8 +791,40 @@ def build_compiled_graph(ctx: GraphContext):
             build_candidate_id=UUID(bcid),
         )
         bc_row = ctx.repo.get_build_candidate(UUID(bcid))
-        if bc_row is not None:
+        ev_input = state.get("event_input") or {}
+        is_static_vertical = (
+            ev_input.get("scenario", "").startswith("kmbl_identity_url_static")
+            or (ev_input.get("constraints") or {}).get("canonical_vertical") == "static_frontend_file_v1"
+        )
+        if bc_row is not None and not is_static_vertical:
             report = merge_gallery_strip_harness_checks(report, bc_row)
+        if bc_row is not None:
+            prev_ev_status = report.status
+            report = apply_duplicate_staging_rejection(
+                report,
+                bc=bc_row,
+                repo=ctx.repo,
+                thread_id=tid,
+                graph_run_id=gid,
+            )
+            if (
+                prev_ev_status != report.status
+                and report.metrics_json.get("duplicate_rejection")
+            ):
+                append_graph_run_event(
+                    ctx.repo,
+                    gid,
+                    RunEventType.CONTRACT_WARNING,
+                    {
+                        "kind": "duplicate_static_output",
+                        "previous_status": prev_ev_status,
+                        "duplicate_of_staging_snapshot_id": report.metrics_json.get(
+                            "duplicate_of_staging_snapshot_id"
+                        ),
+                    },
+                    thread_id=tid,
+                )
+        report = apply_preview_surface_gate(report, is_static_vertical=is_static_vertical)
         report = report.model_copy(update={"raw_payload_json": raw})
         ctx.repo.save_evaluation_report(report)
         step_state = {
@@ -552,26 +865,29 @@ def build_compiled_graph(ctx: GraphContext):
         ev = state.get("evaluation_report") or {}
         status = ev.get("status", "fail")
         iteration = int(state.get("iteration_index", 0))
-        max_iter = int(state.get("max_iterations", 3))
+        max_iter = int(state.get("max_iterations", ctx.settings.graph_max_iterations_default))
 
-        decision: Literal["stage", "iterate", "interrupt"]
-        interrupt_reason: str | None = None
-        if status == "pass":
-            decision = "stage"
-        elif status == "blocked":
-            decision = "interrupt"
-            interrupt_reason = "evaluator_blocked"
-        elif status in ("fail", "partial"):
-            if iteration < max_iter:
-                decision = "iterate"
-            else:
-                decision = "interrupt"
-                interrupt_reason = "max_iterations"
-        else:
-            decision = "interrupt"
-            interrupt_reason = "unknown_eval_status"
+        decision, interrupt_reason = compute_evaluator_decision(
+            status, iteration, max_iter
+        )
 
-        if status != "pass":
+        metrics = ev.get("metrics") if isinstance(ev.get("metrics"), dict) else {}
+        decision, interrupt_reason, dup_suppressed = maybe_suppress_duplicate_staging(
+            decision, interrupt_reason, status, metrics
+        )
+        if dup_suppressed:
+            append_graph_run_event(
+                ctx.repo,
+                gid,
+                RunEventType.CONTRACT_WARNING,
+                {
+                    "kind": "duplicate_staging_suppressed",
+                    "message": "Evaluation still duplicate vs prior staging; skipping snapshot",
+                },
+                thread_id=UUID(state["thread_id"]),
+            )
+
+        if status not in ("pass", "partial"):
             append_graph_run_event(
                 ctx.repo,
                 gid,
@@ -584,10 +900,21 @@ def build_compiled_graph(ctx: GraphContext):
             )
 
         out: dict[str, Any] = {"decision": decision}
-        if decision == "iterate":
-            out["iteration_index"] = iteration + 1
         if interrupt_reason:
             out["interrupt_reason"] = interrupt_reason
+        if decision == "iterate":
+            next_iteration = iteration + 1
+            out["iteration_index"] = next_iteration
+            append_graph_run_event(
+                ctx.repo,
+                gid,
+                RunEventType.ITERATION_STARTED,
+                {
+                    "iteration_index": next_iteration,
+                    "previous_status": status,
+                    "max_iterations": max_iter,
+                },
+            )
         append_graph_run_event(
             ctx.repo,
             gid,
@@ -623,7 +950,7 @@ def build_compiled_graph(ctx: GraphContext):
                     "evaluation_report_id": erid_s,
                 },
             )
-        if ev.status != "pass":
+        if ev.status not in ("pass", "partial", "fail"):
             append_graph_run_event(
                 ctx.repo,
                 gid,
@@ -638,7 +965,7 @@ def build_compiled_graph(ctx: GraphContext):
                 graph_run_id=gid,
                 thread_id=tid,
                 reason="staging_integrity",
-                message="evaluation_report.status must be pass before staging snapshot",
+                message="evaluation_report.status must be pass, partial, or fail to stage (blocked is not stageable)",
                 detail={"evaluation_status": ev.status},
             )
         try:
@@ -671,16 +998,106 @@ def build_compiled_graph(ctx: GraphContext):
                 detail={"thread_id": str(tid)},
             )
         spec = ctx.repo.get_build_spec(UUID(bsid_s))
+        t_st = time.perf_counter()
+
+        # --- Working staging path (primary) ---
+        ws = ctx.repo.get_working_staging_for_thread(tid)
+
+        mode, pressure_eval, mode_reason = choose_update_mode_with_pressure(
+            ws, ev.status, evaluation_issue_count=len(ev.issues_json)
+        )
+
+        if ws is None:
+            ws = WorkingStagingRecord(
+                working_staging_id=uuid4(),
+                thread_id=tid,
+                identity_id=thread.identity_id,
+            )
+
+        before_snapshot = copy.deepcopy(ws)
+
+        pressure_score = pressure_eval.pressure_score if pressure_eval else 0.0
+        if mode == "rebuild" and ws.revision > 0:
+            pre_cp = create_pre_rebuild_checkpoint(
+                ws, source_graph_run_id=gid, pressure_score=pressure_score,
+            )
+            if pre_cp:
+                ctx.repo.save_staging_checkpoint(pre_cp)
+                ws.current_checkpoint_id = pre_cp.staging_checkpoint_id
+                append_graph_run_event(
+                    ctx.repo, gid,
+                    RunEventType.WORKING_STAGING_CHECKPOINT_CREATED,
+                    {
+                        "staging_checkpoint_id": str(pre_cp.staging_checkpoint_id),
+                        "trigger": pre_cp.trigger,
+                        "reason_category": pre_cp.reason_category,
+                    },
+                )
+
+        ws = apply_generator_to_working_staging(
+            working_staging=ws,
+            build_candidate=bc,
+            evaluation_report=ev,
+            build_spec=spec,
+            mode=mode,
+            mode_reason_category=mode_reason,
+            pressure_evaluation=pressure_eval,
+        )
+
+        trigger, reason = should_auto_checkpoint_with_policy(
+            before_snapshot, ws, mode, pressure_score=pressure_score,
+        )
+        if trigger:
+            post_cp = create_staging_checkpoint(
+                ws, trigger=trigger, source_graph_run_id=gid, reason=reason,
+            )
+            ctx.repo.save_staging_checkpoint(post_cp)
+            ws.current_checkpoint_id = post_cp.staging_checkpoint_id
+            append_graph_run_event(
+                ctx.repo, gid,
+                RunEventType.WORKING_STAGING_CHECKPOINT_CREATED,
+                {
+                    "staging_checkpoint_id": str(post_cp.staging_checkpoint_id),
+                    "trigger": trigger,
+                    "reason_category": reason.category if reason else None,
+                },
+            )
+
+        ctx.repo.save_working_staging(ws)
+
+        event_payload: dict[str, Any] = {
+            "working_staging_id": str(ws.working_staging_id),
+            "mode": mode,
+            "mode_reason": mode_reason,
+            "revision": ws.revision,
+            "status": ws.status,
+            "thread_id": str(tid),
+            "build_candidate_id": str(bc.build_candidate_id),
+            "stagnation_count": ws.stagnation_count,
+        }
+        if pressure_eval:
+            event_payload["pressure"] = pressure_evaluation_to_event_payload(pressure_eval)
+        if ws.last_revision_summary_json:
+            event_payload["revision_summary"] = ws.last_revision_summary_json
+
+        append_graph_run_event(
+            ctx.repo, gid,
+            RunEventType.WORKING_STAGING_UPDATED,
+            event_payload,
+        )
+
+        # --- Legacy snapshot path (backward compat) ---
+        prior_on_thread = ctx.repo.list_staging_snapshots_for_thread(tid, limit=1)
+        prior_staging_id: UUID | None = (
+            prior_on_thread[0].staging_snapshot_id if prior_on_thread else None
+        )
+
         payload = build_staging_snapshot_payload(
             build_candidate=bc,
             evaluation_report=ev,
             thread=thread,
             build_spec=spec,
-        )
-        t_st = time.perf_counter()
-        _log.info(
-            "graph_run graph_run_id=%s stage=staging_snapshot_creation_start elapsed_ms=0.0",
-            gid,
+            prior_staging_snapshot_id=prior_staging_id,
         )
         ssid = uuid4()
         snap = StagingSnapshotRecord(
@@ -689,6 +1106,7 @@ def build_compiled_graph(ctx: GraphContext):
             build_candidate_id=bc.build_candidate_id,
             graph_run_id=bc.graph_run_id,
             identity_id=thread.identity_id,
+            prior_staging_snapshot_id=prior_staging_id,
             snapshot_payload_json=payload,
             preview_url=bc.preview_url,
             status="review_ready",
@@ -706,15 +1124,21 @@ def build_compiled_graph(ctx: GraphContext):
                 "reason": "snapshot_persisted",
                 "review_ready": True,
                 "preview_url": bc.preview_url,
+                "prior_staging_snapshot_id": str(prior_staging_id)
+                if prior_staging_id is not None
+                else None,
             },
         )
         _log.info(
-            "graph_run graph_run_id=%s stage=staging_snapshot_creation_done staging_snapshot_id=%s elapsed_ms=%.1f",
-            gid,
-            ssid,
+            "graph_run graph_run_id=%s stage=staging_done working_staging_id=%s mode=%s revision=%d snapshot_id=%s elapsed_ms=%.1f",
+            gid, ws.working_staging_id, mode, ws.revision, ssid,
             (time.perf_counter() - t_st) * 1000,
         )
-        return {"staging_snapshot_id": str(ssid), "status": "completed"}
+        return {
+            "staging_snapshot_id": str(ssid),
+            "working_staging_id": str(ws.working_staging_id),
+            "status": "completed",
+        }
 
     def route_after_decision(state: GraphState) -> str:
         d = state.get("decision")
@@ -778,7 +1202,7 @@ def run_graph(
     app = build_compiled_graph(ctx)
     base: GraphState = {
         "iteration_index": 0,
-        "max_iterations": 3,
+        "max_iterations": settings.graph_max_iterations_default,
         "trigger_type": "prompt",
         "event_input": {},
     }
@@ -910,31 +1334,60 @@ def run_graph(
                 datetime.now(timezone.utc).isoformat(),
             )
         raise
+
+    # --- Post-invoke success path (wrapped for resilience) ---
     assert isinstance(final, dict)
     gid = final.get("graph_run_id")
     if gid:
         tid_s = final.get("thread_id")
-        if tid_s:
-            gid_u = UUID(gid)
-            post = CheckpointRecord(
-                checkpoint_id=uuid4(),
-                thread_id=UUID(tid_s),
-                graph_run_id=gid_u,
-                checkpoint_kind="post_role",
-                state_json=dict(final),
-                context_compaction_json=None,
+        gid_u = UUID(gid)
+        tid_u = UUID(tid_s) if tid_s else None
+        try:
+            if tid_s:
+                post = CheckpointRecord(
+                    checkpoint_id=uuid4(),
+                    thread_id=UUID(tid_s),
+                    graph_run_id=gid_u,
+                    checkpoint_kind="post_role",
+                    state_json=dict(final),
+                    context_compaction_json=None,
+                )
+                _save_checkpoint_with_event(ctx, post)
+                repo.update_thread_current_checkpoint(UUID(tid_s), post.checkpoint_id)
+            ended = datetime.now(timezone.utc).isoformat()
+            repo.update_graph_run_status(gid_u, "completed", ended)
+            repo.attach_run_snapshot(gid_u, dict(final))
+            append_graph_run_event(
+                repo,
+                gid_u,
+                RunEventType.GRAPH_RUN_COMPLETED,
+                {},
+                thread_id=tid_u,
             )
-            _save_checkpoint_with_event(ctx, post)
-            repo.update_thread_current_checkpoint(UUID(tid_s), post.checkpoint_id)
-        ended = datetime.now(timezone.utc).isoformat()
-        repo.update_graph_run_status(UUID(gid), "completed", ended)
-        repo.attach_run_snapshot(UUID(gid), dict(final))
-        append_graph_run_event(
-            repo,
-            UUID(gid),
-            RunEventType.GRAPH_RUN_COMPLETED,
-            {},
-        )
+        except Exception as post_exc:
+            _log.exception(
+                "run_graph post-invoke persistence failed graph_run_id=%s exc=%s",
+                gid,
+                type(post_exc).__name__,
+            )
+            append_graph_run_event(
+                repo,
+                gid_u,
+                RunEventType.POST_INVOKE_FAILURE,
+                {"error": f"{type(post_exc).__name__}: {post_exc}"},
+                thread_id=tid_u,
+            )
+            try:
+                repo.update_graph_run_status(
+                    gid_u,
+                    "failed",
+                    datetime.now(timezone.utc).isoformat(),
+                )
+            except Exception:
+                _log.exception(
+                    "run_graph failed to mark run as failed graph_run_id=%s", gid
+                )
+            raise
     _log.info(
         "run_graph graph_run_id=%s stage=response_returning elapsed_ms=%.1f",
         final.get("graph_run_id", gid0),
@@ -981,7 +1434,7 @@ def persist_graph_run_start(
         status="running",
     )
     repo.save_graph_run(gr)
-    append_graph_run_event(repo, UUID(gid), RunEventType.GRAPH_RUN_STARTED, {})
+    append_graph_run_event(repo, UUID(gid), RunEventType.GRAPH_RUN_STARTED, {}, thread_id=tid_u)
     _log.info(
         "persist_graph_run_start graph_run_id=%s thread_id=%s stage=graph_run_persisted elapsed_ms=%.1f",
         gid,

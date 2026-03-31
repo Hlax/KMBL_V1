@@ -11,10 +11,13 @@ simple HTML/CSS/JS bundles.
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+_log = logging.getLogger(__name__)
 
 _PATH_RE = re.compile(
     r"^component/(?:[a-zA-Z0-9][a-zA-Z0-9_-]*/)*[a-zA-Z0-9][a-zA-Z0-9_-]*\.(html|css|js)$"
@@ -37,7 +40,7 @@ def _infer_language_from_path(path: str) -> Literal["html", "css", "js"]:
 class StaticFrontendFileArtifactV1(BaseModel):
     """One static file in a simple multi-file UI bundle."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     role: Literal["static_frontend_file_v1"]
     path: str = Field(min_length=1, max_length=512)
@@ -53,6 +56,11 @@ class StaticFrontendFileArtifactV1(BaseModel):
         if not isinstance(data, dict):
             return data
         d = dict(data)
+        # Map common aliases to canonical field names
+        if d.get("path") is None and d.get("file_path") is not None:
+            d["path"] = d.pop("file_path")
+        if d.get("path") is None and d.get("file") is not None:
+            d["path"] = d.pop("file")
         if isinstance(d.get("path"), str):
             d["path"] = d["path"].strip().replace("\\", "/")
         bid = d.get("bundle_id")
@@ -98,20 +106,33 @@ def normalize_static_frontend_artifact_outputs_list(seq: list[Any]) -> list[Any]
     """
     Validate ``static_frontend_file_v1`` dicts; pass through other entries unchanged.
 
-    Raises ``ValueError`` on duplicate paths, invalid bundle preview flags, or bad rows.
+    Skips malformed static rows with a warning rather than crashing the entire
+    normalization pipeline.  Duplicate paths keep the first occurrence.
+    Multiple ``entry_for_preview`` flags per bundle are resolved by keeping only
+    the first.
     """
     out: list[Any] = []
     static_paths: set[str] = set()
-    # bundle_id -> list of (path, entry_for_preview)
     by_bundle: dict[str | None, list[tuple[str, bool]]] = {}
 
     for item in seq:
         if isinstance(item, dict) and item.get("role") == "static_frontend_file_v1":
-            model = StaticFrontendFileArtifactV1.model_validate(item)
+            try:
+                model = StaticFrontendFileArtifactV1.model_validate(item)
+            except Exception as exc:
+                _log.warning(
+                    "static_frontend_file_v1 row skipped (validation): %s — %s",
+                    item.get("path", "<no path>"),
+                    exc,
+                )
+                continue
             dumped = model.model_dump(mode="json")
             path = str(dumped["path"])
             if path in static_paths:
-                raise ValueError(f"duplicate static_frontend_file_v1 path: {path!r}")
+                _log.warning(
+                    "static_frontend_file_v1 duplicate path skipped: %s", path,
+                )
+                continue
             static_paths.add(path)
             bid = dumped.get("bundle_id")
             bkey: str | None = bid if isinstance(bid, str) else None
@@ -123,18 +144,24 @@ def normalize_static_frontend_artifact_outputs_list(seq: list[Any]) -> list[Any]
     for bkey, rows in by_bundle.items():
         entries = [p for p, e in rows if e]
         if len(entries) > 1:
-            label = "default" if bkey is None else repr(bkey)
-            raise ValueError(
-                f"at most one entry_for_preview per bundle ({label}), got: {entries!r}"
+            _log.warning(
+                "multiple entry_for_preview in bundle %s — keeping first: %s",
+                "default" if bkey is None else repr(bkey),
+                entries,
             )
 
     return out
 
 
 def normalize_combined_artifact_outputs_list(raw: Any) -> list[Any]:
-    """Gallery normalization first (image roles), then static front-end file roles."""
+    """
+    Combined normalization pipeline for all artifact types.
+    
+    Order: gallery images → universal images → static frontend files
+    """
     gal = _gallery_normalize(raw)
-    return normalize_static_frontend_artifact_outputs_list(gal)
+    img = _image_artifact_normalize(gal)
+    return normalize_static_frontend_artifact_outputs_list(img)
 
 
 def _gallery_normalize(raw: Any) -> list[Any]:
@@ -143,3 +170,11 @@ def _gallery_normalize(raw: Any) -> list[Any]:
     )
 
     return normalize_gallery_artifact_outputs_list(raw)
+
+
+def _image_artifact_normalize(raw: list[Any]) -> list[Any]:
+    from kmbl_orchestrator.contracts.image_artifact_v1 import (
+        normalize_image_artifact_outputs_list,
+    )
+
+    return normalize_image_artifact_outputs_list(raw)

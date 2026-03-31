@@ -96,7 +96,14 @@ KMBL waits on a **single HTTP response** with bounded read timeout. **Minimize w
 
 ## Input
 
-Structured payload from **KMBL** via the gateway — **thread_id**, **build_spec**, **current_working_state**, **iteration_feedback**, **event_input** — see **USER.md**.
+Structured payload from **KMBL** via the gateway. Two formats:
+
+1. **Generator-routed** (gallery strips): **thread_id**, **build_spec**, **current_working_state**, **iteration_feedback**, **event_input** — and when iterating, optional **iteration_plan** (same orchestrator hints as **kmbl-generator**).
+2. **Habitat assembly** (single images): **prompt**, **style**, **size**, **key**, **context** (placement, alt), optional **identity_id**
+
+**Iteration (exploratory retries):** When **`iteration_feedback`** is non-null, it is the **prior evaluator report** for this graph run (**status**, **summary**, **issues**, **metrics**). Use it to **change prompts, keys, or composition** — do not repeat the same failed approach when **issues** or **metrics** flag bad linkage, missing slots, or policy failures. A prior **`pass`** or **`partial`** on image checks means **preserve** working URLs/slots unless **issues** ask for replacement.
+
+See **USER.md** for payload examples and expected response formats.
 
 ---
 

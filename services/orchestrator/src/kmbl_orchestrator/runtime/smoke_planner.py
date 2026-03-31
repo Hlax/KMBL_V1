@@ -18,7 +18,10 @@ from pydantic import ValidationError
 from kmbl_orchestrator.config import Settings
 from kmbl_orchestrator.contracts.normalized_errors import contract_validation_failure
 from kmbl_orchestrator.contracts.persistence_validate import validate_role_output_for_persistence
-from kmbl_orchestrator.contracts.planner_normalize import normalize_build_spec_for_persistence
+from kmbl_orchestrator.contracts.planner_normalize import (
+    compact_planner_wire_output,
+    normalize_build_spec_for_persistence,
+)
 from kmbl_orchestrator.domain import CheckpointRecord
 from kmbl_orchestrator.identity.hydrate import build_planner_identity_context
 from kmbl_orchestrator.normalize import normalize_planner_output
@@ -97,6 +100,7 @@ def run_smoke_planner_only(
         )
         return
 
+    raw = compact_planner_wire_output(raw)
     if not isinstance(raw.get("build_spec"), dict):
         raw["build_spec"] = {}
     norm_bs, normalized_fields = normalize_build_spec_for_persistence(raw["build_spec"])

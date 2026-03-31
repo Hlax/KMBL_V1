@@ -60,3 +60,13 @@ def validate_publication_eligibility(staging: StagingSnapshotRecord) -> None:
             "invalid_payload",
             "persisted staging payload is missing required v1 fields",
         )
+
+    # Check evaluator status - block publication of failed builds
+    ev = p.get("evaluation")
+    if isinstance(ev, dict):
+        ev_status = ev.get("status")
+        if ev_status in ("fail", "blocked"):
+            raise PublicationIneligible(
+                "evaluator_not_pass",
+                f"cannot publish snapshot with evaluator status '{ev_status}'",
+            )

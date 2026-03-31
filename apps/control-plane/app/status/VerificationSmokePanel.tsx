@@ -82,13 +82,21 @@ export function VerificationSmokePanel() {
   const [imageRow, setImageRow] = useState(() =>
     emptyRow("Image artifact path", "seeded_gallery_strip_v1"),
   );
-  const [busy, setBusy] = useState<"static" | "image" | null>(null);
+  const [identityRow, setIdentityRow] = useState(() =>
+    emptyRow("Identity URL vertical", "identity_url_static_v1"),
+  );
+  const [identityUrl, setIdentityUrl] = useState("");
+  const [busy, setBusy] = useState<"static" | "image" | "identity" | null>(null);
 
   const runOne = useCallback(
-    async (kind: "static" | "image") => {
+    async (kind: "static" | "image" | "identity", urlForIdentity?: string) => {
       const preset =
-        kind === "static" ? "seeded_local_v1" : "seeded_gallery_strip_v1";
-      const setRow = kind === "static" ? setStaticRow : setImageRow;
+        kind === "static" 
+          ? "seeded_local_v1" 
+          : kind === "image"
+          ? "seeded_gallery_strip_v1"
+          : "identity_url_static_v1";
+      const setRow = kind === "static" ? setStaticRow : kind === "image" ? setImageRow : setIdentityRow;
       setBusy(kind);
       setRow((r) => ({
         ...emptyRow(r.label, r.preset),
@@ -100,10 +108,14 @@ export function VerificationSmokePanel() {
       let graphRunId: string | null = null;
 
       try {
+        const body = kind === "identity" && urlForIdentity
+          ? { scenario_preset: preset, identity_url: urlForIdentity }
+          : { scenario_preset: preset };
+        
         const startRes = await fetch("/api/orchestrator/runs/start", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ scenario_preset: preset }),
+          body: JSON.stringify(body),
         });
         const startWrap = (await startRes.json()) as {
           ok?: boolean;
@@ -173,7 +185,9 @@ export function VerificationSmokePanel() {
             note:
               kind === "static"
                 ? "Seeded local runs do not guarantee static_frontend_file_v1; generator must emit static artifacts for preview HTML."
-                : "Gallery strip runs normally produce a staging row when the graph completes staging.",
+                : kind === "image"
+                ? "Gallery strip runs normally produce a staging row when the graph completes staging."
+                : "Identity URL runs extract signals and generate a static page reflecting the source identity.",
           }));
           return;
         }
@@ -224,9 +238,13 @@ export function VerificationSmokePanel() {
               ? hasPrev
                 ? "has_previewable_html: open static preview below"
                 : "No previewable static bundle yet — static preview URL may 404 until generator emits static_frontend_file_v1"
-              : hasG
+              : kind === "image"
+              ? hasG
                 ? "Gallery strip present — review staging for image artifacts"
-                : "Staging exists but no gallery strip in payload (check generator output)",
+                : "Staging exists but no gallery strip in payload (check generator output)"
+              : hasPrev
+                ? "Identity page generated — open static preview to see the result"
+                : "Identity extraction complete, but no previewable HTML generated",
         }));
       } catch (e) {
         setRow((r) => ({
@@ -393,6 +411,138 @@ export function VerificationSmokePanel() {
       </p>
       {renderRow(staticRow, "static")}
       {renderRow(imageRow, "image")}
+      
+      {/* Identity URL vertical */}
+      <div
+        style={{
+          border: "1px solid #2a2a33",
+          borderRadius: 6,
+          padding: "0.75rem 1rem",
+          marginBottom: "0.75rem",
+          background: "#12121a",
+        }}
+      >
+        <div style={{ fontWeight: 600, marginBottom: "0.35rem" }}>Identity URL → Static Frontend</div>
+        <p className="muted" style={{ fontSize: "0.82rem", margin: "0 0 0.5rem" }}>
+          Enter a website URL. KMBL extracts identity signals (name, bio, tone, aesthetic) and generates
+          a static page reflecting that identity. This is the canonical v1 vertical.
+        </p>
+        <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.5rem", alignItems: "center" }}>
+          <input
+            type="url"
+            placeholder="https://example.com"
+            value={identityUrl}
+            onChange={(e) => setIdentityUrl(e.target.value)}
+            disabled={busy !== null}
+            style={{
+              flex: 1,
+              padding: "0.5rem 0.75rem",
+              borderRadius: 4,
+              border: "1px solid #3a3a44",
+              background: "#1a1a24",
+              color: "#e0e0e0",
+              fontSize: "0.9rem",
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => void runOne("identity", identityUrl)}
+            disabled={busy !== null || !identityUrl.trim()}
+            style={{ whiteSpace: "nowrap" }}
+          >
+            {busy === "identity" ? (
+              <span className="cp-loading-line">
+                <span className="cp-spinner" aria-hidden />
+                Running…
+              </span>
+            ) : (
+              "Run identity vertical"
+            )}
+          </button>
+        </div>
+        {busy === "identity" && (identityRow.phase === "polling" || identityRow.phase === "detail") && (
+          <p className="muted small" style={{ marginTop: "-0.25rem", marginBottom: "0.35rem" }}>
+            Extracting identity, running planner → generator → evaluator, then loading staging…
+          </p>
+        )}
+        <dl className="debug-kv" style={{ marginTop: "0.5rem", fontSize: "0.85rem" }}>
+          <dt>state</dt>
+          <dd>
+            <code>{identityRow.phase}</code>
+            {identityRow.runStatus ? (
+              <>
+                {" "}
+                · run <code>{identityRow.runStatus}</code>
+              </>
+            ) : null}
+          </dd>
+          {identityRow.graphRunId && (
+            <>
+              <dt>graph_run_id</dt>
+              <dd>
+                <Link href={`/runs/${encodeURIComponent(identityRow.graphRunId)}`} className="mono">
+                  {identityRow.graphRunId}
+                </Link>
+              </dd>
+            </>
+          )}
+          {identityRow.stagingSnapshotId && (
+            <>
+              <dt>staging_snapshot_id</dt>
+              <dd className="mono">{identityRow.stagingSnapshotId}</dd>
+            </>
+          )}
+          {identityRow.contentKind != null && (
+            <>
+              <dt>content_kind</dt>
+              <dd>{identityRow.contentKind}</dd>
+            </>
+          )}
+          {identityRow.hasStaticFrontend != null && (
+            <>
+              <dt>has_static_frontend</dt>
+              <dd>{identityRow.hasStaticFrontend ? "yes" : "no"}</dd>
+            </>
+          )}
+          {identityRow.staticFileCount != null && (
+            <>
+              <dt>static_frontend_file_count</dt>
+              <dd>{identityRow.staticFileCount}</dd>
+            </>
+          )}
+          {identityRow.hasPreviewableHtml != null && (
+            <>
+              <dt>has_previewable_html</dt>
+              <dd>{identityRow.hasPreviewableHtml ? "yes" : "no"}</dd>
+            </>
+          )}
+        </dl>
+        {identityRow.error && (
+          <p role="alert" style={{ color: "#f87171", fontSize: "0.88rem", marginTop: "0.5rem" }}>
+            {identityRow.error}
+          </p>
+        )}
+        {identityRow.note && (
+          <p className="muted" style={{ fontSize: "0.82rem", marginTop: "0.35rem" }}>
+            {identityRow.note}
+          </p>
+        )}
+        {identityRow.stagingSnapshotId && (
+          <p style={{ fontSize: "0.88rem", marginTop: "0.5rem" }}>
+            <Link href={`/review/staging/${encodeURIComponent(identityRow.stagingSnapshotId)}`}>
+              Staging review
+            </Link>
+            {" · "}
+            <a
+              href={`/api/staging/${encodeURIComponent(identityRow.stagingSnapshotId)}/static-preview`}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Static preview (new tab)
+            </a>
+          </p>
+        )}
+      </div>
     </section>
   );
 }

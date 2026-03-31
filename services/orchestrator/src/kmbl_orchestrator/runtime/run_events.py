@@ -27,7 +27,22 @@ class RunEventType:
     STAGING_SNAPSHOT_APPROVED = "staging_snapshot_approved"
     STAGING_SNAPSHOT_UNAPPROVED = "staging_snapshot_unapproved"
     STAGING_SNAPSHOT_REJECTED = "staging_snapshot_rejected"
+    STAGING_SNAPSHOT_RATED = "staging_snapshot_rated"
     PUBLICATION_SNAPSHOT_CREATED = "publication_snapshot_created"
+    WORKING_STAGING_UPDATED = "working_staging_updated"
+    WORKING_STAGING_CHECKPOINT_CREATED = "working_staging_checkpoint_created"
+    WORKING_STAGING_ROLLBACK = "working_staging_rollback"
+
+    # Hardening events
+    KILOCLAW_RETRY = "kiloclaw_retry"
+    CONTRACT_WARNING = "contract_warning"
+    PERSISTENCE_RETRY = "persistence_retry"
+    POST_INVOKE_FAILURE = "post_invoke_failure"
+
+    # Iteration events
+    ITERATION_STARTED = "iteration_started"
+    DECISION_ITERATE = "decision_iterate"
+    DECISION_STAGE = "decision_stage"
 
 
 def append_graph_run_event(
@@ -35,11 +50,14 @@ def append_graph_run_event(
     graph_run_id: UUID,
     event_type: str,
     payload: dict[str, Any] | None = None,
+    *,
+    thread_id: UUID | None = None,
 ) -> None:
     repo.save_graph_run_event(
         GraphRunEventRecord(
             graph_run_event_id=uuid4(),
             graph_run_id=graph_run_id,
+            thread_id=thread_id,
             event_type=event_type,
             payload_json=dict(payload) if payload else {},
         )

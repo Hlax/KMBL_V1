@@ -1,4 +1,4 @@
-"""``save_graph_run_event`` idempotency (upsert / ignore duplicate PK under transport retry)."""
+"""``save_graph_run_event`` idempotency (insert with duplicate key handling)."""
 
 from __future__ import annotations
 
@@ -36,43 +36,56 @@ def _sample_event() -> GraphRunEventRecord:
     )
 
 
-def test_save_graph_run_event_uses_upsert_ignore_duplicates_on_event_id(
+def test_save_graph_run_event_uses_insert(
     event_repo: SupabaseRepository,
 ) -> None:
     table_chain = MagicMock()
-    table_chain.upsert.return_value.execute.return_value = MagicMock(data=[{}])
+    table_chain.insert.return_value.execute.return_value = MagicMock(data=[{}])
     event_repo._client.table.return_value = table_chain
 
-    event_repo.save_graph_run_event(_sample_event())
+    with patch.object(
+        event_repo,
+        "_next_graph_run_event_sequence_index",
+        return_value=None,
+    ):
+        event_repo.save_graph_run_event(_sample_event())
 
     event_repo._client.table.assert_called_once_with("graph_run_event")
-    call_kw = table_chain.upsert.call_args[1]
-    assert call_kw["on_conflict"] == "graph_run_event_id"
-    assert call_kw["ignore_duplicates"] is True
-    row = table_chain.upsert.call_args[0][0]
+    table_chain.insert.assert_called_once()
+    row = table_chain.insert.call_args[0][0]
     assert "graph_run_event_id" in row
-    table_chain.upsert.return_value.execute.assert_called_once()
+    table_chain.insert.return_value.execute.assert_called_once()
 
 
-def test_save_graph_run_event_repeated_call_same_row_does_not_error(
+def test_save_graph_run_event_duplicate_key_ignored(
     event_repo: SupabaseRepository,
 ) -> None:
+    """Duplicate key (23505) is logged but not raised for append-only events."""
     table_chain = MagicMock()
-    table_chain.upsert.return_value.execute.return_value = MagicMock(data=[{}])
+    table_chain.insert.return_value.execute.side_effect = APIError(
+        {
+            "code": "23505",
+            "message": "duplicate key value violates unique constraint",
+            "details": None,
+            "hint": None,
+        }
+    )
     event_repo._client.table.return_value = table_chain
 
-    ev = _sample_event()
-    event_repo.save_graph_run_event(ev)
-    event_repo.save_graph_run_event(ev)
-
-    assert table_chain.upsert.call_count == 2
+    with patch.object(
+        event_repo,
+        "_next_graph_run_event_sequence_index",
+        return_value=None,
+    ):
+        # Should not raise - duplicate key is silently ignored
+        event_repo.save_graph_run_event(_sample_event())
 
 
 def test_save_graph_run_event_unrelated_api_error_still_fails(
     event_repo: SupabaseRepository,
 ) -> None:
     table_chain = MagicMock()
-    table_chain.upsert.return_value.execute.side_effect = APIError(
+    table_chain.insert.return_value.execute.side_effect = APIError(
         {
             "code": "PGRST301",
             "message": "unexpected database error",
@@ -82,5 +95,10 @@ def test_save_graph_run_event_unrelated_api_error_still_fails(
     )
     event_repo._client.table.return_value = table_chain
 
-    with pytest.raises(RuntimeError, match=r"SupabaseRepository\.save_graph_run_event"):
-        event_repo.save_graph_run_event(_sample_event())
+    with patch.object(
+        event_repo,
+        "_next_graph_run_event_sequence_index",
+        return_value=None,
+    ):
+        with pytest.raises(RuntimeError, match=r"SupabaseRepository\.save_graph_run_event"):
+            event_repo.save_graph_run_event(_sample_event())

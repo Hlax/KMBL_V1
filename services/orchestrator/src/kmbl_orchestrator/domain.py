@@ -95,6 +95,7 @@ class GraphRunEventRecord(BaseModel):
 
     graph_run_event_id: UUID
     graph_run_id: UUID
+    thread_id: UUID | None = None
     event_type: str
     payload_json: dict[str, Any] = Field(default_factory=dict)
     created_at: str = Field(default_factory=_utc_now_iso)
@@ -108,6 +109,7 @@ class StagingSnapshotRecord(BaseModel):
     build_candidate_id: UUID
     graph_run_id: UUID | None = None
     identity_id: UUID | None = None
+    prior_staging_snapshot_id: UUID | None = None
     snapshot_payload_json: dict[str, Any] = Field(default_factory=dict)
     preview_url: str | None = None
     status: str = "review_ready"
@@ -116,7 +118,88 @@ class StagingSnapshotRecord(BaseModel):
     approved_at: str | None = None
     rejected_by: str | None = None
     rejected_at: str | None = None
+    # User rating (1-5 scale, None = not rated)
+    user_rating: int | None = None
+    user_feedback: str | None = None
+    rated_at: str | None = None
+    
+    # Evaluator marks for review
+    marked_for_review: bool = False
+    mark_reason: str | None = None
+    review_tags: list[str] = Field(default_factory=list)
     rejection_reason: str | None = None
+
+
+class WorkingStagingRecord(BaseModel):
+    """Mutable live surface for a thread/identity — amended by generator across runs."""
+
+    working_staging_id: UUID
+    thread_id: UUID
+    identity_id: UUID | None = None
+
+    payload_json: dict[str, Any] = Field(default_factory=dict)
+
+    last_update_mode: Literal["patch", "rebuild", "init", "rollback"] = "init"
+    last_update_graph_run_id: UUID | None = None
+    last_update_build_candidate_id: UUID | None = None
+
+    current_checkpoint_id: UUID | None = None
+
+    revision: int = 0
+    status: Literal["draft", "review_ready", "frozen"] = "draft"
+    created_at: str = Field(default_factory=_utc_now_iso)
+    updated_at: str = Field(default_factory=_utc_now_iso)
+
+    last_rebuild_revision: int | None = Field(
+        default=None,
+        description="Revision number of the most recent rebuild (for pressure tracking).",
+    )
+    stagnation_count: int = Field(
+        default=0,
+        description="Count of iterations without evaluator improvement.",
+    )
+    last_evaluator_issue_count: int = Field(
+        default=0,
+        description="Issue count from most recent evaluation (for stagnation detection).",
+    )
+    last_revision_summary_json: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Structured summary of the most recent revision for audit/display.",
+    )
+
+
+class StagingCheckpointRecord(BaseModel):
+    """Lightweight recovery point for working staging — distinct from graph CheckpointRecord."""
+
+    staging_checkpoint_id: UUID
+    working_staging_id: UUID
+    thread_id: UUID
+
+    payload_snapshot_json: dict[str, Any] = Field(default_factory=dict)
+    revision_at_checkpoint: int = 0
+
+    trigger: Literal[
+        "pre_rebuild",
+        "post_patch",
+        "first_previewable_html",
+        "pre_approval",
+        "manual",
+        "pressure_threshold",
+        "stagnation_recovery",
+        "post_patch_milestone",
+    ] = "post_patch"
+
+    source_graph_run_id: UUID | None = None
+    created_at: str = Field(default_factory=_utc_now_iso)
+
+    reason_category: str | None = Field(
+        default=None,
+        description="Structured checkpoint reason category (checkpoint_policy.CheckpointReason).",
+    )
+    reason_explanation: str | None = Field(
+        default=None,
+        description="Human-readable explanation for checkpoint creation.",
+    )
 
 
 class PublicationSnapshotRecord(BaseModel):
@@ -124,6 +207,8 @@ class PublicationSnapshotRecord(BaseModel):
 
     publication_snapshot_id: UUID
     source_staging_snapshot_id: UUID
+    source_working_staging_id: UUID | None = None
+    source_staging_checkpoint_id: UUID | None = None
     thread_id: UUID | None = None
     graph_run_id: UUID | None = None
     identity_id: UUID | None = None
@@ -183,3 +268,51 @@ class EvaluationReportRecord(BaseModel):
     artifacts_json: list[Any] = Field(default_factory=list)
     raw_payload_json: dict[str, Any] | None = None
     created_at: str = Field(default_factory=_utc_now_iso)
+
+
+class AutonomousLoopRecord(BaseModel):
+    """autonomous_loop table — tracks ongoing creative iteration for an identity."""
+
+    loop_id: UUID
+    identity_id: UUID
+    identity_url: str
+
+    # Loop state
+    status: Literal["pending", "running", "paused", "completed", "failed"] = "pending"
+    phase: Literal[
+        "identity_fetch", "planning", "generating", "evaluating", "proposing", "idle"
+    ] = "identity_fetch"
+
+    # Iteration tracking
+    iteration_count: int = 0
+    max_iterations: int = 50
+
+    # Current work references
+    current_thread_id: UUID | None = None
+    current_graph_run_id: UUID | None = None
+    last_staging_snapshot_id: UUID | None = None
+    last_evaluator_status: str | None = None
+    last_evaluator_score: float | None = None
+
+    # Planner exploration state
+    exploration_directions: list[dict[str, Any]] = Field(default_factory=list)
+    completed_directions: list[dict[str, Any]] = Field(default_factory=list)
+
+    # Auto-publication settings
+    auto_publish_threshold: float = 0.85
+    proposed_staging_id: UUID | None = None
+    proposed_at: str | None = None
+
+    # Lock for cron
+    locked_at: str | None = None
+    locked_by: str | None = None
+
+    # Metadata
+    created_at: str = Field(default_factory=_utc_now_iso)
+    updated_at: str = Field(default_factory=_utc_now_iso)
+    completed_at: str | None = None
+
+    # Stats
+    total_staging_count: int = 0
+    total_publication_count: int = 0
+    best_rating: int | None = None

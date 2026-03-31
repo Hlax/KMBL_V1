@@ -389,6 +389,15 @@ def _parse_chat_completion_json_content(
             ),
         )
     raw = _strip_markdown_json_fence(raw_content)
+    
+    # Debug logging for raw content before JSON parse
+    _log.debug(
+        "kiloclaw_http_inbound role_type=%s raw_content_len=%d raw_preview=%s",
+        role_type,
+        len(raw),
+        raw[:500] if raw else "<empty>",
+    )
+    
     e_first: json.JSONDecodeError | None = None
     try:
         parsed: Any = json.loads(raw)
@@ -415,12 +424,22 @@ def _parse_chat_completion_json_content(
             ) from e_first
 
     if isinstance(parsed, list):
+        # Recovery: scan list for first dict that looks like role output
         if role_type == "planner":
             for item in parsed:
                 if isinstance(item, dict):
                     hit = _find_planner_contract_dict(item) or _dict_with_planner_build_spec(item)
                     if hit is not None:
                         return hit
+        elif role_type in ("generator", "evaluator"):
+            # Generator/evaluator: find first dict matching role output keys
+            for item in parsed:
+                if isinstance(item, dict) and _looks_like_role_output(item):
+                    _log.warning(
+                        "kiloclaw %s returned list-root JSON; recovering first matching dict",
+                        role_type,
+                    )
+                    return item
         raise KiloClawInvocationError(
             "assistant JSON root must be an object",
             normalized=provider_failure(
@@ -552,7 +571,7 @@ class KiloClawHttpClient:
         user_content = json.dumps(envelope, ensure_ascii=False)
         model = f"openclaw:{provider_config_key}"
         chat_user = (self._settings.kiloclaw_chat_completions_user or "").strip() or "kmbl-orchestrator"
-        body = {
+        body: dict[str, Any] = {
             "model": model,
             "messages": [
                 {"role": "system", "content": _system_prompt_for_role(role_type)},
@@ -560,6 +579,10 @@ class KiloClawHttpClient:
             ],
             "user": chat_user,
         }
+        if role_type == "planner":
+            mt = getattr(self._settings, "kiloclaw_chat_max_tokens_planner", None)
+            if isinstance(mt, int) and mt > 0:
+                body["max_tokens"] = mt
         t0 = time.perf_counter()
         conn_to = float(self._settings.kiloclaw_http_connect_timeout_sec or 30.0)
         read_to = float(self._settings.kiloclaw_http_read_timeout_sec or 300.0)
@@ -574,30 +597,113 @@ class KiloClawHttpClient:
             read_to,
             len(user_content),
         )
-        try:
-            timeout = httpx.Timeout(
-                connect=conn_to,
-                read=read_to,
-                write=read_to,
-                pool=read_to,
-            )
-            with httpx.Client(timeout=timeout) as client:
-                r = client.post(url, headers=headers, json=body)
-        except httpx.RequestError as e:
-            _log.exception(
-                "kiloclaw_http_outbound failed stage=request_error url=%s role_type=%s path=%s",
-                url,
-                role_type,
-                path,
-            )
+
+        max_retries = 3
+        retry_backoff_base = 1.0
+        # Extended retry coverage: gateway errors, rate limits, timeouts, cloud edge cases
+        retryable_status_codes = {408, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524}
+        last_error: Exception | None = None
+        r: httpx.Response | None = None
+
+        for attempt in range(max_retries):
+            try:
+                timeout = httpx.Timeout(
+                    connect=conn_to,
+                    read=read_to,
+                    write=read_to,
+                    pool=read_to,
+                )
+                with httpx.Client(timeout=timeout) as client:
+                    r = client.post(url, headers=headers, json=body)
+
+                if r.status_code in retryable_status_codes and attempt < max_retries - 1:
+                    backoff = retry_backoff_base * (2 ** attempt)
+                    _log.warning(
+                        "kiloclaw_http_outbound retry attempt=%d/%d status=%d "
+                        "backoff_sec=%.1f url=%s role_type=%s",
+                        attempt + 1,
+                        max_retries,
+                        r.status_code,
+                        backoff,
+                        url,
+                        role_type,
+                    )
+                    time.sleep(backoff)
+                    continue
+                break
+
+            except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.ConnectError) as e:
+                last_error = e
+                if attempt < max_retries - 1:
+                    backoff = retry_backoff_base * (2 ** attempt)
+                    _log.warning(
+                        "kiloclaw_http_outbound retry attempt=%d/%d exc=%s "
+                        "backoff_sec=%.1f url=%s role_type=%s",
+                        attempt + 1,
+                        max_retries,
+                        type(e).__name__,
+                        backoff,
+                        url,
+                        role_type,
+                    )
+                    time.sleep(backoff)
+                    continue
+                _log.exception(
+                    "kiloclaw_http_outbound failed stage=request_error url=%s role_type=%s path=%s",
+                    url,
+                    role_type,
+                    path,
+                )
+                raise KiloClawInvocationError(
+                    str(e),
+                    normalized=provider_failure(
+                        f"request to KiloClaw failed after {max_retries} attempts: {e!s}",
+                        error_type="transport_error",
+                        details={"exception_type": type(e).__name__, "attempts": max_retries},
+                    ),
+                ) from e
+
+            except httpx.RequestError as e:
+                # Retry certain request errors (read/write errors, connection resets)
+                last_error = e
+                if attempt < max_retries - 1:
+                    backoff = retry_backoff_base * (2 ** attempt)
+                    _log.warning(
+                        "kiloclaw_http_outbound retry attempt=%d/%d exc=%s "
+                        "backoff_sec=%.1f url=%s role_type=%s",
+                        attempt + 1,
+                        max_retries,
+                        type(e).__name__,
+                        backoff,
+                        url,
+                        role_type,
+                    )
+                    time.sleep(backoff)
+                    continue
+                _log.exception(
+                    "kiloclaw_http_outbound failed stage=request_error url=%s role_type=%s path=%s",
+                    url,
+                    role_type,
+                    path,
+                )
+                raise KiloClawInvocationError(
+                    str(e),
+                    normalized=provider_failure(
+                        f"request to KiloClaw failed after {max_retries} attempts: {e!s}",
+                        error_type="transport_error",
+                        details={"exception_type": type(e).__name__, "attempts": max_retries},
+                    ),
+                ) from e
+
+        if r is None:
             raise KiloClawInvocationError(
-                str(e),
+                str(last_error) if last_error else "unknown error after retries",
                 normalized=provider_failure(
-                    f"request to KiloClaw failed: {e!s}",
+                    f"request to KiloClaw failed after {max_retries} attempts",
                     error_type="transport_error",
-                    details={"exception_type": type(e).__name__},
+                    details={"attempts": max_retries},
                 ),
-            ) from e
+            )
 
         elapsed_ms = (time.perf_counter() - t0) * 1000
         _log.info(
@@ -798,15 +904,20 @@ class KiloClawStubClient:
             return _apply_role_contract(role_type, raw)
         if role_type == "evaluator":
             iteration = payload.get("iteration_hint", 0)
-            status: Literal["pass", "partial", "fail", "blocked"] = (
-                "pass" if iteration >= 0 else "partial"
-            )
+            # Return partial on first iteration to test multi-iteration loop,
+            # then pass on subsequent iterations
+            if iteration == 0:
+                status: Literal["pass", "partial", "fail", "blocked"] = "partial"
+                issues = [{"severity": "warning", "message": "First pass incomplete, needs refinement"}]
+            else:
+                status = "pass"
+                issues = []
             raw = {
                 "status": status,
-                "summary": "stub evaluation",
-                "issues": [],
+                "summary": f"stub evaluation (iteration {iteration})",
+                "issues": issues,
                 "artifacts": [],
-                "metrics": {"stub": True},
+                "metrics": {"stub": True, "iteration": iteration},
             }
             return _apply_role_contract(role_type, raw)
         raise ValueError(f"unknown role_type: {role_type}")

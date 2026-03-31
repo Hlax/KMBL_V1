@@ -12,7 +12,7 @@ from typing import Annotated, Any, Literal
 from uuid import UUID, uuid4
 
 from fastapi import BackgroundTasks, Body, Depends, FastAPI, HTTPException, Query
-from fastapi.responses import Response
+from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from kmbl_orchestrator.config import Settings, get_settings
@@ -23,10 +23,12 @@ from kmbl_orchestrator.domain import (
     BuildSpecRecord,
     CheckpointRecord,
     EvaluationReportRecord,
+    GraphRunRecord,
     IdentityProfileRecord,
     IdentitySourceRecord,
     PublicationSnapshotRecord,
     StagingSnapshotRecord,
+    WorkingStagingRecord,
 )
 from kmbl_orchestrator.publication.eligibility import (
     PublicationIneligible,
@@ -69,6 +71,10 @@ from kmbl_orchestrator.runtime.run_failure_view import build_run_failure_view
 from kmbl_orchestrator.runtime.run_snapshot_sanitize import (
     sanitize_checkpoint_state_for_api,
 )
+from kmbl_orchestrator.runtime.session_staging_links import (
+    build_session_staging_links_dict,
+    merge_session_staging_into_event_input,
+)
 from kmbl_orchestrator.runtime.stale_run import reconcile_stale_running_graph_run
 from kmbl_orchestrator.staging.static_preview_assembly import (
     assemble_static_preview_html,
@@ -99,7 +105,19 @@ from kmbl_orchestrator.staging.proposals_queue import (
     validate_review_action_state,
 )
 from kmbl_orchestrator.staging.review_action import derive_review_action_state
+from kmbl_orchestrator.staging.working_staging_ops import (
+    approve_working_staging,
+    fresh_rebuild as ws_fresh_rebuild,
+    rollback_to_checkpoint as ws_rollback_to_checkpoint,
+    rollback_to_publication as ws_rollback_to_publication,
+)
+from kmbl_orchestrator.identity import (
+    extract_identity_from_url,
+    persist_identity_from_seed,
+)
 from kmbl_orchestrator.seeds import (
+    IDENTITY_URL_STATIC_FRONTEND_PRESET,
+    IDENTITY_URL_STATIC_FRONTEND_TAG,
     KILOCLAW_IMAGE_ONLY_TEST_EVENT_INPUT,
     KILOCLAW_IMAGE_ONLY_TEST_SCENARIO_PRESET,
     KILOCLAW_IMAGE_ONLY_TEST_SCENARIO_TAG,
@@ -111,6 +129,7 @@ from kmbl_orchestrator.seeds import (
     SEEDED_LOCAL_EVENT_INPUT,
     SEEDED_LOCAL_SCENARIO_PRESET,
     SEEDED_SCENARIO_TAG,
+    build_identity_url_static_frontend_event_input,
     build_seeded_gallery_strip_varied_v1_event_input,
 )
 
@@ -166,8 +185,24 @@ class StartRunBody(BaseModel):
     )
     trigger_type: Literal["prompt", "resume", "schedule", "system"] = "prompt"
     event_input: dict[str, Any] = Field(default_factory=dict)
+    identity_url: str | None = Field(
+        default=None,
+        description=(
+            "Website URL for the identity vertical. First run (no thread_id + identity_id): "
+            "fetch URL, extract signals, create identity. Continuation: send the same URL with "
+            "thread_id and identity_id from a prior run to reuse identity and thread (working staging)."
+        ),
+    )
+    deep_crawl: bool = Field(
+        default=True,
+        description=(
+            "When extracting identity from a URL, crawl additional pages (about, work, portfolio, "
+            "etc.) to build richer identity signals. Enabled by default."
+        ),
+    )
     scenario_preset: (
         Literal[
+            "identity_url_static_v1",
             "seeded_local_v1",
             "seeded_gallery_strip_v1",
             "seeded_gallery_strip_varied_v1",
@@ -177,6 +212,7 @@ class StartRunBody(BaseModel):
     ) = Field(
         default=None,
         description=(
+            "identity_url_static_v1: canonical vertical — requires identity_url field. "
             "When set to seeded_local_v1 or seeded_gallery_strip_v1, event_input is replaced "
             "with the canonical seeded scenario (deterministic tag in event_input.scenario). "
             "seeded_gallery_strip_varied_v1 replaces event_input with a non-deterministic "
@@ -184,6 +220,21 @@ class StartRunBody(BaseModel):
             "kiloclaw_image_only_test_v1 requires gallery images via KiloClaw kmbl-image-gen routing "
             "(KILOCLAW_GENERATOR_OPENAI_IMAGE_CONFIG_KEY). "
             "Ignores event_input for that run."
+        ),
+    )
+    user_instructions: str | None = Field(
+        default=None,
+        description=(
+            "Merged into event_input as user_instructions for planner/generator (e.g. autonomous loop chat)."
+        ),
+    )
+    max_iterations: int | None = Field(
+        default=None,
+        ge=1,
+        le=100,
+        description=(
+            "Generator↔evaluator loop bound. Omit to use KMBL_GRAPH_MAX_ITERATIONS_DEFAULT "
+            "(orchestrator settings; default 10)."
         ),
     )
 
@@ -222,6 +273,14 @@ class StartRunResponse(BaseModel):
         default_factory=dict,
         description="Event input passed into the graph (after applying scenario_preset).",
     )
+    identity_id: str | None = Field(
+        default=None,
+        description="Identity used for this run (new extraction or continuation).",
+    )
+    session_staging: SessionStagingLinks | None = Field(
+        default=None,
+        description="Stable links to live working staging (also in event_input.kmbl_session_staging).",
+    )
 
 
 class BuildSpecSummary(BaseModel):
@@ -248,6 +307,29 @@ class RunTimelineEventSummary(BaseModel):
     event_type: str
     payload_json: dict[str, Any] = Field(default_factory=dict)
     created_at: str
+
+
+class SessionStagingLinks(BaseModel):
+    """Stable per-run links to live working staging (same thread as this graph run)."""
+
+    graph_run_id: str
+    thread_id: str
+    orchestrator_staging_preview_path: str
+    orchestrator_working_staging_json_path: str
+    control_plane_staging_preview_path: str
+    note: str
+    orchestrator_staging_preview_url: str | None = None
+    orchestrator_working_staging_json_url: str | None = None
+
+
+def _session_staging_model(settings: Settings, gr: GraphRunRecord) -> SessionStagingLinks:
+    return SessionStagingLinks(
+        **build_session_staging_links_dict(
+            settings,
+            graph_run_id=str(gr.graph_run_id),
+            thread_id=str(gr.thread_id),
+        )
+    )
 
 
 class RunStatusResponse(BaseModel):
@@ -297,6 +379,10 @@ class RunStatusResponse(BaseModel):
     timeline_events: list[RunTimelineEventSummary] = Field(
         default_factory=list,
         description="Append-only execution timeline (most recent window).",
+    )
+    session_staging: SessionStagingLinks | None = Field(
+        default=None,
+        description="Stable URLs to live working staging for this run (thread-scoped).",
     )
 
 
@@ -397,6 +483,10 @@ class GraphRunDetailResponse(BaseModel):
         default=None,
         description="Debug: identity linkage and hydrated planner identity_context.",
     )
+    session_staging: SessionStagingLinks | None = Field(
+        default=None,
+        description="Stable links to live working staging for this run (thread-scoped).",
+    )
 
 
 class GraphRunListItem(BaseModel):
@@ -492,6 +582,10 @@ class StagingLineageSection(BaseModel):
     build_candidate_id: str
     evaluation_report_id: str | None = None
     identity_id: str | None = None
+    prior_staging_snapshot_id: str | None = Field(
+        default=None,
+        description="Previous staging snapshot on the same thread (amend chain).",
+    )
 
 
 class StagingEvaluationDetail(BaseModel):
@@ -531,6 +625,9 @@ class StagingSnapshotDetailResponse(BaseModel):
     rejected_by: str | None = None
     rejected_at: str | None = None
     rejection_reason: str | None = None
+    user_rating: int | None = None
+    user_feedback: str | None = None
+    rated_at: str | None = None
     evaluation_summary: str = ""
     short_title: str | None = None
     identity_hint: str | None = None
@@ -681,7 +778,20 @@ class PublicationSnapshotDetailResponse(BaseModel):
     )
 
 
-def _resolve_start_event_input(body: StartRunBody) -> tuple[dict[str, Any], str | None]:
+def _resolve_start_event_input(
+    body: StartRunBody,
+    *,
+    identity_seed_summary: str | None = None,
+) -> tuple[dict[str, Any], str | None]:
+    if body.identity_url or body.scenario_preset == IDENTITY_URL_STATIC_FRONTEND_PRESET:
+        url = body.identity_url or ""
+        return (
+            build_identity_url_static_frontend_event_input(
+                identity_url=url,
+                seed_summary=identity_seed_summary,
+            ),
+            IDENTITY_URL_STATIC_FRONTEND_PRESET,
+        )
     if body.scenario_preset == SEEDED_LOCAL_SCENARIO_PRESET:
         return dict(SEEDED_LOCAL_EVENT_INPUT), SEEDED_LOCAL_SCENARIO_PRESET
     if body.scenario_preset == SEEDED_GALLERY_STRIP_SCENARIO_PRESET:
@@ -791,6 +901,7 @@ def _run_graph_background(
     identity_id: str | None,
     trigger_type: str,
     event_input: dict[str, Any],
+    max_iterations: int | None = None,
 ) -> None:
     """Runs LangGraph after HTTP response; same-process thread pool (local dev)."""
     settings = get_settings()
@@ -841,6 +952,7 @@ def _run_graph_background(
             )
         return
     try:
+        mi = max_iterations if max_iterations is not None else settings.graph_max_iterations_default
         run_graph(
             repo=repo,
             invoker=invoker,
@@ -851,6 +963,7 @@ def _run_graph_background(
                 "identity_id": identity_id,
                 "trigger_type": trigger_type,
                 "event_input": event_input,
+                "max_iterations": mi,
             },
         )
     except RoleInvocationFailed as e:
@@ -1031,7 +1144,57 @@ async def start_run(
     """Create thread + graph_run rows, enqueue LangGraph (persist before graph)."""
     t_req = time.perf_counter()
     _log.info("run_start stage=request_received elapsed_ms=0.0")
-    effective_event_input, preset_applied = _resolve_start_event_input(body)
+
+    identity_id_str = str(body.identity_id) if body.identity_id is not None else None
+    identity_seed_summary: str | None = None
+
+    # Continuation: same thread + identity — skip re-fetch/re-seed so working_staging and ratings apply.
+    continuation = (
+        body.identity_url
+        and body.identity_id is not None
+        and body.thread_id is not None
+    )
+    if body.identity_url and continuation:
+        identity_id_str = str(body.identity_id)
+        _log.info(
+            "run_start stage=identity_url_reuse thread_id=%s identity_id=%s url=%s (skip extract)",
+            body.thread_id,
+            identity_id_str,
+            body.identity_url,
+        )
+        try:
+            prof = repo.get_identity_profile(UUID(identity_id_str))
+            if prof and prof.profile_summary:
+                identity_seed_summary = prof.profile_summary
+        except Exception:
+            pass
+    elif body.identity_url:
+        _log.info(
+            "run_start stage=identity_url_extract url=%s deep_crawl=%s",
+            body.identity_url, body.deep_crawl,
+        )
+        try:
+            seed = extract_identity_from_url(body.identity_url, deep_crawl=body.deep_crawl)
+            iid = persist_identity_from_seed(repo, seed)
+            identity_id_str = str(iid)
+            identity_seed_summary = seed.to_profile_summary()
+            crawl_info = f" pages={len(seed.crawled_pages)}" if seed.crawled_pages else ""
+            _log.info(
+                "run_start stage=identity_url_extracted identity_id=%s confidence=%.2f%s elapsed_ms=%.1f",
+                iid, seed.confidence, crawl_info, (time.perf_counter() - t_req) * 1000,
+            )
+        except Exception as e:
+            _log.warning("run_start identity_url extraction failed: %s", e)
+            identity_seed_summary = f"extraction failed: {type(e).__name__}"
+
+    effective_event_input, preset_applied = _resolve_start_event_input(
+        body, identity_seed_summary=identity_seed_summary
+    )
+    if body.user_instructions and str(body.user_instructions).strip():
+        effective_event_input = {
+            **effective_event_input,
+            "user_instructions": str(body.user_instructions).strip(),
+        }
     _log.info(
         "run_start stage=event_input_resolved elapsed_ms=%.1f",
         (time.perf_counter() - t_req) * 1000,
@@ -1041,7 +1204,7 @@ async def start_run(
         "repo": repo,
         "thread_id": str(body.thread_id) if body.thread_id is not None else None,
         "graph_run_id": None,
-        "identity_id": str(body.identity_id) if body.identity_id is not None else None,
+        "identity_id": identity_id_str,
         "trigger_type": body.trigger_type,
         "event_input": effective_event_input,
     }
@@ -1089,13 +1252,27 @@ async def start_run(
         gid,
         (time.perf_counter() - t_req) * 1000,
     )
+    effective_event_input = merge_session_staging_into_event_input(
+        settings,
+        effective_event_input,
+        graph_run_id=gid,
+        thread_id=tid,
+    )
+    session_staging = SessionStagingLinks(
+        **build_session_staging_links_dict(
+            settings,
+            graph_run_id=gid,
+            thread_id=tid,
+        )
+    )
     background_tasks.add_task(
         _run_graph_background,
         thread_id=tid,
         graph_run_id=gid,
-        identity_id=str(body.identity_id) if body.identity_id is not None else None,
+        identity_id=identity_id_str,
         trigger_type=body.trigger_type,
         event_input=effective_event_input,
+        max_iterations=body.max_iterations,
     )
     _log.info(
         "run_start stage=response_returning thread_id=%s graph_run_id=%s total_elapsed_ms=%.1f",
@@ -1108,6 +1285,8 @@ async def start_run(
         thread_id=tid,
         scenario_preset=preset_applied,
         effective_event_input=effective_event_input,
+        identity_id=identity_id_str,
+        session_staging=session_staging,
     )
 
 
@@ -1318,7 +1497,37 @@ def run_status(
         run_event_input=_run_event_input_from_snapshot(snap),
         outputs_substantive=_outputs_substantive(bs, ev, snap),
         timeline_events=timeline_events,
+        session_staging=_session_staging_model(settings, gr),
     )
+
+
+@app.get("/orchestrator/runs/{graph_run_id}/staging-preview")
+def graph_run_session_staging_preview_redirect(
+    graph_run_id: str,
+    bundle_id: str | None = Query(None),
+    repo: Repository = Depends(get_repo),
+    settings: Settings = Depends(get_settings),
+) -> RedirectResponse:
+    """Redirect to live working staging HTML for this run's thread (stable per graph_run_id)."""
+    try:
+        gid = UUID(graph_run_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="invalid graph_run_id") from e
+    gr = repo.get_graph_run(gid)
+    if gr is None:
+        raise HTTPException(status_code=404, detail="graph_run not found")
+    reconcile_stale_running_graph_run(repo, settings, gid)
+    gr = repo.get_graph_run(gid)
+    if gr is None:
+        raise HTTPException(status_code=404, detail="graph_run not found")
+    tid = str(gr.thread_id)
+    target = f"/orchestrator/working-staging/{tid}/preview"
+    q: dict[str, str] = {}
+    if bundle_id:
+        q["bundle_id"] = bundle_id
+    if q:
+        target += "?" + urlencode(q)
+    return RedirectResponse(url=target, status_code=307)
 
 
 @app.get("/orchestrator/runs/{graph_run_id}/detail", response_model=GraphRunDetailResponse)
@@ -1399,6 +1608,7 @@ def graph_run_detail(
         scenario_tag=scen_tag,
         scenario_badge=scen_badge,
         identity_trace=id_trace,
+        session_staging=_session_staging_model(settings, gr),
     )
 
 
@@ -1668,6 +1878,22 @@ def approve_staging_snapshot(
                 "staging_status": rec.status,
             },
         )
+    # Block approval when evaluator status is fail/blocked
+    payload = rec.snapshot_payload_json
+    if isinstance(payload, dict):
+        ev = payload.get("evaluation")
+        if isinstance(ev, dict):
+            ev_status = ev.get("status")
+            if ev_status in ("fail", "blocked"):
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "error_kind": "approve_ineligible",
+                        "reason": "evaluator_not_pass",
+                        "message": f"cannot approve snapshot with evaluator status '{ev_status}'",
+                        "evaluator_status": ev_status,
+                    },
+                )
     updated = repo.update_staging_snapshot_status(
         sid, "approved", approved_by=body.approved_by
     )
@@ -1814,6 +2040,88 @@ def unapprove_staging_snapshot(
             },
         )
     return _staging_mutation_response(updated)
+
+
+class RateStagingBody(BaseModel):
+    """Body for rating a staging snapshot."""
+
+    rating: int = Field(
+        ...,
+        ge=1,
+        le=5,
+        description="User rating 1-5 (1=reject, 5=excellent)",
+    )
+    feedback: str | None = Field(
+        default=None,
+        description="Optional feedback explaining the rating",
+    )
+
+
+class RateStagingResponse(BaseModel):
+    staging_snapshot_id: str
+    thread_id: str
+    graph_run_id: str | None
+    user_rating: int
+    user_feedback: str | None
+    rated_at: str
+    status: str
+
+
+@app.post(
+    "/orchestrator/staging/{staging_snapshot_id}/rate",
+    response_model=RateStagingResponse,
+)
+def rate_staging_snapshot(
+    staging_snapshot_id: str,
+    body: RateStagingBody,
+    repo: Repository = Depends(get_repo),
+) -> RateStagingResponse:
+    """
+    Rate a staging snapshot (1-5 scale).
+    
+    - 5: Excellent — exceeds expectations
+    - 4: Good — meets expectations  
+    - 3: Acceptable — functional but could improve
+    - 2: Poor — significant gaps, needs rework
+    - 1: Reject — does not represent the identity
+    
+    Low ratings (1-2) can trigger re-iteration with feedback.
+    """
+    try:
+        sid = UUID(staging_snapshot_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="invalid staging_snapshot_id") from e
+    rec = repo.get_staging_snapshot(sid)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="staging_snapshot not found")
+    
+    updated = repo.rate_staging_snapshot(sid, body.rating, body.feedback)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="staging_snapshot not found")
+    
+    if updated.graph_run_id is not None:
+        append_graph_run_event(
+            repo,
+            updated.graph_run_id,
+            RunEventType.STAGING_SNAPSHOT_RATED,
+            {
+                "staging_snapshot_id": str(updated.staging_snapshot_id),
+                "thread_id": str(updated.thread_id),
+                "graph_run_id": str(updated.graph_run_id),
+                "user_rating": body.rating,
+                "user_feedback": body.feedback,
+            },
+        )
+    
+    return RateStagingResponse(
+        staging_snapshot_id=str(updated.staging_snapshot_id),
+        thread_id=str(updated.thread_id),
+        graph_run_id=str(updated.graph_run_id) if updated.graph_run_id else None,
+        user_rating=updated.user_rating or body.rating,
+        user_feedback=updated.user_feedback,
+        rated_at=updated.rated_at or "",
+        status=updated.status,
+    )
 
 
 @app.get(
@@ -2011,6 +2319,9 @@ def get_staging_snapshot(
         rejected_by=rec.rejected_by,
         rejected_at=rec.rejected_at,
         rejection_reason=rec.rejection_reason,
+        user_rating=rec.user_rating,
+        user_feedback=rec.user_feedback,
+        rated_at=rec.rated_at,
         evaluation_summary=evaluation_summary_from_payload(p),
         short_title=short_title_from_payload(p),
         identity_hint=identity_hint_from_uuid(rec.identity_id),
@@ -2031,6 +2342,224 @@ def get_staging_snapshot(
         static_frontend_bundle_count=int(fv.get("static_frontend_bundle_count") or 0),
         has_previewable_html=bool(fv.get("has_previewable_html")),
     )
+
+
+# ---------------------------------------------------------------------------
+# Working staging endpoints
+# ---------------------------------------------------------------------------
+
+
+class WorkingStagingResponse(BaseModel):
+    working_staging_id: str
+    thread_id: str
+    identity_id: str | None = None
+    revision: int
+    status: str
+    last_update_mode: str
+    last_update_graph_run_id: str | None = None
+    last_update_build_candidate_id: str | None = None
+    current_checkpoint_id: str | None = None
+    created_at: str
+    updated_at: str
+    payload_json: dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkingStagingCheckpointItem(BaseModel):
+    staging_checkpoint_id: str
+    working_staging_id: str
+    revision_at_checkpoint: int
+    trigger: str
+    source_graph_run_id: str | None = None
+    created_at: str
+
+
+class RollbackWorkingStagingBody(BaseModel):
+    source: Literal["checkpoint", "publication", "fresh"]
+    staging_checkpoint_id: UUID | None = None
+    publication_snapshot_id: UUID | None = None
+
+
+class ApproveWorkingStagingBody(BaseModel):
+    approved_by: str | None = Field(
+        default=None, description="Operator identifier."
+    )
+
+
+def _ws_response(ws: WorkingStagingRecord) -> WorkingStagingResponse:
+    return WorkingStagingResponse(
+        working_staging_id=str(ws.working_staging_id),
+        thread_id=str(ws.thread_id),
+        identity_id=str(ws.identity_id) if ws.identity_id else None,
+        revision=ws.revision,
+        status=ws.status,
+        last_update_mode=ws.last_update_mode,
+        last_update_graph_run_id=str(ws.last_update_graph_run_id) if ws.last_update_graph_run_id else None,
+        last_update_build_candidate_id=str(ws.last_update_build_candidate_id) if ws.last_update_build_candidate_id else None,
+        current_checkpoint_id=str(ws.current_checkpoint_id) if ws.current_checkpoint_id else None,
+        created_at=ws.created_at,
+        updated_at=ws.updated_at,
+        payload_json=dict(ws.payload_json),
+    )
+
+
+@app.get(
+    "/orchestrator/working-staging/{thread_id}",
+    response_model=WorkingStagingResponse,
+)
+def get_working_staging(
+    thread_id: str,
+    repo: Repository = Depends(get_repo),
+) -> WorkingStagingResponse:
+    """Current mutable working staging state for a thread."""
+    try:
+        tid = UUID(thread_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="invalid thread_id") from e
+    ws = repo.get_working_staging_for_thread(tid)
+    if ws is None:
+        raise HTTPException(status_code=404, detail="no working staging for this thread")
+    return _ws_response(ws)
+
+
+@app.get("/orchestrator/working-staging/{thread_id}/preview")
+def get_working_staging_preview(
+    thread_id: str,
+    bundle_id: str | None = Query(None),
+    repo: Repository = Depends(get_repo),
+) -> Response:
+    """Serve live static preview from the current working staging payload."""
+    try:
+        tid = UUID(thread_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="invalid thread_id") from e
+    ws = repo.get_working_staging_for_thread(tid)
+    if ws is None:
+        raise HTTPException(status_code=404, detail="no working staging for this thread")
+    p = dict(ws.payload_json)
+    entry, err = resolve_static_preview_entry_path(p, bundle_id=bundle_id)
+    if err or not entry:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_kind": "static_preview_unavailable", "reason": err or "unknown"},
+        )
+    html, aerr = assemble_static_preview_html(p, entry_path=entry)
+    if aerr or not html:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_kind": "static_preview_unavailable", "reason": aerr or "unknown"},
+        )
+    return Response(
+        content=html.encode("utf-8"),
+        media_type="text/html; charset=utf-8",
+        headers={
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'; img-src data: https:; font-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'",
+            "Cache-Control": "private, no-store",
+        },
+    )
+
+
+@app.get("/orchestrator/working-staging/{thread_id}/checkpoints")
+def list_working_staging_checkpoints(
+    thread_id: str,
+    limit: int = Query(50, ge=1, le=200),
+    repo: Repository = Depends(get_repo),
+) -> dict[str, Any]:
+    """List staging checkpoints for this thread's working staging."""
+    try:
+        tid = UUID(thread_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="invalid thread_id") from e
+    ws = repo.get_working_staging_for_thread(tid)
+    if ws is None:
+        raise HTTPException(status_code=404, detail="no working staging for this thread")
+    checkpoints = repo.list_staging_checkpoints(ws.working_staging_id, limit=limit)
+    items = [
+        WorkingStagingCheckpointItem(
+            staging_checkpoint_id=str(cp.staging_checkpoint_id),
+            working_staging_id=str(cp.working_staging_id),
+            revision_at_checkpoint=cp.revision_at_checkpoint,
+            trigger=cp.trigger,
+            source_graph_run_id=str(cp.source_graph_run_id) if cp.source_graph_run_id else None,
+            created_at=cp.created_at,
+        ).model_dump(mode="json")
+        for cp in checkpoints
+    ]
+    return {"checkpoints": items, "count": len(items)}
+
+
+@app.post(
+    "/orchestrator/working-staging/{thread_id}/rollback",
+    response_model=WorkingStagingResponse,
+)
+def rollback_working_staging(
+    thread_id: str,
+    body: RollbackWorkingStagingBody,
+    repo: Repository = Depends(get_repo),
+) -> WorkingStagingResponse:
+    """Recover working staging from a checkpoint, publication, or fresh rebuild."""
+    try:
+        tid = UUID(thread_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="invalid thread_id") from e
+    ws = repo.get_working_staging_for_thread(tid)
+    if ws is None:
+        raise HTTPException(status_code=404, detail="no working staging for this thread")
+
+    if body.source == "checkpoint":
+        if body.staging_checkpoint_id is None:
+            raise HTTPException(status_code=400, detail="staging_checkpoint_id required for checkpoint rollback")
+        cp = repo.get_staging_checkpoint(body.staging_checkpoint_id)
+        if cp is None:
+            raise HTTPException(status_code=404, detail="staging_checkpoint not found")
+        ws = ws_rollback_to_checkpoint(ws, cp)
+    elif body.source == "publication":
+        if body.publication_snapshot_id is None:
+            raise HTTPException(status_code=400, detail="publication_snapshot_id required for publication rollback")
+        pub = repo.get_publication_snapshot(body.publication_snapshot_id)
+        if pub is None:
+            raise HTTPException(status_code=404, detail="publication_snapshot not found")
+        ws = ws_rollback_to_publication(ws, pub)
+    else:
+        ws = ws_fresh_rebuild(ws)
+
+    repo.save_working_staging(ws)
+    return _ws_response(ws)
+
+
+@app.post(
+    "/orchestrator/working-staging/{thread_id}/approve",
+    response_model=WorkingStagingResponse,
+)
+def approve_working_staging_endpoint(
+    thread_id: str,
+    body: ApproveWorkingStagingBody = Body(default=ApproveWorkingStagingBody()),
+    repo: Repository = Depends(get_repo),
+) -> WorkingStagingResponse:
+    """Freeze working staging into a publication snapshot."""
+    try:
+        tid = UUID(thread_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="invalid thread_id") from e
+    ws = repo.get_working_staging_for_thread(tid)
+    if ws is None:
+        raise HTTPException(status_code=404, detail="no working staging for this thread")
+    if ws.status == "frozen":
+        raise HTTPException(
+            status_code=409,
+            detail={"error_kind": "already_frozen", "message": "working staging is already frozen"},
+        )
+    if ws.revision == 0:
+        raise HTTPException(
+            status_code=409,
+            detail={"error_kind": "empty_staging", "message": "cannot approve empty working staging"},
+        )
+
+    ws, pub, cp = approve_working_staging(ws, approved_by=body.approved_by or "operator")
+    repo.save_staging_checkpoint(cp)
+    repo.save_publication_snapshot(pub)
+    repo.save_working_staging(ws)
+    return _ws_response(ws)
 
 
 @app.get("/orchestrator/staging/{staging_snapshot_id}/static-preview")
@@ -2167,6 +2696,251 @@ def invoke_role(
         routing_metadata=routing_meta,
     )
     return {"output": raw}
+
+
+# --- Autonomous Loop / Cron Endpoints ---
+
+
+class StartLoopBody(BaseModel):
+    identity_url: str = Field(..., description="URL to start autonomous iteration on")
+    max_iterations: int = Field(default=50, ge=1, le=500)
+    auto_publish_threshold: float = Field(default=0.85, ge=0.0, le=1.0)
+
+
+class LoopResponse(BaseModel):
+    loop_id: str
+    identity_id: str
+    identity_url: str
+    status: str
+    phase: str
+    iteration_count: int
+    proposed_staging_id: str | None = None
+
+
+@app.post("/orchestrator/loops/start", response_model=LoopResponse)
+def start_loop(
+    body: StartLoopBody,
+    repo: Repository = Depends(get_repo),
+) -> LoopResponse:
+    """Start a new autonomous loop for an identity URL."""
+    from kmbl_orchestrator.autonomous import start_autonomous_loop
+
+    loop = start_autonomous_loop(
+        repo,
+        body.identity_url,
+        max_iterations=body.max_iterations,
+        auto_publish_threshold=body.auto_publish_threshold,
+    )
+    return LoopResponse(
+        loop_id=str(loop.loop_id),
+        identity_id=str(loop.identity_id),
+        identity_url=loop.identity_url,
+        status=loop.status,
+        phase=loop.phase,
+        iteration_count=loop.iteration_count,
+        proposed_staging_id=str(loop.proposed_staging_id) if loop.proposed_staging_id else None,
+    )
+
+
+@app.get("/orchestrator/loops", response_model=list[LoopResponse])
+def list_loops(
+    repo: Repository = Depends(get_repo),
+    status: str | None = Query(None, description="Filter by status"),
+    limit: int = Query(20, ge=1, le=100),
+) -> list[LoopResponse]:
+    """List autonomous loops."""
+    loops = repo.list_autonomous_loops(status=status, limit=limit)
+    return [
+        LoopResponse(
+            loop_id=str(loop.loop_id),
+            identity_id=str(loop.identity_id),
+            identity_url=loop.identity_url,
+            status=loop.status,
+            phase=loop.phase,
+            iteration_count=loop.iteration_count,
+            proposed_staging_id=str(loop.proposed_staging_id) if loop.proposed_staging_id else None,
+        )
+        for loop in loops
+    ]
+
+
+@app.get("/orchestrator/loops/{loop_id}")
+def get_loop(
+    loop_id: str,
+    repo: Repository = Depends(get_repo),
+) -> dict[str, Any]:
+    """Get details of an autonomous loop."""
+    loop = repo.get_autonomous_loop(UUID(loop_id))
+    if loop is None:
+        raise HTTPException(status_code=404, detail="Loop not found")
+    return {
+        "loop_id": str(loop.loop_id),
+        "identity_id": str(loop.identity_id),
+        "identity_url": loop.identity_url,
+        "status": loop.status,
+        "phase": loop.phase,
+        "iteration_count": loop.iteration_count,
+        "max_iterations": loop.max_iterations,
+        "current_thread_id": str(loop.current_thread_id) if loop.current_thread_id else None,
+        "current_graph_run_id": str(loop.current_graph_run_id) if loop.current_graph_run_id else None,
+        "last_staging_snapshot_id": str(loop.last_staging_snapshot_id) if loop.last_staging_snapshot_id else None,
+        "last_evaluator_status": loop.last_evaluator_status,
+        "last_evaluator_score": loop.last_evaluator_score,
+        "exploration_directions": loop.exploration_directions,
+        "completed_directions": loop.completed_directions,
+        "auto_publish_threshold": loop.auto_publish_threshold,
+        "proposed_staging_id": str(loop.proposed_staging_id) if loop.proposed_staging_id else None,
+        "proposed_at": loop.proposed_at,
+        "locked_at": loop.locked_at,
+        "locked_by": loop.locked_by,
+        "created_at": loop.created_at,
+        "updated_at": loop.updated_at,
+        "completed_at": loop.completed_at,
+        "total_staging_count": loop.total_staging_count,
+        "total_publication_count": loop.total_publication_count,
+        "best_rating": loop.best_rating,
+    }
+
+
+@app.post("/orchestrator/cron/tick")
+async def cron_tick(
+    repo: Repository = Depends(get_repo),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    """
+    Cron tick endpoint - called every minute.
+    
+    Acquires lock on next pending loop and runs one tick.
+    If no loops pending or all locked, returns immediately.
+    """
+    import asyncio
+    from kmbl_orchestrator.autonomous import tick_loop
+
+    loop = repo.get_next_pending_loop()
+    if loop is None:
+        return {"status": "no_pending_loops", "action": None}
+
+    worker_id = f"cron-{uuid4().hex[:8]}"
+    acquired = repo.try_acquire_loop_lock(loop.loop_id, worker_id, lock_timeout_seconds=300)
+    if not acquired:
+        return {"status": "lock_contention", "loop_id": str(loop.loop_id), "action": None}
+
+    try:
+        async def run_graph(
+            *,
+            identity_url: str,
+            identity_id: UUID,
+            event_input: dict[str, Any],
+            thread_id: UUID | None = None,
+        ) -> dict[str, Any]:
+            from kmbl_orchestrator.graph.app import build_graph_context, get_compiled_graph
+
+            ctx = build_graph_context(settings, repo)
+            graph = get_compiled_graph(ctx)
+
+            input_state = {
+                "thread_id": str(thread_id) if thread_id else str(uuid4()),
+                "identity_url": identity_url,
+                "identity_id": str(identity_id),
+                "event_input": event_input,
+                "trigger_type": "autonomous_loop",
+            }
+
+            final_state = None
+            async for state in graph.astream(input_state):
+                final_state = state
+
+            if final_state is None:
+                return {"error": "Graph produced no output"}
+
+            last_state = list(final_state.values())[-1] if final_state else {}
+            return {
+                "graph_run_id": last_state.get("graph_run_id"),
+                "thread_id": last_state.get("thread_id"),
+                "staging_snapshot_id": last_state.get("staging_snapshot_id"),
+                "evaluator_status": last_state.get("evaluator_status"),
+                "evaluator_score": last_state.get("evaluator_confidence"),
+            }
+
+        result = await tick_loop(repo, loop, run_graph_fn=run_graph)
+        return {
+            "status": "tick_completed",
+            **result.to_dict(),
+        }
+
+    finally:
+        repo.release_loop_lock(loop.loop_id)
+
+
+@app.post("/orchestrator/loops/{loop_id}/pause")
+def pause_loop(
+    loop_id: str,
+    repo: Repository = Depends(get_repo),
+) -> dict[str, str]:
+    """Pause an autonomous loop."""
+    loop = repo.get_autonomous_loop(UUID(loop_id))
+    if loop is None:
+        raise HTTPException(status_code=404, detail="Loop not found")
+    if loop.status not in ("pending", "running"):
+        raise HTTPException(status_code=400, detail=f"Cannot pause loop in status: {loop.status}")
+    repo.update_loop_state(UUID(loop_id), status="paused")
+    return {"status": "paused", "loop_id": loop_id}
+
+
+@app.post("/orchestrator/loops/{loop_id}/resume")
+def resume_loop(
+    loop_id: str,
+    repo: Repository = Depends(get_repo),
+) -> dict[str, str]:
+    """Resume a paused autonomous loop."""
+    loop = repo.get_autonomous_loop(UUID(loop_id))
+    if loop is None:
+        raise HTTPException(status_code=404, detail="Loop not found")
+    if loop.status != "paused":
+        raise HTTPException(status_code=400, detail=f"Cannot resume loop in status: {loop.status}")
+    repo.update_loop_state(UUID(loop_id), status="running")
+    return {"status": "running", "loop_id": loop_id}
+
+
+class InterruptBody(BaseModel):
+    message: str = Field(..., description="Instruction to send to the planner")
+
+
+@app.post("/orchestrator/loops/{loop_id}/interrupt")
+def interrupt_loop(
+    loop_id: str,
+    body: InterruptBody,
+    repo: Repository = Depends(get_repo),
+) -> dict[str, Any]:
+    """
+    Send an interrupt instruction to a running loop.
+    
+    The message is added to exploration_directions and will be picked up
+    by the planner on the next iteration.
+    """
+    loop = repo.get_autonomous_loop(UUID(loop_id))
+    if loop is None:
+        raise HTTPException(status_code=404, detail="Loop not found")
+    
+    from datetime import datetime, timezone
+    
+    interrupt_direction = {
+        "id": f"interrupt-{uuid4().hex[:8]}",
+        "type": "user_interrupt",
+        "message": body.message,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "priority": "high",
+    }
+    
+    new_directions = (loop.exploration_directions or []) + [interrupt_direction]
+    repo.update_loop_state(UUID(loop_id), exploration_directions=new_directions)
+    
+    return {
+        "status": "interrupt_queued",
+        "loop_id": loop_id,
+        "interrupt_id": interrupt_direction["id"],
+        "message": body.message,
+    }
 
 
 def run() -> None:

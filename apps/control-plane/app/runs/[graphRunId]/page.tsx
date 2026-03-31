@@ -173,6 +173,35 @@ export default async function GraphRunDetailPage({
         stream; refresh to update. Review surface is staging; canon is publication.
       </p>
 
+      {data.session_staging ? (
+        <div className="op-card op-card--compact" style={{ marginBottom: "1rem" }}>
+          <h2 className="op-section-title" style={{ marginBottom: "0.35rem" }}>
+            Session staging (live)
+          </h2>
+          <p className="muted small" style={{ marginTop: 0 }}>
+            Stable for this run: points at the <strong>current working staging</strong> for the
+            thread (updates as generator iterations apply). Unlike snapshot review links, this does
+            not change when new iterations land.
+          </p>
+          <p className="small" style={{ marginBottom: 0 }}>
+            <a
+              href={`/api/runs/${encodeURIComponent(graphRunId)}/staging-preview`}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Open live preview
+            </a>
+            <span className="muted small">
+              {" "}
+              · full payload:{" "}
+              <code className="mono small" title="GET on orchestrator">
+                {data.session_staging.orchestrator_working_staging_json_path}
+              </code>
+            </span>
+          </p>
+        </div>
+      ) : null}
+
       <section className="pub-hero">
         <div className="pub-hero__head">
           <h2 className="op-section-title" style={{ margin: 0 }}>
@@ -251,11 +280,12 @@ export default async function GraphRunDetailPage({
           Generator routing (KMBL)
         </h2>
         <p className="muted small" style={{ marginTop: 0 }}>
-          <span className="op-badge op-badge--neutral" title="Combined persisted vs scenario-tag notes">
+          <span className="op-badge op-badge--neutral" title="Where routing hints came from">
             routing facts: {routingView.routingFactSource}
           </span>{" "}
-          — Persisted <code>routing_metadata_json</code> on generator rows when present; OpenClaw{" "}
-          <code>provider_config_key</code> is always persisted; scenario tag lines are heuristic.
+          — This is <strong>diagnostic</strong>, not an error.{" "}
+          <code>persisted</code> means the orchestrator saved routing metadata on the generator invocation
+          (default <code>kmbl-generator</code> vs image agent when applicable). It does not mean the run failed.
         </p>
         {routingView.persistedRoutingLines.length > 0 ? (
           <>

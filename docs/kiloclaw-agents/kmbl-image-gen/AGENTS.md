@@ -14,7 +14,7 @@ Read **BOOTSTRAP.md**, **IDENTITY.md**, **USER.md**, **SOUL.md**, **TOOLS.md**, 
 ## Per invocation
 
 1. **SOUL.md** — strict JSON envelope, success vs failure, **Prompt return** (emit JSON as soon as artifact URLs exist)  
-2. **USER.md** — caller and fields  
+2. **USER.md** — caller and fields (including **`iteration_feedback`** on graph retries)  
 3. **IDENTITY.md** — agent id **`kmbl-image-gen`**
 
 Do **not** use **MEMORY.MD** or **HEARTBEAT.md** as run truth. **KMBL** persistence is canonical.

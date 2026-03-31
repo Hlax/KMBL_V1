@@ -15,6 +15,7 @@ from supabase import Client, create_client
 
 from kmbl_orchestrator.config import Settings
 from kmbl_orchestrator.domain import (
+    AutonomousLoopRecord,
     BuildCandidateRecord,
     BuildSpecRecord,
     CheckpointRecord,
@@ -25,8 +26,10 @@ from kmbl_orchestrator.domain import (
     IdentitySourceRecord,
     PublicationSnapshotRecord,
     RoleInvocationRecord,
+    StagingCheckpointRecord,
     StagingSnapshotRecord,
     ThreadRecord,
+    WorkingStagingRecord,
 )
 
 _log = logging.getLogger(__name__)
@@ -167,6 +170,7 @@ def _row_to_thread(row: dict[str, Any]) -> ThreadRecord:
 def _row_to_staging_snapshot(row: dict[str, Any]) -> StagingSnapshotRecord:
     iid = row.get("identity_id")
     gid = row.get("graph_run_id")
+    psid = row.get("prior_staging_snapshot_id")
     sp = row.get("snapshot_payload_json")
     return StagingSnapshotRecord(
         staging_snapshot_id=UUID(row["staging_snapshot_id"]),
@@ -174,6 +178,7 @@ def _row_to_staging_snapshot(row: dict[str, Any]) -> StagingSnapshotRecord:
         build_candidate_id=UUID(row["build_candidate_id"]),
         graph_run_id=UUID(gid) if gid else None,
         identity_id=UUID(iid) if iid else None,
+        prior_staging_snapshot_id=UUID(psid) if psid else None,
         snapshot_payload_json=sp if isinstance(sp, dict) else {},
         preview_url=row.get("preview_url"),
         status=str(row.get("status", "review_ready")),
@@ -183,6 +188,45 @@ def _row_to_staging_snapshot(row: dict[str, Any]) -> StagingSnapshotRecord:
         rejected_by=row.get("rejected_by"),
         rejected_at=_ts_to_iso(row.get("rejected_at")),
         rejection_reason=row.get("rejection_reason"),
+        user_rating=row.get("user_rating"),
+        user_feedback=row.get("user_feedback"),
+        rated_at=_ts_to_iso(row.get("rated_at")),
+        marked_for_review=row.get("marked_for_review", False),
+        mark_reason=row.get("mark_reason"),
+        review_tags=row.get("review_tags") or [],
+    )
+
+
+def _row_to_autonomous_loop(row: dict[str, Any]) -> AutonomousLoopRecord:
+    def _uuid_or_none(val: Any) -> UUID | None:
+        return UUID(val) if val else None
+
+    return AutonomousLoopRecord(
+        loop_id=UUID(row["loop_id"]),
+        identity_id=UUID(row["identity_id"]),
+        identity_url=row["identity_url"],
+        status=row.get("status", "pending"),
+        phase=row.get("phase", "identity_fetch"),
+        iteration_count=row.get("iteration_count", 0),
+        max_iterations=row.get("max_iterations", 50),
+        current_thread_id=_uuid_or_none(row.get("current_thread_id")),
+        current_graph_run_id=_uuid_or_none(row.get("current_graph_run_id")),
+        last_staging_snapshot_id=_uuid_or_none(row.get("last_staging_snapshot_id")),
+        last_evaluator_status=row.get("last_evaluator_status"),
+        last_evaluator_score=row.get("last_evaluator_score"),
+        exploration_directions=row.get("exploration_directions") or [],
+        completed_directions=row.get("completed_directions") or [],
+        auto_publish_threshold=row.get("auto_publish_threshold", 0.85),
+        proposed_staging_id=_uuid_or_none(row.get("proposed_staging_id")),
+        proposed_at=_ts_to_iso(row.get("proposed_at")),
+        locked_at=_ts_to_iso(row.get("locked_at")),
+        locked_by=row.get("locked_by"),
+        created_at=_ts_to_iso(row.get("created_at")) or "",
+        updated_at=_ts_to_iso(row.get("updated_at")) or "",
+        completed_at=_ts_to_iso(row.get("completed_at")),
+        total_staging_count=row.get("total_staging_count", 0),
+        total_publication_count=row.get("total_publication_count", 0),
+        best_rating=row.get("best_rating"),
     )
 
 
@@ -975,13 +1019,40 @@ class SupabaseRepository:
             return None
         return _row_to_evaluation_report(res.data[0])
 
+    def _next_graph_run_event_sequence_index(self, graph_run_id: UUID) -> int | None:
+        """
+        Next ``sequence_index`` for ``graph_run_event`` when the table has that column
+        and a unique (graph_run_id, sequence_index) constraint. Returns None if the column
+        is missing (older schemas).
+        """
+        try:
+            res = self._run(
+                "_next_graph_run_event_sequence_index",
+                "graph_run_event",
+                lambda: self._client.table("graph_run_event")
+                .select("sequence_index")
+                .eq("graph_run_id", str(graph_run_id))
+                .order("sequence_index", desc=True)
+                .limit(1)
+                .execute(),
+                graph_run_id=str(graph_run_id),
+            )
+        except RuntimeError:
+            return None
+        if not res.data:
+            return 0
+        try:
+            return int(res.data[0]["sequence_index"]) + 1
+        except (KeyError, TypeError, ValueError):
+            return None
+
     def save_graph_run_event(self, record: GraphRunEventRecord) -> None:
         """
         Persist an append-only timeline row.
 
-        Uses upsert with ``ignore_duplicates`` on ``graph_run_event_id`` (same pattern as
-        :meth:`save_checkpoint`) so a retry after an ambiguous transport disconnect does
-        not raise duplicate-key ``23505`` on ``graph_run_event_pkey``.
+        Supplies ``sequence_index`` when the DB enforces uniqueness on
+        (graph_run_id, sequence_index); retries with an incremented index on race (23505).
+        If ``sequence_index`` is not available, duplicate PK/unique errors are logged and ignored.
         """
         row: dict[str, Any] = {
             "graph_run_event_id": str(record.graph_run_event_id),
@@ -990,19 +1061,43 @@ class SupabaseRepository:
             "payload_json": record.payload_json,
             "created_at": record.created_at,
         }
-        self._run(
-            "save_graph_run_event",
-            "graph_run_event",
-            lambda: self._client.table("graph_run_event")
-            .upsert(
-                row,
-                on_conflict="graph_run_event_id",
-                ignore_duplicates=True,
-            )
-            .execute(),
-            graph_run_event_id=str(record.graph_run_event_id),
-            graph_run_id=str(record.graph_run_id),
-        )
+        if record.thread_id is not None:
+            row["thread_id"] = str(record.thread_id)
+
+        seq = self._next_graph_run_event_sequence_index(record.graph_run_id)
+        if seq is not None:
+            row["sequence_index"] = seq
+
+        max_bumps = 32
+        for bump in range(max_bumps):
+            try:
+                self._run(
+                    "save_graph_run_event",
+                    "graph_run_event",
+                    lambda r=row: self._client.table("graph_run_event")
+                    .insert(r)
+                    .execute(),
+                    graph_run_event_id=str(record.graph_run_event_id),
+                    graph_run_id=str(record.graph_run_id),
+                )
+                return
+            except RuntimeError as e:
+                if "23505" not in str(e):
+                    raise
+                if seq is None:
+                    _log.warning(
+                        "save_graph_run_event duplicate key ignored graph_run_event_id=%s",
+                        record.graph_run_event_id,
+                    )
+                    return
+                row["sequence_index"] = int(row.get("sequence_index", 0)) + 1
+                if bump == max_bumps - 1:
+                    _log.warning(
+                        "save_graph_run_event gave up after %s sequence bumps graph_run_event_id=%s",
+                        max_bumps,
+                        record.graph_run_event_id,
+                    )
+                    return
 
     def list_graph_run_events(
         self, graph_run_id: UUID, *, limit: int = 200
@@ -1133,6 +1228,8 @@ class SupabaseRepository:
             row["graph_run_id"] = str(record.graph_run_id)
         if record.identity_id is not None:
             row["identity_id"] = str(record.identity_id)
+        if record.prior_staging_snapshot_id is not None:
+            row["prior_staging_snapshot_id"] = str(record.prior_staging_snapshot_id)
         if record.preview_url is not None:
             row["preview_url"] = record.preview_url
         if record.approved_by is not None:
@@ -1205,6 +1302,35 @@ class SupabaseRepository:
             return []
         return [_row_to_staging_snapshot(r) for r in res.data]
 
+    def list_staging_snapshots_for_thread(
+        self,
+        thread_id: UUID,
+        *,
+        limit: int = 10,
+    ) -> list[StagingSnapshotRecord]:
+        lim = max(1, min(limit, 100))
+
+        def _query() -> Any:
+            return (
+                self._client.table("staging_snapshot")
+                .select("*")
+                .eq("thread_id", str(thread_id))
+                .order("created_at", desc=True)
+                .limit(lim)
+                .execute()
+            )
+
+        res = self._run(
+            "list_staging_snapshots_for_thread",
+            "staging_snapshot",
+            _query,
+            thread_id=str(thread_id),
+            limit=lim,
+        )
+        if not res.data:
+            return []
+        return [_row_to_staging_snapshot(r) for r in res.data]
+
     def update_staging_snapshot_status(
         self,
         staging_snapshot_id: UUID,
@@ -1243,6 +1369,244 @@ class SupabaseRepository:
         if not res.data:
             return None
         return _row_to_staging_snapshot(res.data[0])
+
+    def rate_staging_snapshot(
+        self,
+        staging_snapshot_id: UUID,
+        rating: int,
+        feedback: str | None = None,
+    ) -> StagingSnapshotRecord | None:
+        from datetime import datetime, timezone
+
+        patch: dict[str, Any] = {
+            "user_rating": rating,
+            "rated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if feedback is not None:
+            patch["user_feedback"] = feedback
+
+        def _query() -> Any:
+            return (
+                self._client.table("staging_snapshot")
+                .update(patch)
+                .eq("staging_snapshot_id", str(staging_snapshot_id))
+                .execute()
+            )
+
+        res = self._run(
+            "rate_staging_snapshot",
+            "staging_snapshot",
+            _query,
+            staging_snapshot_id=str(staging_snapshot_id),
+            rating=rating,
+        )
+        if not res.data:
+            return None
+        return _row_to_staging_snapshot(res.data[0])
+
+    # --- Autonomous Loop ---
+
+    def save_autonomous_loop(self, record: "AutonomousLoopRecord") -> None:
+        from kmbl_orchestrator.domain import AutonomousLoopRecord
+
+        row = {
+            "loop_id": str(record.loop_id),
+            "identity_id": str(record.identity_id),
+            "identity_url": record.identity_url,
+            "status": record.status,
+            "phase": record.phase,
+            "iteration_count": record.iteration_count,
+            "max_iterations": record.max_iterations,
+            "current_thread_id": str(record.current_thread_id) if record.current_thread_id else None,
+            "current_graph_run_id": str(record.current_graph_run_id) if record.current_graph_run_id else None,
+            "last_staging_snapshot_id": str(record.last_staging_snapshot_id) if record.last_staging_snapshot_id else None,
+            "last_evaluator_status": record.last_evaluator_status,
+            "last_evaluator_score": record.last_evaluator_score,
+            "exploration_directions": record.exploration_directions,
+            "completed_directions": record.completed_directions,
+            "auto_publish_threshold": record.auto_publish_threshold,
+            "proposed_staging_id": str(record.proposed_staging_id) if record.proposed_staging_id else None,
+            "proposed_at": record.proposed_at,
+            "locked_at": record.locked_at,
+            "locked_by": record.locked_by,
+            "created_at": record.created_at,
+            "updated_at": record.updated_at,
+            "completed_at": record.completed_at,
+            "total_staging_count": record.total_staging_count,
+            "total_publication_count": record.total_publication_count,
+            "best_rating": record.best_rating,
+        }
+
+        def _query() -> Any:
+            return self._client.table("autonomous_loop").upsert(row, on_conflict="loop_id").execute()
+
+        self._run("save_autonomous_loop", "autonomous_loop", _query, loop_id=str(record.loop_id))
+
+    def get_autonomous_loop(self, loop_id: UUID) -> "AutonomousLoopRecord | None":
+        def _query() -> Any:
+            return self._client.table("autonomous_loop").select("*").eq("loop_id", str(loop_id)).limit(1).execute()
+
+        res = self._run("get_autonomous_loop", "autonomous_loop", _query, loop_id=str(loop_id))
+        if not res.data:
+            return None
+        return _row_to_autonomous_loop(res.data[0])
+
+    def get_autonomous_loop_for_identity(self, identity_id: UUID) -> "AutonomousLoopRecord | None":
+        def _query() -> Any:
+            return (
+                self._client.table("autonomous_loop")
+                .select("*")
+                .eq("identity_id", str(identity_id))
+                .not_.in_("status", ["completed", "failed"])
+                .order("created_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+
+        res = self._run("get_autonomous_loop_for_identity", "autonomous_loop", _query, identity_id=str(identity_id))
+        if not res.data:
+            return None
+        return _row_to_autonomous_loop(res.data[0])
+
+    def list_autonomous_loops(
+        self,
+        *,
+        status: str | None = None,
+        limit: int = 20,
+    ) -> list["AutonomousLoopRecord"]:
+        lim = max(1, min(limit, 100))
+
+        def _query() -> Any:
+            q = self._client.table("autonomous_loop").select("*")
+            if status is not None:
+                q = q.eq("status", status)
+            return q.order("created_at", desc=True).limit(lim).execute()
+
+        res = self._run("list_autonomous_loops", "autonomous_loop", _query, status=status, limit=lim)
+        if not res.data:
+            return []
+        return [_row_to_autonomous_loop(r) for r in res.data]
+
+    def get_next_pending_loop(self) -> "AutonomousLoopRecord | None":
+        from datetime import datetime, timezone, timedelta
+
+        lock_timeout = timedelta(seconds=300)
+        cutoff = (datetime.now(timezone.utc) - lock_timeout).isoformat()
+
+        def _query() -> Any:
+            return (
+                self._client.table("autonomous_loop")
+                .select("*")
+                .in_("status", ["pending", "running"])
+                .or_(f"locked_at.is.null,locked_at.lt.{cutoff}")
+                .order("created_at")
+                .limit(1)
+                .execute()
+            )
+
+        res = self._run("get_next_pending_loop", "autonomous_loop", _query)
+        if not res.data:
+            return None
+        return _row_to_autonomous_loop(res.data[0])
+
+    def try_acquire_loop_lock(
+        self,
+        loop_id: UUID,
+        locked_by: str,
+        lock_timeout_seconds: int = 300,
+    ) -> bool:
+        from datetime import datetime, timezone, timedelta
+
+        now = datetime.now(timezone.utc)
+        cutoff = (now - timedelta(seconds=lock_timeout_seconds)).isoformat()
+
+        def _query() -> Any:
+            return (
+                self._client.table("autonomous_loop")
+                .update({"locked_at": now.isoformat(), "locked_by": locked_by, "updated_at": now.isoformat()})
+                .eq("loop_id", str(loop_id))
+                .or_(f"locked_at.is.null,locked_at.lt.{cutoff}")
+                .execute()
+            )
+
+        res = self._run("try_acquire_loop_lock", "autonomous_loop", _query, loop_id=str(loop_id))
+        return bool(res.data)
+
+    def release_loop_lock(self, loop_id: UUID) -> None:
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc).isoformat()
+
+        def _query() -> Any:
+            return (
+                self._client.table("autonomous_loop")
+                .update({"locked_at": None, "locked_by": None, "updated_at": now})
+                .eq("loop_id", str(loop_id))
+                .execute()
+            )
+
+        self._run("release_loop_lock", "autonomous_loop", _query, loop_id=str(loop_id))
+
+    def update_loop_state(
+        self,
+        loop_id: UUID,
+        *,
+        status: str | None = None,
+        phase: str | None = None,
+        iteration_count: int | None = None,
+        current_thread_id: UUID | None = None,
+        current_graph_run_id: UUID | None = None,
+        last_staging_snapshot_id: UUID | None = None,
+        last_evaluator_status: str | None = None,
+        last_evaluator_score: float | None = None,
+        exploration_directions: list | None = None,
+        completed_directions: list | None = None,
+        proposed_staging_id: UUID | None = None,
+        total_staging_count: int | None = None,
+        best_rating: int | None = None,
+    ) -> "AutonomousLoopRecord | None":
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc).isoformat()
+        patch: dict[str, Any] = {"updated_at": now}
+
+        if status is not None:
+            patch["status"] = status
+            if status == "completed":
+                patch["completed_at"] = now
+        if phase is not None:
+            patch["phase"] = phase
+        if iteration_count is not None:
+            patch["iteration_count"] = iteration_count
+        if current_thread_id is not None:
+            patch["current_thread_id"] = str(current_thread_id)
+        if current_graph_run_id is not None:
+            patch["current_graph_run_id"] = str(current_graph_run_id)
+        if last_staging_snapshot_id is not None:
+            patch["last_staging_snapshot_id"] = str(last_staging_snapshot_id)
+        if last_evaluator_status is not None:
+            patch["last_evaluator_status"] = last_evaluator_status
+        if last_evaluator_score is not None:
+            patch["last_evaluator_score"] = last_evaluator_score
+        if exploration_directions is not None:
+            patch["exploration_directions"] = exploration_directions
+        if completed_directions is not None:
+            patch["completed_directions"] = completed_directions
+        if proposed_staging_id is not None:
+            patch["proposed_staging_id"] = str(proposed_staging_id)
+            patch["proposed_at"] = now
+        if total_staging_count is not None:
+            patch["total_staging_count"] = total_staging_count
+        if best_rating is not None:
+            patch["best_rating"] = best_rating
+
+        def _query() -> Any:
+            return self._client.table("autonomous_loop").update(patch).eq("loop_id", str(loop_id)).execute()
+
+        res = self._run("update_loop_state", "autonomous_loop", _query, loop_id=str(loop_id))
+        if not res.data:
+            return None
+        return _row_to_autonomous_loop(res.data[0])
 
     def save_publication_snapshot(self, record: PublicationSnapshotRecord) -> None:
         """
@@ -1462,6 +1826,123 @@ class SupabaseRepository:
             identity_id=str(record.identity_id),
         )
 
+    # ---- Working staging ----
+
+    def get_working_staging_for_thread(
+        self, thread_id: UUID
+    ) -> WorkingStagingRecord | None:
+        res = self._run(
+            "get_working_staging_for_thread",
+            "working_staging",
+            lambda: self._client.table("working_staging")
+            .select("*")
+            .eq("thread_id", str(thread_id))
+            .limit(1)
+            .execute(),
+            thread_id=str(thread_id),
+        )
+        if not res.data:
+            return None
+        return _row_to_working_staging(res.data[0])
+
+    def save_working_staging(self, record: WorkingStagingRecord) -> None:
+        row: dict[str, Any] = {
+            "working_staging_id": str(record.working_staging_id),
+            "thread_id": str(record.thread_id),
+            "payload_json": record.payload_json,
+            "last_update_mode": record.last_update_mode,
+            "revision": record.revision,
+            "status": record.status,
+            "created_at": record.created_at,
+            "updated_at": record.updated_at,
+            "stagnation_count": record.stagnation_count,
+            "last_evaluator_issue_count": record.last_evaluator_issue_count,
+            "last_revision_summary_json": record.last_revision_summary_json,
+        }
+        if record.identity_id is not None:
+            row["identity_id"] = str(record.identity_id)
+        if record.last_update_graph_run_id is not None:
+            row["last_update_graph_run_id"] = str(record.last_update_graph_run_id)
+        if record.last_update_build_candidate_id is not None:
+            row["last_update_build_candidate_id"] = str(record.last_update_build_candidate_id)
+        if record.current_checkpoint_id is not None:
+            row["current_checkpoint_id"] = str(record.current_checkpoint_id)
+        if record.last_rebuild_revision is not None:
+            row["last_rebuild_revision"] = record.last_rebuild_revision
+        self._run(
+            "save_working_staging",
+            "working_staging",
+            lambda: self._client.table("working_staging")
+            .upsert(row, on_conflict="working_staging_id")
+            .execute(),
+            working_staging_id=str(record.working_staging_id),
+        )
+
+    def save_staging_checkpoint(self, record: StagingCheckpointRecord) -> None:
+        row: dict[str, Any] = {
+            "staging_checkpoint_id": str(record.staging_checkpoint_id),
+            "working_staging_id": str(record.working_staging_id),
+            "thread_id": str(record.thread_id),
+            "payload_snapshot_json": record.payload_snapshot_json,
+            "revision_at_checkpoint": record.revision_at_checkpoint,
+            "trigger": record.trigger,
+            "created_at": record.created_at,
+        }
+        if record.source_graph_run_id is not None:
+            row["source_graph_run_id"] = str(record.source_graph_run_id)
+        if record.reason_category is not None:
+            row["reason_category"] = record.reason_category
+        if record.reason_explanation is not None:
+            row["reason_explanation"] = record.reason_explanation
+        self._run(
+            "save_staging_checkpoint",
+            "staging_checkpoint",
+            lambda: self._client.table("staging_checkpoint")
+            .upsert(
+                row,
+                on_conflict="staging_checkpoint_id",
+                ignore_duplicates=True,
+            )
+            .execute(),
+            staging_checkpoint_id=str(record.staging_checkpoint_id),
+        )
+
+    def get_staging_checkpoint(
+        self, staging_checkpoint_id: UUID
+    ) -> StagingCheckpointRecord | None:
+        res = self._run(
+            "get_staging_checkpoint",
+            "staging_checkpoint",
+            lambda: self._client.table("staging_checkpoint")
+            .select("*")
+            .eq("staging_checkpoint_id", str(staging_checkpoint_id))
+            .limit(1)
+            .execute(),
+            staging_checkpoint_id=str(staging_checkpoint_id),
+        )
+        if not res.data:
+            return None
+        return _row_to_staging_checkpoint(res.data[0])
+
+    def list_staging_checkpoints(
+        self, working_staging_id: UUID, *, limit: int = 50
+    ) -> list[StagingCheckpointRecord]:
+        lim = max(1, min(limit, 500))
+        res = self._run(
+            "list_staging_checkpoints",
+            "staging_checkpoint",
+            lambda: self._client.table("staging_checkpoint")
+            .select("*")
+            .eq("working_staging_id", str(working_staging_id))
+            .order("created_at", desc=True)
+            .limit(lim)
+            .execute(),
+            working_staging_id=str(working_staging_id),
+        )
+        if not res.data:
+            return []
+        return [_row_to_staging_checkpoint(r) for r in res.data]
+
 
 def _row_to_identity_source(row: dict[str, Any]) -> IdentitySourceRecord:
     return IdentitySourceRecord(
@@ -1483,4 +1964,51 @@ def _row_to_identity_profile(row: dict[str, Any]) -> IdentityProfileRecord:
         facets_json=row.get("facets_json") if isinstance(row.get("facets_json"), dict) else {},
         open_questions_json=oq if isinstance(oq, list) else [],
         updated_at=_ts_to_iso(row.get("updated_at")) or "",
+    )
+
+
+def _row_to_working_staging(row: dict[str, Any]) -> WorkingStagingRecord:
+    iid = row.get("identity_id")
+    gid = row.get("last_update_graph_run_id")
+    bcid = row.get("last_update_build_candidate_id")
+    cpid = row.get("current_checkpoint_id")
+    pj = row.get("payload_json")
+    lrr = row.get("last_rebuild_revision")
+    lrsj = row.get("last_revision_summary_json")
+    return WorkingStagingRecord(
+        working_staging_id=UUID(row["working_staging_id"]),
+        thread_id=UUID(row["thread_id"]),
+        identity_id=UUID(iid) if iid else None,
+        payload_json=pj if isinstance(pj, dict) else {},
+        last_update_mode=str(row.get("last_update_mode", "init")),  # type: ignore[arg-type]
+        last_update_graph_run_id=UUID(gid) if gid else None,
+        last_update_build_candidate_id=UUID(bcid) if bcid else None,
+        current_checkpoint_id=UUID(cpid) if cpid else None,
+        revision=int(row.get("revision", 0)),
+        status=str(row.get("status", "draft")),  # type: ignore[arg-type]
+        created_at=_ts_to_iso(row.get("created_at")) or "",
+        updated_at=_ts_to_iso(row.get("updated_at")) or "",
+        last_rebuild_revision=int(lrr) if lrr is not None else None,
+        stagnation_count=int(row.get("stagnation_count", 0)),
+        last_evaluator_issue_count=int(row.get("last_evaluator_issue_count", 0)),
+        last_revision_summary_json=lrsj if isinstance(lrsj, dict) else {},
+    )
+
+
+def _row_to_staging_checkpoint(row: dict[str, Any]) -> StagingCheckpointRecord:
+    gid = row.get("source_graph_run_id")
+    pj = row.get("payload_snapshot_json")
+    rc = row.get("reason_category")
+    re = row.get("reason_explanation")
+    return StagingCheckpointRecord(
+        staging_checkpoint_id=UUID(row["staging_checkpoint_id"]),
+        working_staging_id=UUID(row["working_staging_id"]),
+        thread_id=UUID(row["thread_id"]),
+        payload_snapshot_json=pj if isinstance(pj, dict) else {},
+        revision_at_checkpoint=int(row.get("revision_at_checkpoint", 0)),
+        trigger=str(row.get("trigger", "post_patch")),  # type: ignore[arg-type]
+        source_graph_run_id=UUID(gid) if gid else None,
+        created_at=_ts_to_iso(row.get("created_at")) or "",
+        reason_category=rc if isinstance(rc, str) else None,
+        reason_explanation=re if isinstance(re, str) else None,
     )

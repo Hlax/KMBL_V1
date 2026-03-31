@@ -28,13 +28,15 @@ def test_normalize_gallery_artifact_valid() -> None:
     assert out[0]["url"] == "https://example.com/a.png"
 
 
-def test_duplicate_key_rejected() -> None:
+def test_duplicate_key_skipped() -> None:
     raw = [
         {"role": "gallery_strip_image_v1", "key": "x", "url": "https://example.com/1.png"},
         {"role": "gallery_strip_image_v1", "key": "x", "url": "https://example.com/2.png"},
     ]
-    with pytest.raises(ValueError, match="duplicate"):
-        normalize_gallery_artifact_outputs_list(raw)
+    out = normalize_gallery_artifact_outputs_list(raw)
+    gallery = [r for r in out if isinstance(r, dict) and r.get("role") == "gallery_strip_image_v1"]
+    assert len(gallery) == 1
+    assert gallery[0]["url"] == "https://example.com/1.png"
 
 
 def test_pass_through_non_gallery_artifacts() -> None:
@@ -43,13 +45,15 @@ def test_pass_through_non_gallery_artifacts() -> None:
     assert out == raw
 
 
-def test_model_rejects_extra_keys() -> None:
-    with pytest.raises(ValidationError):
-        GalleryStripImageArtifactV1.model_validate(
-            {
-                "role": "gallery_strip_image_v1",
-                "key": "k",
-                "url": "https://example.com/z.png",
-                "extra": 1,
-            }
-        )
+def test_model_ignores_extra_keys() -> None:
+    model = GalleryStripImageArtifactV1.model_validate(
+        {
+            "role": "gallery_strip_image_v1",
+            "key": "k",
+            "url": "https://example.com/z.png",
+            "extra": 1,
+        }
+    )
+    assert model.key == "k"
+    dumped = model.model_dump(mode="json")
+    assert "extra" not in dumped

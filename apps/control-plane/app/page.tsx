@@ -83,6 +83,9 @@ export default async function HomePage() {
         <Link className="op-home-surface-links__a op-home-surface-links__a--runs" href="/runs">
           Runs
         </Link>
+        <Link className="op-home-surface-links__a" href="/autonomous" style={{ background: "#9b59b6" }}>
+          Autonomous
+        </Link>
       </nav>
 
       {pinnedGallery ? (

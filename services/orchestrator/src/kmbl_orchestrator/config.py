@@ -39,6 +39,24 @@ class Settings(BaseSettings):
     orchestrator_run_start_sync_timeout_sec: float = 120.0
     # If true: background work runs only one planner role + persist (no generator/evaluator/staging).
     orchestrator_smoke_planner_only: bool = False
+    # LangGraph generator↔evaluator loop: default max iterations (exploratory runs; Anthropic-style harness).
+    graph_max_iterations_default: int = Field(
+        default=10,
+        ge=1,
+        le=100,
+        validation_alias=AliasChoices(
+            "KMBL_GRAPH_MAX_ITERATIONS_DEFAULT",
+            "graph_max_iterations_default",
+        ),
+    )
+    # Absolute URLs in kmbl_session_staging (optional). E.g. http://127.0.0.1:8010 for local agents fetching previews.
+    orchestrator_public_base_url: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "KMBL_ORCHESTRATOR_PUBLIC_BASE_URL",
+            "orchestrator_public_base_url",
+        ),
+    )
 
     kiloclaw_base_url: str = "https://kiloclaw.example.invalid"
     # KiloClaw gateway OpenAI-compatible chat: POST {base}{path} (default /v1/chat/completions).
@@ -81,6 +99,15 @@ class Settings(BaseSettings):
     # httpx client for KILOCLAW_TRANSPORT=http (chat completions POST).
     kiloclaw_http_connect_timeout_sec: float = 30.0
     kiloclaw_http_read_timeout_sec: float = 300.0
+    # OpenAI-style chat completion cap (sent as ``max_tokens``). Planner JSON can be large;
+    # omit or lower if your gateway rejects high values.
+    kiloclaw_chat_max_tokens_planner: int | None = Field(
+        default=8192,
+        validation_alias=AliasChoices(
+            "KILOCLAW_CHAT_MAX_TOKENS_PLANNER",
+            "kiloclaw_chat_max_tokens_planner",
+        ),
+    )
 
     supabase_url: str = ""
     supabase_service_role_key: str = ""
@@ -110,6 +137,13 @@ class Settings(BaseSettings):
         default=4,
         validation_alias=AliasChoices(
             "KMB_MAX_IMAGES_PER_GRAPH_RUN", "kmb_max_images_per_graph_run"
+        ),
+    )
+    habitat_image_generation_enabled: bool = Field(
+        default=True,
+        description="Enable image generation during habitat assembly (uses OpenAI API)",
+        validation_alias=AliasChoices(
+            "HABITAT_IMAGE_GENERATION_ENABLED", "habitat_image_generation_enabled"
         ),
     )
 

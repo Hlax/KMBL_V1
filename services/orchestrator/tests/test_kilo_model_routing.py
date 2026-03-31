@@ -258,3 +258,24 @@ def test_planner_evaluator_cannot_use_openai_route_helpers() -> None:
         event_input={"task": "plan only"},
         build_spec={"constraints": {}, "success_criteria": []},
     )
+
+
+def test_static_frontend_vertical_ignores_criteria_substring_markers() -> None:
+    """Planner prose must not trigger image route (e.g. 'ui_gallery_strip' in success_criteria)."""
+    intent = extract_image_generation_intent(
+        event_input={
+            "constraints": {
+                "canonical_vertical": "static_frontend_file_v1",
+                "kmbl_static_frontend_vertical": True,
+            },
+        },
+        build_spec={
+            "type": "static_frontend_file_v1",
+            "success_criteria": [
+                "Must include ui_gallery_strip for work section",
+            ],
+        },
+        generator_payload={},
+    )
+    assert intent.kind == "none"
+    assert "static_frontend_vertical" in intent.route_reason

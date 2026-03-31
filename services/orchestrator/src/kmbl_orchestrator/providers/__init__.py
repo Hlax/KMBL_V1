@@ -1,23 +1,15 @@
-from kmbl_orchestrator.contracts.role_provider import RoleProvider
-from kmbl_orchestrator.providers.kiloclaw import (
-    KiloClawClient,
-    KiloClawHttpClient,
-    KiloClawInvocationError,
-    KiloClawStubClient,
-    OpenClawCliClient,
-    extract_role_payload_from_openclaw_output,
-    get_kiloclaw_client,
-    provider_failure,
-)
+"""
+Providers package: image generation, content generation, and other external services.
+
+Provides a unified interface for habitat assembly and other orchestrator needs.
+"""
+
+from kmbl_orchestrator.providers.image import ImageService, HabitatImageRequest
+from kmbl_orchestrator.providers.content import ContentService, HabitatContentRequest
 
 __all__ = [
-    "KiloClawClient",
-    "KiloClawHttpClient",
-    "KiloClawInvocationError",
-    "KiloClawStubClient",
-    "OpenClawCliClient",
-    "RoleProvider",
-    "extract_role_payload_from_openclaw_output",
-    "get_kiloclaw_client",
-    "provider_failure",
+    "ImageService",
+    "HabitatImageRequest",
+    "ContentService",
+    "HabitatContentRequest",
 ]

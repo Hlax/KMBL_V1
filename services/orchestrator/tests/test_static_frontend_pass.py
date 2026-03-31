@@ -48,18 +48,19 @@ def test_static_frontend_artifact_normalizes_and_dedupes_roles() -> None:
     assert out[1]["previewable"] is False
 
 
-def test_static_frontend_rejects_duplicate_paths() -> None:
+def test_static_frontend_skips_duplicate_paths() -> None:
     one = {
         "role": "static_frontend_file_v1",
         "path": "component/a.html",
         "language": "html",
         "content": _minimal_html(),
     }
-    with pytest.raises(ValueError, match="duplicate"):
-        normalize_static_frontend_artifact_outputs_list([one, one])
+    result = normalize_static_frontend_artifact_outputs_list([one, one])
+    static = [r for r in result if isinstance(r, dict) and r.get("role") == "static_frontend_file_v1"]
+    assert len(static) == 1
 
 
-def test_static_frontend_rejects_two_entry_for_preview_same_bundle() -> None:
+def test_static_frontend_warns_on_two_entry_for_preview_same_bundle() -> None:
     a = {
         "role": "static_frontend_file_v1",
         "path": "component/a.html",
@@ -76,8 +77,9 @@ def test_static_frontend_rejects_two_entry_for_preview_same_bundle() -> None:
         "bundle_id": "b1",
         "entry_for_preview": True,
     }
-    with pytest.raises(ValueError, match="entry_for_preview"):
-        normalize_static_frontend_artifact_outputs_list([a, b])
+    result = normalize_static_frontend_artifact_outputs_list([a, b])
+    static = [r for r in result if isinstance(r, dict) and r.get("role") == "static_frontend_file_v1"]
+    assert len(static) == 2
 
 
 def test_combined_with_gallery_unchanged_order() -> None:
@@ -128,7 +130,7 @@ def test_normalize_generator_output_chains_preview_patch() -> None:
     assert len(bc.artifact_refs_json) == 1
 
 
-def test_normalize_generator_rejects_preview_path_not_in_artifacts() -> None:
+def test_normalize_generator_warns_on_preview_path_not_in_artifacts() -> None:
     raw = {
         "artifact_outputs": [
             {
@@ -146,14 +148,14 @@ def test_normalize_generator_rejects_preview_path_not_in_artifacts() -> None:
     gid = uuid4()
     ginv = uuid4()
     bsid = uuid4()
-    with pytest.raises(ValueError, match="static_frontend_preview_v1"):
-        normalize_generator_output(
-            raw,
-            thread_id=tid,
-            graph_run_id=gid,
-            generator_invocation_id=ginv,
-            build_spec_id=bsid,
-        )
+    bc = normalize_generator_output(
+        raw,
+        thread_id=tid,
+        graph_run_id=gid,
+        generator_invocation_id=ginv,
+        build_spec_id=bsid,
+    )
+    assert len(bc.artifact_refs_json) == 1
 
 
 def test_derive_frontend_static_v1_preview_entry() -> None:

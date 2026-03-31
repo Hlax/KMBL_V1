@@ -23,8 +23,23 @@ class _PlannerPersistableBody(BaseModel):
     build_spec: _PlannerBuildSpecShape
 
 
+def _is_non_empty_generator_field(value: Any) -> bool:
+    """Check if a generator field is semantically non-empty."""
+    if value is None:
+        return False
+    if isinstance(value, dict) and not value:
+        return False
+    if isinstance(value, list):
+        if not value:
+            return False
+        # List of only empty dicts is considered empty
+        if all(isinstance(item, dict) and not item for item in value):
+            return False
+    return True
+
+
 class _GeneratorPersistableBody(BaseModel):
-    """Ensure at least one persistable artifact exists beyond empty dict."""
+    """Ensure at least one persistable artifact exists with actual content."""
 
     proposed_changes: Any | None = None
     updated_state: Any | None = None
@@ -32,12 +47,14 @@ class _GeneratorPersistableBody(BaseModel):
 
     @model_validator(mode="after")
     def at_least_one_persistable(self) -> _GeneratorPersistableBody:
-        if (
-            self.proposed_changes is None
-            and self.updated_state is None
-            and self.artifact_outputs is None
-        ):
-            raise ValueError("no persistable generator fields")
+        has_proposed = _is_non_empty_generator_field(self.proposed_changes)
+        has_state = _is_non_empty_generator_field(self.updated_state)
+        has_artifacts = _is_non_empty_generator_field(self.artifact_outputs)
+        
+        if not (has_proposed or has_state or has_artifacts):
+            raise ValueError(
+                "no persistable generator fields (all are None, empty, or contain only empty dicts)"
+            )
         return self
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -25,6 +26,7 @@ class StagingPayloadIdsV1(BaseModel):
     evaluation_report_id: str
     identity_id: str | None = None
     build_spec_id: str | None = None
+    prior_staging_snapshot_id: str | None = None
 
 
 class StagingPayloadSummaryV1(BaseModel):
@@ -98,6 +100,38 @@ class StagingPayloadFrontendStaticV1(BaseModel):
     patch_preview_entry_path: str | None = None
 
 
+class StagingPayloadHabitatPageV1(BaseModel):
+    """Habitat page summary for review UIs."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    slug: str
+    title: str
+    section_count: int = 0
+    file_path: str | None = None
+
+
+class StagingPayloadHabitatV1(BaseModel):
+    """
+    Derived review hints for habitat-assembled artifacts.
+
+    Provides summary information about the habitat structure for review UIs.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    slug: str
+    framework: str
+    theme: str
+    page_count: int = 0
+    file_count: int = 0
+    pages: list[StagingPayloadHabitatPageV1] = Field(default_factory=list)
+    libraries: list[str] = Field(default_factory=list)
+    has_custom_css: bool = False
+    has_custom_js: bool = False
+
+
 class StagingPayloadMetadataV1(BaseModel):
     """Non-UI working state slice persisted on the candidate (no raw KiloClaw envelope)."""
 
@@ -105,6 +139,11 @@ class StagingPayloadMetadataV1(BaseModel):
 
     working_state_patch: dict[str, Any] = Field(default_factory=dict)
     frontend_static: StagingPayloadFrontendStaticV1 | None = None
+    habitat: StagingPayloadHabitatV1 | None = None
+    content_reuse_note: str | None = Field(
+        default=None,
+        description="When prior staging exists: generated images / gallery URLs may repeat as content.",
+    )
 
 
 class StagingSnapshotPayloadV1(BaseModel):
@@ -212,12 +251,117 @@ def derive_frontend_static_v1(
     )
 
 
+def derive_habitat_v1(
+    artifact_refs: list[Any],
+    working_state_patch: dict[str, Any],
+) -> StagingPayloadHabitatV1 | None:
+    """
+    Build a deterministic summary of habitat artifacts for review UIs.
+
+    Extracts habitat metadata from the working state patch if present,
+    or infers it from bundle structure.
+    """
+    habitat_meta = working_state_patch.get("habitat_manifest_v2")
+    if not isinstance(habitat_meta, dict):
+        static_rows = [
+            a for a in artifact_refs
+            if isinstance(a, dict) and a.get("role") == "static_frontend_file_v1"
+        ]
+        if not static_rows:
+            return None
+
+        bundles: set[str] = set()
+        for row in static_rows:
+            bid = row.get("bundle_id")
+            if isinstance(bid, str) and bid:
+                bundles.add(bid)
+
+        if len(bundles) != 1:
+            return None
+
+        bundle_slug = list(bundles)[0]
+        html_files = [r for r in static_rows if r.get("language") == "html"]
+
+        pages = []
+        for html_row in html_files:
+            path = str(html_row.get("path", ""))
+            slug = "/" if "index.html" in path else f"/{path.split('/')[-1].replace('.html', '')}"
+            pages.append(StagingPayloadHabitatPageV1(
+                slug=slug,
+                title=slug.strip("/").title() or "Home",
+                section_count=0,
+                file_path=path,
+            ))
+
+        return StagingPayloadHabitatV1(
+            name=bundle_slug.replace("-", " ").title(),
+            slug=bundle_slug,
+            framework="unknown",
+            theme="default",
+            page_count=len(pages),
+            file_count=len(static_rows),
+            pages=pages,
+            libraries=[],
+            has_custom_css=False,
+            has_custom_js=False,
+        )
+
+    name = habitat_meta.get("name", "")
+    slug = habitat_meta.get("slug", "")
+    framework_config = habitat_meta.get("framework", {})
+    framework = framework_config.get("base", "daisyui") if isinstance(framework_config, dict) else "daisyui"
+    theme = framework_config.get("theme", "corporate") if isinstance(framework_config, dict) else "corporate"
+
+    pages_raw = habitat_meta.get("pages", [])
+    pages = []
+    if isinstance(pages_raw, list):
+        for p in pages_raw:
+            if isinstance(p, dict):
+                page_slug = p.get("slug", "/")
+                slug_path = "index" if page_slug == "/" else page_slug.strip("/").replace("/", "-")
+                pages.append(StagingPayloadHabitatPageV1(
+                    slug=page_slug,
+                    title=p.get("title", ""),
+                    section_count=len(p.get("sections", [])),
+                    file_path=f"component/{slug}/{slug_path}.html",
+                ))
+
+    libs_raw = habitat_meta.get("libraries", [])
+    libraries = []
+    if isinstance(libs_raw, list):
+        for lib in libs_raw:
+            if isinstance(lib, dict):
+                lib_name = lib.get("name", "")
+                if lib_name:
+                    libraries.append(lib_name)
+
+    static_count = sum(
+        1 for a in artifact_refs
+        if isinstance(a, dict) and a.get("role") == "static_frontend_file_v1"
+        and isinstance(a.get("bundle_id"), str) and a.get("bundle_id") == slug
+    )
+
+    return StagingPayloadHabitatV1(
+        name=name,
+        slug=slug,
+        framework=framework,
+        theme=theme,
+        page_count=len(pages),
+        file_count=static_count,
+        pages=pages,
+        libraries=libraries,
+        has_custom_css=bool(habitat_meta.get("custom_css")),
+        has_custom_js=bool(habitat_meta.get("custom_js")),
+    )
+
+
 def build_staging_snapshot_payload(
     *,
     build_candidate: BuildCandidateRecord,
     evaluation_report: EvaluationReportRecord,
     thread: ThreadRecord,
     build_spec: BuildSpecRecord | None,
+    prior_staging_snapshot_id: UUID | None = None,
 ) -> dict[str, Any]:
     """
     Pure function: same persisted inputs → same JSON-serializable dict.
@@ -226,10 +370,19 @@ def build_staging_snapshot_payload(
     """
     sj: dict[str, Any] = build_spec.spec_json if build_spec is not None else {}
     wsp = dict(build_candidate.working_state_patch_json)
-    fs = derive_frontend_static_v1(
-        list(build_candidate.artifact_refs_json),
-        wsp,
-    )
+    artifact_refs = list(build_candidate.artifact_refs_json)
+
+    fs = derive_frontend_static_v1(artifact_refs, wsp)
+    habitat = derive_habitat_v1(artifact_refs, wsp)
+
+    prior_s = str(prior_staging_snapshot_id) if prior_staging_snapshot_id is not None else None
+    reuse_note: str | None = None
+    if prior_staging_snapshot_id is not None:
+        reuse_note = (
+            "Prior staging on this thread: generated images, gallery URLs, and other artifacts "
+            "may intentionally reuse the same references across amends."
+        )
+
     spec_summary = StagingPayloadSummaryV1(
         type=sj.get("type") if isinstance(sj.get("type"), str) else None,
         title=sj.get("title") if isinstance(sj.get("title"), str) else None,
@@ -242,6 +395,7 @@ def build_staging_snapshot_payload(
             evaluation_report_id=str(evaluation_report.evaluation_report_id),
             identity_id=str(thread.identity_id) if thread.identity_id is not None else None,
             build_spec_id=str(build_spec.build_spec_id) if build_spec is not None else None,
+            prior_staging_snapshot_id=prior_s,
         ),
         summary=spec_summary,
         evaluation=StagingPayloadEvaluationV1(
@@ -255,11 +409,13 @@ def build_staging_snapshot_payload(
             sandbox_ref=build_candidate.sandbox_ref,
         ),
         artifacts=StagingPayloadArtifactsV1(
-            artifact_refs=list(build_candidate.artifact_refs_json),
+            artifact_refs=artifact_refs,
         ),
         metadata=StagingPayloadMetadataV1(
             working_state_patch=wsp,
             frontend_static=fs,
+            habitat=habitat,
+            content_reuse_note=reuse_note,
         ),
     )
     return body.model_dump(mode="json")

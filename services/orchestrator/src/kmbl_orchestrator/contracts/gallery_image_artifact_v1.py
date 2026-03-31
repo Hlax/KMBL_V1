@@ -15,10 +15,13 @@ Other artifact shapes pass through unchanged (list position preserved).
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+_log = logging.getLogger(__name__)
 
 _KEY_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$")
 
@@ -33,7 +36,7 @@ def _http_url_required(v: str) -> str:
 class GalleryStripImageArtifactV1(BaseModel):
     """Stable, reviewable gallery image ref — persisted in artifact_outputs."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     role: Literal["gallery_strip_image_v1"]
     key: str = Field(min_length=1, max_length=64)
@@ -73,7 +76,8 @@ def normalize_gallery_artifact_outputs_list(raw: Any) -> list[Any]:
     """
     Validate ``gallery_strip_image_v1`` dicts; pass through other entries unchanged.
 
-    Raises ``ValueError`` on duplicate keys or invalid gallery artifact rows.
+    Skips malformed gallery rows with a warning rather than crashing.
+    Duplicate keys keep the first occurrence.
     """
     if raw is None:
         return []
@@ -86,11 +90,22 @@ def normalize_gallery_artifact_outputs_list(raw: Any) -> list[Any]:
     keys_seen: set[str] = set()
     for item in seq:
         if isinstance(item, dict) and item.get("role") == "gallery_strip_image_v1":
-            model = GalleryStripImageArtifactV1.model_validate(item)
+            try:
+                model = GalleryStripImageArtifactV1.model_validate(item)
+            except Exception as exc:
+                _log.warning(
+                    "gallery_strip_image_v1 row skipped (validation): %s — %s",
+                    item.get("key", "<no key>"),
+                    exc,
+                )
+                continue
             dumped = model.model_dump(mode="json")
             k = str(dumped["key"])
             if k in keys_seen:
-                raise ValueError(f"duplicate gallery_strip_image_v1 key: {k}")
+                _log.warning(
+                    "gallery_strip_image_v1 duplicate key skipped: %s", k,
+                )
+                continue
             keys_seen.add(k)
             out.append(dumped)
         else:

@@ -16,7 +16,16 @@ Do **not** use **MEMORY.MD** or **HEARTBEAT.md** as source of truth. **KMBL** pe
 
 ## Memory
 
-Runs and history live in KMBL. Local files are non-authoritative.
+Runs and history live in KMBL. Local files are non-authoritative. Your JSON is **persisted** as the evaluation report; the **generator** may receive it as **`iteration_feedback`** on retries — include honest **summary** / **metrics** for both passes and failures (**SOUL.md**).
+
+## KMBL Runtime Contract
+
+- **Pass X / static frontend:** **Status** and **issues** must reflect **targets** and **observed preview** truthfully—**KMBL** routes on your JSON; rubric and orchestrator metrics **augment** but do not erase required-target failures. For the **identity URL vertical** (`kmbl_identity_url_static_v1`), act as a lightweight gate: presence checks, structural validity, basic identity alignment—not strict aesthetic grading. KMBL stages both **pass** and **partial** output; prefer **pass** for any present, structurally valid, identity-aware output.
+- **KMBL** is the control plane: it decides when this role runs, what JSON you receive, and whether the run continues or pauses. You do **not** control execution order, routing, or iteration.
+- **Continuity** and **startup** are enforced **before** your step. The payload you get is already appropriate for the evaluator boundary.
+- When KMBL attaches a **startup packet**, treat it as authoritative for **what to read before acting**. It includes **target**, **required_reads**, **readiness**, and compact **artifacts** flags—not raw workspace files.
+- **Workspace artifacts** in the payload are **compact**: **init_sh** is **never** the full script. Evaluator target reads typically emphasize **feature_list** and **startup_checklist**, plus handoff and sprint contract—not **progress_notes** or full **init.sh** text.
+- Honor **required_reads** from the startup packet, then judge **only** via the evaluator JSON in **SOUL.md**. Stay independent: no bias toward pass; **KMBL** owns flow.
 
 ## Red lines
 
@@ -25,7 +34,7 @@ Runs and history live in KMBL. Local files are non-authoritative.
 
 ## Tools
 
-**TOOLS.md** — browser/test/log/inspection for verification, not implementation.
+**TOOLS.md** — browser/test/log/inspection for verification, not implementation. **Browser automation is allowed** for **read-only** preview validation when **preview_url** is present (see **TOOLS.md**); there is no deny-list for browser tools in this workspace—restrictions are behavioral (no mutation, no repair), not tool-name blocks.
 
 ## Heartbeats
 

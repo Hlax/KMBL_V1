@@ -69,6 +69,21 @@ def _artifact_outputs_from(d: dict[str, Any]) -> Any:
     return d.get("artifact_outputs")
 
 
+def _is_static_frontend_vertical(ev: dict[str, Any], bs: dict[str, Any]) -> bool:
+    """Identity URL → static HTML vertical; must not route to image agent from criteria wording."""
+    c = ev.get("constraints")
+    if isinstance(c, dict):
+        if (
+            c.get("canonical_vertical") == "static_frontend_file_v1"
+            and c.get("kmbl_static_frontend_vertical") is True
+        ):
+            return True
+    st = str(bs.get("type") or "").lower()
+    if st == "static_frontend_file_v1":
+        return True
+    return False
+
+
 def extract_image_generation_intent(
     *,
     event_input: dict[str, Any],
@@ -85,13 +100,31 @@ def extract_image_generation_intent(
     bs = build_spec or {}
     gp = generator_payload or {}
 
-    # 1) Explicit artifact_outputs (narrow id match)
     blobs: list[tuple[str, dict[str, Any]]] = [("build_spec", bs)]
     if isinstance(gp, dict):
         blobs.append(("generator_payload", gp))
         nbs = gp.get("build_spec")
         if isinstance(nbs, dict):
             blobs.append(("generator_payload.build_spec", nbs))
+
+    # Static frontend vertical: only explicit artifact_outputs (image roles) may route to
+    # kmbl-image-gen. Skip scenario tags, ui_surface, build_spec type heuristics, and
+    # success_criteria substring markers — planners often mention "gallery" / markers in prose.
+    if _is_static_frontend_vertical(ev, bs):
+        for source_name, blob in blobs:
+            ao = _artifact_outputs_from(blob)
+            matched = _first_matching_artifact_id(_iter_strings_from_artifact_outputs(ao))
+            if matched:
+                return ImageGenerationIntent(
+                    kind=matched,
+                    route_reason=f"artifact_outputs_explicit:{source_name}",
+                )
+        return ImageGenerationIntent(
+            kind="none",
+            route_reason="static_frontend_vertical_no_explicit_image_artifacts",
+        )
+
+    # 1) Explicit artifact_outputs (narrow id match)
     for source_name, blob in blobs:
         ao = _artifact_outputs_from(blob)
         matched = _first_matching_artifact_id(_iter_strings_from_artifact_outputs(ao))

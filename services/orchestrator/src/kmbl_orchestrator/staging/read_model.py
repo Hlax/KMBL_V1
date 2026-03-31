@@ -12,7 +12,11 @@ from kmbl_orchestrator.runtime.scenario_visibility import (
     static_frontend_visibility_from_staging_payload,
 )
 
-from kmbl_orchestrator.domain import PublicationSnapshotRecord, StagingSnapshotRecord
+from kmbl_orchestrator.domain import (
+    PublicationSnapshotRecord,
+    StagingSnapshotRecord,
+    WorkingStagingRecord,
+)
 
 
 def review_readiness_for_staging_record(rec: StagingSnapshotRecord) -> dict[str, Any]:
@@ -188,16 +192,26 @@ def staging_lineage_read_model(
     """
     ids = payload.get("ids")
     eval_id: str | None = None
+    prior_from_payload: str | None = None
     if isinstance(ids, dict):
         er = ids.get("evaluation_report_id")
         if er is not None:
             eval_id = str(er)
+        ps = ids.get("prior_staging_snapshot_id")
+        if ps is not None:
+            prior_from_payload = str(ps)
+    prior_s: str | None = (
+        str(rec.prior_staging_snapshot_id)
+        if rec.prior_staging_snapshot_id is not None
+        else prior_from_payload
+    )
     return {
         "thread_id": str(rec.thread_id),
         "graph_run_id": str(rec.graph_run_id) if rec.graph_run_id else None,
         "build_candidate_id": str(rec.build_candidate_id),
         "evaluation_report_id": eval_id,
         "identity_id": str(rec.identity_id) if rec.identity_id else None,
+        "prior_staging_snapshot_id": prior_s,
     }
 
 
@@ -363,3 +377,58 @@ def staging_lifecycle_timeline(
             }
         )
     return out
+
+
+# --- Working staging read model ---
+
+
+def working_staging_read_model(ws: WorkingStagingRecord) -> dict[str, Any]:
+    """Compact read model for the mutable working staging surface."""
+    p = dict(ws.payload_json)
+    fv = static_frontend_visibility_from_staging_payload(p)
+    gv = gallery_strip_visibility_from_staging_payload(p)
+    has_f = bool(fv.get("has_static_frontend"))
+    has_g = bool(gv.get("has_gallery_strip"))
+
+    if has_g and has_f:
+        content_kind = "mixed"
+    elif has_g:
+        content_kind = "gallery_strip"
+    elif has_f:
+        content_kind = "static_frontend"
+    else:
+        content_kind = None
+
+    title = short_title_from_payload(p)
+    ev_sum = evaluation_summary_from_payload(p)
+
+    patches_since_rebuild = 0
+    if ws.last_rebuild_revision is not None:
+        patches_since_rebuild = max(0, ws.revision - ws.last_rebuild_revision)
+    elif ws.revision > 0:
+        patches_since_rebuild = ws.revision
+
+    revision_summary = ws.last_revision_summary_json if ws.last_revision_summary_json else None
+
+    return {
+        "working_staging_id": str(ws.working_staging_id),
+        "thread_id": str(ws.thread_id),
+        "identity_id": str(ws.identity_id) if ws.identity_id else None,
+        "revision": ws.revision,
+        "status": ws.status,
+        "last_update_mode": ws.last_update_mode,
+        "created_at": ws.created_at,
+        "updated_at": ws.updated_at,
+        "title": title,
+        "evaluation_summary": ev_sum,
+        "content_kind": content_kind,
+        "has_static_frontend": has_f,
+        "has_previewable_html": bool(fv.get("has_previewable_html")),
+        "static_frontend_file_count": int(fv.get("static_frontend_file_count") or 0),
+        "has_gallery_strip": has_g,
+        "identity_hint": identity_hint_from_uuid(ws.identity_id),
+        "patches_since_rebuild": patches_since_rebuild,
+        "stagnation_count": ws.stagnation_count,
+        "last_rebuild_revision": ws.last_rebuild_revision,
+        "last_revision_summary": revision_summary,
+    }

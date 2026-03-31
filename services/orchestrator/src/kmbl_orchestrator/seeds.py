@@ -6,6 +6,10 @@ import hashlib
 import secrets
 from typing import Any, Final
 
+# --- Canonical vertical: identity URL → static frontend ---
+IDENTITY_URL_STATIC_FRONTEND_PRESET: Final = "identity_url_static_v1"
+IDENTITY_URL_STATIC_FRONTEND_TAG: Final = "kmbl_identity_url_static_v1"
+
 # API: POST /orchestrator/runs/start with {"scenario_preset": "seeded_local_v1"}
 SEEDED_LOCAL_SCENARIO_PRESET: Final = "seeded_local_v1"
 
@@ -168,5 +172,37 @@ def build_seeded_gallery_strip_varied_v1_event_input(*, run_nonce: str | None = 
             "subject_variant": subject_variant,
             "layout_variant": layout_variant,
             "tone_variant": tone_variant,
+        },
+    }
+
+
+def build_identity_url_static_frontend_event_input(
+    *, identity_url: str, seed_summary: str | None = None
+) -> dict[str, Any]:
+    """
+    Canonical vertical event_input: identity URL → static frontend.
+
+    The planner receives identity_context with rich signals and makes all creative decisions.
+    No hardcoded variants - the planner interprets the identity and designs accordingly.
+    """
+    seed_hint = f" ({seed_summary})" if seed_summary else ""
+
+    task = (
+        f"Build a static website reflecting the identity from {identity_url}{seed_hint}. "
+        "Planner: analyze identity_context (profile_summary, facets) and make creative decisions "
+        "in build_spec (design_direction, layout_concept, color_strategy). "
+        "Generator: execute the planner's vision with static_frontend_file_v1 artifacts. "
+        "Output must include artifact_outputs with at least one HTML file."
+    )
+    return {
+        "scenario": IDENTITY_URL_STATIC_FRONTEND_TAG,
+        "task": task,
+        "identity_url": identity_url,
+        "constraints": {
+            "canonical_vertical": "static_frontend_file_v1",
+            "kmbl_static_frontend_vertical": True,
+            "scope": "identity_url_vertical",
+            "deterministic": False,
+            "planner_is_creative_director": True,
         },
     }

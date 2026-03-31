@@ -135,10 +135,8 @@ def merge_gallery_strip_harness_checks(
     if not href_http_ok:
         issues.append("gallery_strip_harness: non-http(s) href on strip item")
 
-    status = report.status
     summary = report.summary or ""
-    if probe_failures > 0 and status == "pass":
-        status = "partial"
+    if probe_failures > 0:
         if summary:
             summary = f"{summary} [gallery_strip_harness: URL probe issues]"
         else:
@@ -146,7 +144,6 @@ def merge_gallery_strip_harness_checks(
 
     return report.model_copy(
         update={
-            "status": status,
             "summary": summary,
             "issues_json": issues,
             "metrics_json": metrics,

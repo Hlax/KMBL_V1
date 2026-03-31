@@ -98,6 +98,8 @@ export type StagingLineage = {
   build_candidate_id: string;
   evaluation_report_id?: string | null;
   identity_id?: string | null;
+  /** Previous staging on same thread (amend chain); artifact URLs may repeat (e.g. image gen). */
+  prior_staging_snapshot_id?: string | null;
 };
 
 export type StagingEvaluationDetail = {
@@ -260,6 +262,18 @@ export type OperatorActionItem = {
   details?: Record<string, unknown> | null;
 };
 
+/** Stable per-run links to live working staging (orchestrator + CP paths). */
+export type SessionStagingLinks = {
+  graph_run_id: string;
+  thread_id: string;
+  orchestrator_staging_preview_path: string;
+  orchestrator_working_staging_json_path: string;
+  control_plane_staging_preview_path: string;
+  note: string;
+  orchestrator_staging_preview_url?: string | null;
+  orchestrator_working_staging_json_url?: string | null;
+};
+
 export type GraphRunDetail = {
   backend_unimplemented?: boolean;
   message?: string;
@@ -275,6 +289,7 @@ export type GraphRunDetail = {
   retry_deferred_note?: string | null;
   scenario_tag?: string | null;
   scenario_badge?: string | null;
+  session_staging?: SessionStagingLinks | null;
   error?: string;
   detail?: unknown;
 };

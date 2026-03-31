@@ -8,11 +8,12 @@ from __future__ import annotations
 
 from typing import Any
 
-# Must match seeds.SEEDED_*_SCENARIO_TAG
+# Must match seeds.SEEDED_*_SCENARIO_TAG / IDENTITY_URL_STATIC_FRONTEND_TAG
 _GALLERY_TAG = "kmbl_seeded_gallery_strip_v1"
 _GALLERY_VARIED_TAG = "kmbl_seeded_gallery_strip_varied_v1"
 _KILOCLAW_IMAGE_ONLY_TEST_TAG = "kmbl_kiloclaw_image_only_test_v1"
 _LOCAL_TAG = "kmbl_seeded_local_v1"
+_IDENTITY_URL_STATIC_TAG = "kmbl_identity_url_static_v1"
 
 
 def scenario_tag_from_run_state(snapshot: dict[str, Any] | None) -> str | None:
@@ -30,10 +31,13 @@ def scenario_badge_from_tag(tag: str | None) -> str | None:
     """
     Compact operator-facing label for list badges.
 
-    Returns ``gallery_strip``, ``gallery_varied``, ``kiloclaw_image_test``, ``local_seed``, ``other``, or None.
+    Returns ``identity_url_static``, ``gallery_strip``, ``gallery_varied``,
+    ``kiloclaw_image_test``, ``local_seed``, ``other``, or None.
     """
     if not tag:
         return None
+    if tag == _IDENTITY_URL_STATIC_TAG:
+        return "identity_url_static"
     if tag == _GALLERY_VARIED_TAG:
         return "gallery_varied"
     if tag == _GALLERY_TAG:

@@ -19,8 +19,35 @@ import { galleryStripVisibilityFromStagingPayload } from "@/lib/gallery-strip-vi
 import { OperatorOutputSurface } from "@/app/components/OperatorOutputSurface";
 import { parseUIGalleryStripV1FromPayload } from "@/lib/ui-gallery-strip-v1";
 import { StagingReviewActions } from "./StagingReviewActions";
+import { StagingRatingSection } from "./StagingRatingSection";
 import { StagingFactsCard } from "@/app/components/StagingFactsCard";
 import { ImageReviewSection } from "@/app/components/ImageReviewSection";
+
+type StagingListItem = { staging_snapshot_id: string };
+
+async function getNextStagingId(
+  origin: string,
+  currentId: string,
+  status?: string,
+): Promise<string | null> {
+  try {
+    const statusParam = status && status !== "rejected" ? `&status=${status}` : "";
+    const res = await fetch(`${origin}/api/staging?limit=50${statusParam}`, { cache: "no-store" });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { snapshots?: StagingListItem[] };
+    const list = data.snapshots ?? [];
+    const idx = list.findIndex((s) => s.staging_snapshot_id === currentId);
+    if (idx >= 0 && idx < list.length - 1) {
+      return list[idx + 1].staging_snapshot_id;
+    }
+    if (idx === -1 && list.length > 0) {
+      return list[0].staging_snapshot_id;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 export const dynamic = "force-dynamic";
 
@@ -413,20 +440,87 @@ export default async function StagingReviewPage({
   const showGalleryStripBanner =
     data.content_kind === "gallery_strip" || data.has_gallery_strip === true || gv.hasGalleryStrip;
 
+  const nextStagingId = await getNextStagingId(origin, data.staging_snapshot_id, data.status);
+
   return (
     <>
-      <p className="muted small cp-crumb-line">
-        <Link href="/review">← Review list</Link>
-        {identityForNav ? (
-          <>
-            {" · "}
-            <IdentityNavExtras identityId={identityForNav} />
-          </>
-        ) : null}
-      </p>
+      <div className="staging-nav-bar" style={{ 
+        display: "flex", 
+        justifyContent: "space-between", 
+        alignItems: "center",
+        marginBottom: "0.75rem",
+        flexWrap: "wrap",
+        gap: "0.5rem"
+      }}>
+        <p className="muted small cp-crumb-line" style={{ margin: 0 }}>
+          <Link href="/review">← Review list</Link>
+          {identityForNav ? (
+            <>
+              {" · "}
+              <IdentityNavExtras identityId={identityForNav} />
+            </>
+          ) : null}
+        </p>
+        {nextStagingId && (
+          <Link 
+            href={`/review/staging/${encodeURIComponent(nextStagingId)}`}
+            className="op-btn op-btn--secondary"
+            style={{ fontSize: "0.9rem", padding: "0.4rem 0.8rem" }}
+          >
+            Next staging →
+          </Link>
+        )}
+      </div>
 
-      <h1 className="pub-page-title">{title}</h1>
-      <p className="pub-page-id mono">{data.staging_snapshot_id}</p>
+      <h1 className="pub-page-title" style={{ marginBottom: "0.25rem" }}>{title}</h1>
+      <p className="pub-page-id mono" style={{ marginBottom: "1rem" }}>{data.staging_snapshot_id}</p>
+
+      {/* Preview at top */}
+      {showStaticFePreview ? (
+        <div className="op-panel op-panel--embed" style={{ marginBottom: "1rem" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
+            <h2 className="op-section-title" style={{ margin: 0 }}>Preview</h2>
+            <a className="op-btn op-btn--secondary" href={staticPreviewSrc} target="_blank" rel="noreferrer" style={{ fontSize: "0.85rem" }}>
+              Open in new tab ↗
+            </a>
+          </div>
+          <div className="op-preview-frame" style={{ height: "400px" }}>
+            <iframe
+              title="Static staging preview"
+              src={staticPreviewSrc}
+              sandbox="allow-scripts allow-same-origin"
+              loading="lazy"
+              style={{ width: "100%", height: "100%", border: "none", borderRadius: "4px" }}
+            />
+          </div>
+        </div>
+      ) : showIframe ? (
+        <div className="op-panel op-panel--embed" style={{ marginBottom: "1rem" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
+            <h2 className="op-section-title" style={{ margin: 0 }}>Preview</h2>
+            <a className="op-btn op-btn--secondary" href={preview} target="_blank" rel="noreferrer" style={{ fontSize: "0.85rem" }}>
+              Open in new tab ↗
+            </a>
+          </div>
+          <div className="op-preview-frame" style={{ height: "400px" }}>
+            <iframe
+              title="Staging preview"
+              src={preview}
+              sandbox="allow-scripts allow-forms allow-same-origin allow-popups"
+              loading="lazy"
+              style={{ width: "100%", height: "100%", border: "none", borderRadius: "4px" }}
+            />
+          </div>
+        </div>
+      ) : null}
+
+      {/* Rating section right after preview */}
+      <StagingRatingSection
+        stagingSnapshotId={data.staging_snapshot_id}
+        status={data.status}
+        currentRating={(data as Record<string, unknown>).user_rating as number | null | undefined}
+        currentFeedback={(data as Record<string, unknown>).user_feedback as string | null | undefined}
+      />
 
       {showGalleryStripBanner ? (
         <p className="op-banner op-banner--gallery-strip" style={{ marginBottom: "0.75rem" }}>
@@ -566,7 +660,10 @@ export default async function StagingReviewPage({
           </div>
         </div>
 
-        {(lineageIdentity || lineage?.thread_id || lineage?.graph_run_id) && (
+        {(lineageIdentity ||
+          lineage?.thread_id ||
+          lineage?.graph_run_id ||
+          lineage?.prior_staging_snapshot_id) && (
           <div className="pub-hero__grid" style={{ marginTop: "0.85rem" }}>
             <div>
               <span className="pub-hero__label">Identity</span>
@@ -596,6 +693,22 @@ export default async function StagingReviewPage({
                 ) : null}
               </div>
             </div>
+            {lineage?.prior_staging_snapshot_id ? (
+              <div>
+                <span className="pub-hero__label">Prior staging (amend chain)</span>
+                <div className="pub-hero__value small">
+                  <Link
+                    href={`/review/staging/${encodeURIComponent(lineage.prior_staging_snapshot_id)}`}
+                  >
+                    {shortId(lineage.prior_staging_snapshot_id)}
+                  </Link>
+                  <p className="muted small" style={{ margin: "0.35rem 0 0", lineHeight: 1.45 }}>
+                    Same thread: generated images and gallery URLs may reuse prior artifact references
+                    as content.
+                  </p>
+                </div>
+              </div>
+            ) : null}
           </div>
         )}
       </section>
@@ -615,46 +728,6 @@ export default async function StagingReviewPage({
         variant="staging"
       />
 
-      {showStaticFePreview ? (
-        <div className="op-panel op-panel--embed">
-          <h2 className="op-section-title">Static front-end preview</h2>
-          <p className="muted small">
-            Assembled from persisted <code className="mono">static_frontend_file_v1</code> artifacts
-            (inlined CSS/JS from the same bundle). Same-origin iframe — scripts run sandboxed.
-          </p>
-          <p className="small" style={{ marginTop: "0.35rem" }}>
-            <a className="op-btn op-btn--secondary" href={staticPreviewSrc} target="_blank" rel="noreferrer">
-              Open preview in new tab
-            </a>
-          </p>
-          <div className="op-preview-frame">
-            <iframe
-              title="Static staging preview"
-              src={staticPreviewSrc}
-              sandbox="allow-scripts allow-same-origin"
-              loading="lazy"
-            />
-          </div>
-        </div>
-      ) : null}
-
-      {showIframe ? (
-        <div className="op-panel op-panel--embed">
-          <h2 className="op-section-title">Embedded preview</h2>
-          <p className="muted small">
-            Sandboxed iframe; if the site blocks embedding, use <strong>Open preview in new tab</strong>{" "}
-            above.
-          </p>
-          <div className="op-preview-frame">
-            <iframe
-              title="Staging preview"
-              src={preview}
-              sandbox="allow-scripts allow-forms allow-same-origin allow-popups"
-              loading="lazy"
-            />
-          </div>
-        </div>
-      ) : null}
 
       {data.review_readiness_explanation ? (
         <div className="op-banner op-banner--neutral" role="status">

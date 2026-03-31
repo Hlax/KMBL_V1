@@ -20,8 +20,24 @@ class PlannerRoleOutput(BaseModel):
     evaluation_targets: list[Any] = Field(default_factory=list)
 
 
+def _is_non_empty(value: Any) -> bool:
+    """Check if a value is semantically non-empty (not None, not empty dict/list)."""
+    if value is None:
+        return False
+    if isinstance(value, dict) and not value:
+        return False
+    if isinstance(value, list):
+        # Empty list or list of only empty dicts is considered empty
+        if not value:
+            return False
+        # Check if all items are empty dicts
+        if all(isinstance(item, dict) and not item for item in value):
+            return False
+    return True
+
+
 class GeneratorRoleOutput(BaseModel):
-    """Generator must include at least one of the three primary fields."""
+    """Generator must include at least one non-empty primary field."""
 
     model_config = ConfigDict(extra="allow")
 
@@ -33,14 +49,16 @@ class GeneratorRoleOutput(BaseModel):
 
     @model_validator(mode="after")
     def at_least_one_primary_field(self) -> GeneratorRoleOutput:
-        if (
-            self.proposed_changes is None
-            and self.updated_state is None
-            and self.artifact_outputs is None
-        ):
+        # Check for at least one non-empty primary field
+        has_proposed = _is_non_empty(self.proposed_changes)
+        has_state = _is_non_empty(self.updated_state)
+        has_artifacts = _is_non_empty(self.artifact_outputs)
+        
+        if not (has_proposed or has_state or has_artifacts):
             raise ValueError(
-                "generator output must include at least one of: "
-                "proposed_changes, updated_state, artifact_outputs"
+                "generator output must include at least one non-empty field: "
+                "proposed_changes, updated_state, or artifact_outputs "
+                "(empty dict/list or list of empty dicts not accepted)"
             )
         return self
 

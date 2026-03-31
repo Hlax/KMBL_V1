@@ -7,6 +7,7 @@ from typing import Any, Literal, Protocol
 from uuid import UUID
 
 from kmbl_orchestrator.domain import (
+    AutonomousLoopRecord,
     BuildCandidateRecord,
     BuildSpecRecord,
     CheckpointRecord,
@@ -17,8 +18,10 @@ from kmbl_orchestrator.domain import (
     IdentitySourceRecord,
     PublicationSnapshotRecord,
     RoleInvocationRecord,
+    StagingCheckpointRecord,
     StagingSnapshotRecord,
     ThreadRecord,
+    WorkingStagingRecord,
 )
 
 
@@ -156,6 +159,15 @@ class Repository(Protocol):
         """Persisted rows only, newest ``created_at`` first."""
         ...
 
+    def list_staging_snapshots_for_thread(
+        self,
+        thread_id: UUID,
+        *,
+        limit: int = 10,
+    ) -> list[StagingSnapshotRecord]:
+        """List staging snapshots for a specific thread, newest first."""
+        ...
+
     def update_staging_snapshot_status(
         self,
         staging_snapshot_id: UUID,
@@ -166,6 +178,67 @@ class Repository(Protocol):
         rejection_reason: str | None = None,
     ) -> StagingSnapshotRecord | None:
         """Update ``staging_snapshot.status`` and matching audit columns (approve / reject / unapprove)."""
+
+    def rate_staging_snapshot(
+        self,
+        staging_snapshot_id: UUID,
+        rating: int,
+        feedback: str | None = None,
+    ) -> StagingSnapshotRecord | None:
+        """Set user_rating (1-5), user_feedback, and rated_at on a staging snapshot."""
+
+    # --- Autonomous Loop ---
+
+    def save_autonomous_loop(self, record: "AutonomousLoopRecord") -> None: ...
+
+    def get_autonomous_loop(self, loop_id: UUID) -> "AutonomousLoopRecord | None": ...
+
+    def get_autonomous_loop_for_identity(self, identity_id: UUID) -> "AutonomousLoopRecord | None":
+        """Get active loop for an identity (status not completed/failed)."""
+        ...
+
+    def list_autonomous_loops(
+        self,
+        *,
+        status: str | None = None,
+        limit: int = 20,
+    ) -> list["AutonomousLoopRecord"]: ...
+
+    def get_next_pending_loop(self) -> "AutonomousLoopRecord | None":
+        """Get next loop that's pending or running and not locked."""
+        ...
+
+    def try_acquire_loop_lock(
+        self,
+        loop_id: UUID,
+        locked_by: str,
+        lock_timeout_seconds: int = 300,
+    ) -> bool:
+        """Try to acquire lock on a loop. Returns True if acquired."""
+        ...
+
+    def release_loop_lock(self, loop_id: UUID) -> None:
+        """Release lock on a loop."""
+        ...
+
+    def update_loop_state(
+        self,
+        loop_id: UUID,
+        *,
+        status: str | None = None,
+        phase: str | None = None,
+        iteration_count: int | None = None,
+        current_thread_id: UUID | None = None,
+        current_graph_run_id: UUID | None = None,
+        last_staging_snapshot_id: UUID | None = None,
+        last_evaluator_status: str | None = None,
+        last_evaluator_score: float | None = None,
+        exploration_directions: list | None = None,
+        completed_directions: list | None = None,
+        proposed_staging_id: UUID | None = None,
+        total_staging_count: int | None = None,
+        best_rating: int | None = None,
+    ) -> "AutonomousLoopRecord | None": ...
 
     def save_publication_snapshot(self, record: PublicationSnapshotRecord) -> None: ...
 
@@ -206,6 +279,27 @@ class Repository(Protocol):
 
     def upsert_identity_profile(self, record: IdentityProfileRecord) -> None: ...
 
+    # --- Working staging ---
+
+    def get_working_staging_for_thread(
+        self, thread_id: UUID
+    ) -> WorkingStagingRecord | None:
+        """Return the current working staging record for this thread, or None."""
+
+    def save_working_staging(self, record: WorkingStagingRecord) -> None:
+        """Insert or fully replace a working staging record (keyed by working_staging_id)."""
+
+    def save_staging_checkpoint(self, record: StagingCheckpointRecord) -> None: ...
+
+    def get_staging_checkpoint(
+        self, staging_checkpoint_id: UUID
+    ) -> StagingCheckpointRecord | None: ...
+
+    def list_staging_checkpoints(
+        self, working_staging_id: UUID, *, limit: int = 50
+    ) -> list[StagingCheckpointRecord]:
+        """Newest ``created_at`` first."""
+
 
 class InMemoryRepository:
     """Development / unit tests — no external DB."""
@@ -221,9 +315,12 @@ class InMemoryRepository:
         self._run_snapshots: dict[str, dict[str, Any]] = {}
         self._graph_run_events: list[GraphRunEventRecord] = []
         self._staging_snapshots: dict[str, StagingSnapshotRecord] = {}
+        self._working_stagings: dict[str, WorkingStagingRecord] = {}
+        self._staging_checkpoints: dict[str, StagingCheckpointRecord] = {}
         self._publications: dict[str, PublicationSnapshotRecord] = {}
         self._identity_sources: list[IdentitySourceRecord] = []
         self._identity_profiles: dict[str, IdentityProfileRecord] = {}
+        self._autonomous_loops: dict[str, AutonomousLoopRecord] = {}
 
     def ensure_thread(self, record: ThreadRecord) -> None:
         key = str(record.thread_id)
@@ -564,6 +661,16 @@ class InMemoryRepository:
         rows.sort(key=lambda r: r.created_at, reverse=True)
         return rows[: max(0, limit)]
 
+    def list_staging_snapshots_for_thread(
+        self,
+        thread_id: UUID,
+        *,
+        limit: int = 10,
+    ) -> list[StagingSnapshotRecord]:
+        rows = [r for r in self._staging_snapshots.values() if r.thread_id == thread_id]
+        rows.sort(key=lambda r: r.created_at, reverse=True)
+        return rows[: max(0, limit)]
+
     def update_staging_snapshot_status(
         self,
         staging_snapshot_id: UUID,
@@ -587,6 +694,173 @@ class InMemoryRepository:
             rejection_reason=rejection_reason,
         )
         self._staging_snapshots[key] = updated
+        return updated
+
+    def rate_staging_snapshot(
+        self,
+        staging_snapshot_id: UUID,
+        rating: int,
+        feedback: str | None = None,
+    ) -> StagingSnapshotRecord | None:
+        from datetime import datetime, timezone
+
+        key = str(staging_snapshot_id)
+        cur = self._staging_snapshots.get(key)
+        if cur is None:
+            return None
+        updated = StagingSnapshotRecord(
+            **{
+                **cur.model_dump(),
+                "user_rating": rating,
+                "user_feedback": feedback,
+                "rated_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+        self._staging_snapshots[key] = updated
+        return updated
+
+    # --- Autonomous Loop (in-memory) ---
+
+    def save_autonomous_loop(self, record: AutonomousLoopRecord) -> None:
+        self._autonomous_loops[str(record.loop_id)] = record
+
+    def get_autonomous_loop(self, loop_id: UUID) -> AutonomousLoopRecord | None:
+        return self._autonomous_loops.get(str(loop_id))
+
+    def get_autonomous_loop_for_identity(self, identity_id: UUID) -> AutonomousLoopRecord | None:
+        for loop in self._autonomous_loops.values():
+            if loop.identity_id == identity_id and loop.status not in ("completed", "failed"):
+                return loop
+        return None
+
+    def list_autonomous_loops(
+        self,
+        *,
+        status: str | None = None,
+        limit: int = 20,
+    ) -> list[AutonomousLoopRecord]:
+        rows = list(self._autonomous_loops.values())
+        if status is not None:
+            rows = [r for r in rows if r.status == status]
+        rows.sort(key=lambda r: r.created_at, reverse=True)
+        return rows[: max(0, limit)]
+
+    def get_next_pending_loop(self) -> AutonomousLoopRecord | None:
+        from datetime import datetime, timezone, timedelta
+
+        now = datetime.now(timezone.utc)
+        lock_timeout = timedelta(seconds=300)
+        for loop in sorted(self._autonomous_loops.values(), key=lambda r: r.created_at):
+            if loop.status not in ("pending", "running"):
+                continue
+            if loop.locked_at:
+                locked_time = datetime.fromisoformat(loop.locked_at.replace("Z", "+00:00"))
+                if now - locked_time < lock_timeout:
+                    continue
+            return loop
+        return None
+
+    def try_acquire_loop_lock(
+        self,
+        loop_id: UUID,
+        locked_by: str,
+        lock_timeout_seconds: int = 300,
+    ) -> bool:
+        from datetime import datetime, timezone, timedelta
+
+        key = str(loop_id)
+        loop = self._autonomous_loops.get(key)
+        if loop is None:
+            return False
+        now = datetime.now(timezone.utc)
+        if loop.locked_at:
+            locked_time = datetime.fromisoformat(loop.locked_at.replace("Z", "+00:00"))
+            if now - locked_time < timedelta(seconds=lock_timeout_seconds):
+                return False
+        updated = AutonomousLoopRecord(
+            **{
+                **loop.model_dump(),
+                "locked_at": now.isoformat(),
+                "locked_by": locked_by,
+                "updated_at": now.isoformat(),
+            }
+        )
+        self._autonomous_loops[key] = updated
+        return True
+
+    def release_loop_lock(self, loop_id: UUID) -> None:
+        from datetime import datetime, timezone
+
+        key = str(loop_id)
+        loop = self._autonomous_loops.get(key)
+        if loop is None:
+            return
+        updated = AutonomousLoopRecord(
+            **{
+                **loop.model_dump(),
+                "locked_at": None,
+                "locked_by": None,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+        self._autonomous_loops[key] = updated
+
+    def update_loop_state(
+        self,
+        loop_id: UUID,
+        *,
+        status: str | None = None,
+        phase: str | None = None,
+        iteration_count: int | None = None,
+        current_thread_id: UUID | None = None,
+        current_graph_run_id: UUID | None = None,
+        last_staging_snapshot_id: UUID | None = None,
+        last_evaluator_status: str | None = None,
+        last_evaluator_score: float | None = None,
+        exploration_directions: list | None = None,
+        completed_directions: list | None = None,
+        proposed_staging_id: UUID | None = None,
+        total_staging_count: int | None = None,
+        best_rating: int | None = None,
+    ) -> AutonomousLoopRecord | None:
+        from datetime import datetime, timezone
+
+        key = str(loop_id)
+        loop = self._autonomous_loops.get(key)
+        if loop is None:
+            return None
+        updates = {"updated_at": datetime.now(timezone.utc).isoformat()}
+        if status is not None:
+            updates["status"] = status
+            if status == "completed":
+                updates["completed_at"] = datetime.now(timezone.utc).isoformat()
+        if phase is not None:
+            updates["phase"] = phase
+        if iteration_count is not None:
+            updates["iteration_count"] = iteration_count
+        if current_thread_id is not None:
+            updates["current_thread_id"] = current_thread_id
+        if current_graph_run_id is not None:
+            updates["current_graph_run_id"] = current_graph_run_id
+        if last_staging_snapshot_id is not None:
+            updates["last_staging_snapshot_id"] = last_staging_snapshot_id
+        if last_evaluator_status is not None:
+            updates["last_evaluator_status"] = last_evaluator_status
+        if last_evaluator_score is not None:
+            updates["last_evaluator_score"] = last_evaluator_score
+        if exploration_directions is not None:
+            updates["exploration_directions"] = exploration_directions
+        if completed_directions is not None:
+            updates["completed_directions"] = completed_directions
+        if proposed_staging_id is not None:
+            updates["proposed_staging_id"] = proposed_staging_id
+            updates["proposed_at"] = datetime.now(timezone.utc).isoformat()
+        if total_staging_count is not None:
+            updates["total_staging_count"] = total_staging_count
+        if best_rating is not None:
+            updates["best_rating"] = best_rating
+        updated = AutonomousLoopRecord(**{**loop.model_dump(), **updates})
+        self._autonomous_loops[key] = updated
         return updated
 
     def save_publication_snapshot(self, record: PublicationSnapshotRecord) -> None:
@@ -661,3 +935,35 @@ class InMemoryRepository:
 
     def upsert_identity_profile(self, record: IdentityProfileRecord) -> None:
         self._identity_profiles[str(record.identity_id)] = record
+
+    # ---- Working staging ----
+
+    def get_working_staging_for_thread(
+        self, thread_id: UUID
+    ) -> WorkingStagingRecord | None:
+        for ws in self._working_stagings.values():
+            if ws.thread_id == thread_id:
+                return ws
+        return None
+
+    def save_working_staging(self, record: WorkingStagingRecord) -> None:
+        self._working_stagings[str(record.working_staging_id)] = record
+
+    def save_staging_checkpoint(self, record: StagingCheckpointRecord) -> None:
+        self._staging_checkpoints[str(record.staging_checkpoint_id)] = record
+
+    def get_staging_checkpoint(
+        self, staging_checkpoint_id: UUID
+    ) -> StagingCheckpointRecord | None:
+        return self._staging_checkpoints.get(str(staging_checkpoint_id))
+
+    def list_staging_checkpoints(
+        self, working_staging_id: UUID, *, limit: int = 50
+    ) -> list[StagingCheckpointRecord]:
+        wsid = str(working_staging_id)
+        rows = [
+            r for r in self._staging_checkpoints.values()
+            if str(r.working_staging_id) == wsid
+        ]
+        rows.sort(key=lambda r: r.created_at, reverse=True)
+        return rows[:limit]

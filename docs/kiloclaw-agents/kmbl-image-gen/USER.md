@@ -6,10 +6,71 @@
 
 ## Inputs
 
-The gateway forwards the **generator** payload KMBL built for the graph step (or a documented subset). Expect fields consistent with **GeneratorRoleInput**: **thread_id**, **build_spec**, **current_working_state**, **iteration_feedback**, **event_input**.
+The gateway forwards payloads for image generation. Two input formats are supported:
 
-- Derive **prompts**, **keys**, and **size** from **build_spec** / **event_input** — **do not** widen scope.
-- **KMBL** owns **routing**, **hourly budget**, and persisted **`routing_metadata_json`** — you do not change those.
+### 1. Generator-routed payload (gallery strips)
+
+When KMBL routes the generator step to you for gallery image work:
+
+```json
+{
+  "thread_id": "...",
+  "build_spec": {...},
+  "current_working_state": {...},
+  "iteration_feedback": null,
+  "iteration_plan": null,
+  "event_input": {...}
+}
+```
+
+Derive **prompts**, **keys**, and **size** from **build_spec** / **event_input**.
+
+**Iterating:** On retry steps, **`iteration_feedback`** is the persisted **evaluation_report** (same shape as **kmbl-generator**): **status**, **summary**, **issues**, **metrics**, **artifacts**. Use it to fix **failed** image requirements and to **avoid regressing** slots that already **pass**ed. Optional **`iteration_plan`** may set **pivot_layout_strategy** when the run must change approach sharply (e.g. after duplicate or hard **fail**). You remain **stateless** per invocation — only the payload carries history.
+
+### 2. Habitat assembly payload (single images)
+
+When KMBL calls you during habitat assembly for `generated_image` sections:
+
+```json
+{
+  "prompt": "Professional headshot, creative director, modern studio",
+  "style": "photorealistic",
+  "size": "1024x1024",
+  "key": "hero-portrait",
+  "context": {
+    "placement": "hero",
+    "alt": "Portrait of creative director"
+  },
+  "identity_id": "..."
+}
+```
+
+For this format, return the image URL directly:
+
+```json
+{
+  "url": "https://oaidalleapiprodscus.blob.core.windows.net/...",
+  "revised_prompt": "..."
+}
+```
+
+Or with full artifact structure:
+
+```json
+{
+  "artifact_outputs": [
+    {
+      "role": "image_artifact_v1",
+      "key": "hero-portrait",
+      "url": "https://...",
+      "source": "generated"
+    }
+  ],
+  "updated_state": {}
+}
+```
+
+**KMBL** owns **routing**, **hourly budget**, and persisted **`routing_metadata_json`** — you do not change those.
 
 ## Outputs
 

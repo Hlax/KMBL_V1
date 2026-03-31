@@ -428,7 +428,11 @@ def normalize_generator_output(
 
     Normalization is resilient: individual artifact validation failures are
     logged and skipped rather than crashing the entire build candidate.
-    
+
+    Rescue paths are tracked in ``raw_payload_json._normalization_rescues`` so
+    the graph node can emit a structured ``normalization_rescue`` event for
+    observability without changing this function's return type.
+
     Args:
         raw: Raw generator output from KiloClaw
         thread_id: Thread ID for this run
@@ -439,28 +443,50 @@ def normalize_generator_output(
         enable_image_generation: Whether to generate images during assembly (default False)
     """
     candidate_id = uuid4()
+    rescue_paths: list[str] = []
 
     # Build content index from proposed_changes/updated_state for cross-reference
     content_index = _build_content_index(raw)
+    if content_index:
+        rescue_paths.append("content_index_built")
 
     ao = raw.get("artifact_outputs")
     artifacts = list(ao) if isinstance(ao, list) else []
-    
+
     # Enrich artifacts missing content with content from files arrays
+    pre_enrich_count = sum(1 for a in artifacts if isinstance(a, dict) and not a.get("content"))
     artifacts = _enrich_artifacts_with_content(artifacts, content_index)
-    
+    post_enrich_count = sum(1 for a in artifacts if isinstance(a, dict) and a.get("content"))
+    if pre_enrich_count > 0 and post_enrich_count > pre_enrich_count:
+        rescue_paths.append(f"content_enrichment:{post_enrich_count - pre_enrich_count}")
+
     try:
         artifacts = normalize_combined_artifact_outputs_list(artifacts)
     except Exception as exc:
         _log.warning("artifact normalization failed, falling back to raw list: %s", exc)
         artifacts = list(ao) if isinstance(ao, list) else []
+        rescue_paths.append(f"artifact_norm_fallback:{type(exc).__name__}")
 
-    artifacts = _recover_static_files_from_proposed_changes(
-        raw.get("proposed_changes"), artifacts
+    pre_count = len(artifacts)
+    # Only attempt static file recovery when there are NO html_block_v1 artifacts
+    # (blocks are intentional partial outputs, not a missing-content scenario)
+    has_blocks = any(
+        isinstance(a, dict) and a.get("role") == "html_block_v1"
+        for a in artifacts
     )
-    artifacts = _recover_static_files_from_updated_state(
-        raw.get("updated_state"), artifacts
-    )
+    if not has_blocks:
+        artifacts = _recover_static_files_from_proposed_changes(
+            raw.get("proposed_changes"), artifacts
+        )
+        if len(artifacts) > pre_count:
+            rescue_paths.append(f"recover_from_proposed_changes:{len(artifacts) - pre_count}")
+
+        pre_count = len(artifacts)
+        artifacts = _recover_static_files_from_updated_state(
+            raw.get("updated_state"), artifacts
+        )
+        if len(artifacts) > pre_count:
+            rescue_paths.append(f"recover_from_updated_state:{len(artifacts) - pre_count}")
 
     artifacts = _assemble_habitat_if_present(
         artifacts,
@@ -474,12 +500,14 @@ def normalize_generator_output(
         artifacts = normalize_combined_artifact_outputs_list(artifacts)
     except Exception as exc:
         _log.warning("post-recovery normalization failed, using pre-norm list: %s", exc)
+        rescue_paths.append(f"post_recovery_norm_fallback:{type(exc).__name__}")
 
     patch = raw.get("updated_state") or raw.get("proposed_changes")
     # Normalize list-shaped patches to dict wrapper
     if isinstance(patch, list):
         _log.info("patch_normalization: converting list patch to dict wrapper (files=%d)", len(patch))
         patch = {"files": patch}
+        rescue_paths.append(f"list_patch_coerced:{len(raw.get('updated_state') or raw.get('proposed_changes') or [])}")
     elif not isinstance(patch, dict):
         patch = {}
     try:
@@ -488,9 +516,16 @@ def normalize_generator_output(
         patch = normalize_ui_gallery_strip_v1_in_patch(patch)
     except Exception as exc:
         _log.warning("patch normalization error (non-fatal): %s", exc)
+        rescue_paths.append(f"patch_norm_error:{type(exc).__name__}")
 
     sandbox = raw.get("sandbox_ref")
     preview = raw.get("preview_url")
+
+    # Embed rescue audit into raw_payload_json so the graph node can surface it
+    raw_with_audit = dict(raw)
+    if rescue_paths:
+        raw_with_audit["_normalization_rescues"] = rescue_paths
+
     return BuildCandidateRecord(
         build_candidate_id=candidate_id,
         thread_id=thread_id,
@@ -500,6 +535,7 @@ def normalize_generator_output(
         candidate_kind="habitat",
         working_state_patch_json=patch,
         artifact_refs_json=artifacts,
+        raw_payload_json=raw_with_audit,
         sandbox_ref=str(sandbox) if sandbox is not None else None,
         preview_url=str(preview) if preview is not None else None,
         status="generated",

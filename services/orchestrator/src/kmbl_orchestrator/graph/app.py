@@ -1,8 +1,6 @@
 """
 LangGraph application — minimal v1: thread → context → checkpoint → planner → generator
 → evaluator → decision → (iterate | staging | end).
-
-TODO: interrupt_node, publication_node, richer context compaction (docs/08 §8).
 """
 
 from __future__ import annotations
@@ -31,6 +29,7 @@ from kmbl_orchestrator.contracts.planner_normalize import (
     normalize_build_spec_for_persistence,
 )
 from kmbl_orchestrator.domain import (
+    BuildCandidateRecord,
     CheckpointRecord,
     GraphRunRecord,
     StagingSnapshotRecord,
@@ -38,7 +37,10 @@ from kmbl_orchestrator.domain import (
 )
 from kmbl_orchestrator.errors import RoleInvocationFailed, StagingIntegrityFailed
 from kmbl_orchestrator.graph.state import GraphState
-from kmbl_orchestrator.identity.hydrate import build_planner_identity_context
+from kmbl_orchestrator.identity.hydrate import (
+    build_planner_identity_context,
+    upsert_identity_evolution_signal,
+)
 from kmbl_orchestrator.normalize import (
     normalize_evaluator_output,
     normalize_generator_output,
@@ -101,6 +103,178 @@ class GraphContext:
         self.repo = repo
         self.invoker = invoker
         self.settings = settings
+
+
+def _extract_html_file_map_from_working_staging(
+    ws: Any,
+) -> dict[str, str]:
+    """Extract ``path → html_content`` from a working_staging record.
+
+    Returns only HTML files so they can be used as block merge targets.
+    """
+    file_map: dict[str, str] = {}
+    if ws is None:
+        return file_map
+    refs = (
+        ws.payload_json.get("artifacts", {}).get("artifact_refs", [])
+        if isinstance(ws.payload_json, dict)
+        else []
+    )
+    for ref in refs:
+        if not isinstance(ref, dict):
+            continue
+        if ref.get("role") != "static_frontend_file_v1":
+            continue
+        if ref.get("language") != "html":
+            continue
+        path = ref.get("path", "")
+        content = ref.get("content", "")
+        if isinstance(path, str) and path and isinstance(content, str) and content:
+            file_map[path] = content
+    return file_map
+
+
+def _apply_html_blocks_to_candidate(
+    ctx: "GraphContext",
+    cand: "BuildCandidateRecord",
+    tid: UUID,
+) -> "BuildCandidateRecord":
+    """If the build candidate contains ``html_block_v1`` artifacts, apply them.
+
+    Fetches the current working_staging for ``tid``, applies each block to the
+    corresponding HTML file (creating a minimal skeleton if the file doesn't exist
+    yet), and returns an updated ``BuildCandidateRecord`` where:
+
+    - The merged ``static_frontend_file_v1`` artifacts are added to ``artifact_refs_json``
+      alongside the original ``html_block_v1`` artifacts (kept for provenance).
+    - ``working_state_patch_json["block_preview_anchors"]`` lists the applied block
+      anchors so the staging snapshot metadata can expose a direct preview link.
+
+    When there are no ``html_block_v1`` artifacts, the candidate is returned unchanged.
+    """
+    from kmbl_orchestrator.contracts.html_block_artifact_v1 import (
+        HtmlBlockArtifactV1,
+        normalize_html_block_artifact,
+    )
+    from kmbl_orchestrator.staging.block_merge import apply_blocks_to_static_files
+
+    raw_refs = list(cand.artifact_refs_json)
+    raw_blocks = [r for r in raw_refs if isinstance(r, dict) and r.get("role") == "html_block_v1"]
+    if not raw_blocks:
+        return cand
+
+    # Validate blocks — skip malformed ones
+    blocks: list[HtmlBlockArtifactV1] = []
+    for raw in raw_blocks:
+        try:
+            blocks.append(HtmlBlockArtifactV1.model_validate(raw))
+        except Exception as exc:
+            _log.warning(
+                "graph_run block application: invalid html_block_v1 block_id=%s err=%s",
+                raw.get("block_id", "?"),
+                exc,
+            )
+
+    if not blocks:
+        return cand
+
+    # Get the current working staging HTML for block targets
+    ws = ctx.repo.get_working_staging_for_thread(tid)
+    file_map = _extract_html_file_map_from_working_staging(ws)
+
+    # Apply blocks
+    merged_map, anchors = apply_blocks_to_static_files(blocks, file_map)
+
+    if not merged_map:
+        _log.info(
+            "graph_run block_application: no files were changed (all blocks returned identical content)"
+        )
+        return cand
+
+    # Build updated artifact_refs:
+    # - existing non-block artifacts unchanged
+    # - merged static files replace existing ones at the same path (or are added)
+    # - original html_block_v1 artifacts retained as provenance
+    non_block_refs = [r for r in raw_refs if isinstance(r, dict) and r.get("role") != "html_block_v1"]
+    existing_by_path: dict[str, Any] = {}
+    for ref in non_block_refs:
+        if isinstance(ref, dict):
+            p = ref.get("path", "")
+            if p:
+                existing_by_path[p] = ref
+
+    # Merge new static files
+    for path, html_content in merged_map.items():
+        # Try to inherit bundle_id from the existing file or the first block targeting this path
+        bundle_id: str | None = None
+        if path in existing_by_path:
+            bundle_id = existing_by_path[path].get("bundle_id")
+        if bundle_id is None:
+            for blk in blocks:
+                if blk.target_path == path and blk.bundle_id:
+                    bundle_id = blk.bundle_id
+                    break
+
+        existing_by_path[path] = {
+            "role": "static_frontend_file_v1",
+            "path": path,
+            "language": "html",
+            "content": html_content,
+            "entry_for_preview": True,
+            "bundle_id": bundle_id,
+        }
+
+    # Other non-static-html artifacts not in merged_map stay unchanged
+    other_refs = [
+        ref for ref in non_block_refs
+        if not (isinstance(ref, dict) and ref.get("path", "") in existing_by_path)
+           or not (isinstance(ref, dict) and ref.get("language") == "html")
+    ]
+    # Build the final list: non-HTML non-block refs + all (updated) static refs + block provenance
+    static_refs = list(existing_by_path.values())
+    updated_refs = (
+        [r for r in non_block_refs if not (isinstance(r, dict) and r.get("path", "") in merged_map)]
+        + static_refs
+        + raw_blocks  # provenance
+    )
+
+    # Record anchors in working_state_patch
+    updated_wsp = dict(cand.working_state_patch_json)
+    if anchors:
+        updated_wsp["block_preview_anchors"] = anchors
+
+    _log.info(
+        "graph_run block_application: applied %d block(s) to %d file(s) anchors=%s",
+        len(blocks),
+        len(merged_map),
+        anchors,
+    )
+
+    return cand.model_copy(
+        update={
+            "artifact_refs_json": updated_refs,
+            "working_state_patch_json": updated_wsp,
+        }
+    )
+
+
+def build_graph_context(
+    settings: Settings,
+    repo: Repository,
+    invoker: DefaultRoleInvoker | None = None,
+) -> "GraphContext":
+    """Public factory: create a ``GraphContext`` from settings and repo."""
+    inv = invoker or DefaultRoleInvoker(settings=settings)
+    return GraphContext(repo, inv, settings)
+
+
+def get_compiled_graph(ctx: "GraphContext"):
+    """Public factory: compile and return the LangGraph graph for a given context.
+
+    The returned object supports both ``.invoke()`` (synchronous) and ``.ainvoke()``
+    / ``.astream()`` (async) — use the appropriate form depending on your call site.
+    """
+    return build_compiled_graph(ctx)
 
 
 def _save_checkpoint_with_event(
@@ -265,10 +439,19 @@ def build_compiled_graph(ctx: GraphContext):
         ws = ctx.repo.get_working_staging_for_thread(tid)
         ws_facts: dict[str, Any] | None = None
         user_rating_context: dict[str, Any] | None = None
-        
+
         if ws is not None:
             checkpoints = ctx.repo.list_staging_checkpoints(ws.working_staging_id, limit=5)
             latest_cp = checkpoints[0] if checkpoints else None
+
+            # Collect recent user ratings for trend signal
+            staging_snapshots = ctx.repo.list_staging_snapshots_for_thread(tid, limit=5)
+            recent_ratings = [
+                s.user_rating for s in staging_snapshots if s.user_rating is not None
+            ]
+            # Most-recent-first from DB → reverse so oldest→newest for trend calc
+            recent_ratings = list(reversed(recent_ratings))
+
             facts = build_working_staging_facts(
                 ws,
                 checkpoint_count=len(checkpoints),
@@ -276,11 +459,11 @@ def build_compiled_graph(ctx: GraphContext):
                 latest_checkpoint_trigger=latest_cp.trigger if latest_cp else None,
                 patches_since_rebuild=(ws.revision - (ws.last_rebuild_revision or 0)),
                 stagnation_count=ws.stagnation_count,
+                recent_user_ratings=recent_ratings if recent_ratings else None,
             )
             ws_facts = working_staging_facts_to_payload(facts)
-            
-            # Get latest staging snapshot for user rating context
-            staging_snapshots = ctx.repo.list_staging_snapshots_for_thread(tid, limit=1)
+
+            # Build user_rating_context from most recent rated snapshot
             if staging_snapshots:
                 latest_staging = staging_snapshots[0]
                 if latest_staging.user_rating is not None:
@@ -609,7 +792,7 @@ def build_compiled_graph(ctx: GraphContext):
             )
 
         ctx.repo.save_role_invocation(inv)
-        
+
         # Get identity_id from state for image generation context
         iid_raw = state.get("identity_id")
         identity_id: UUID | None = None
@@ -618,7 +801,7 @@ def build_compiled_graph(ctx: GraphContext):
                 identity_id = UUID(str(iid_raw))
             except (ValueError, TypeError):
                 pass
-        
+
         cand = normalize_generator_output(
             raw,
             thread_id=tid,
@@ -628,8 +811,30 @@ def build_compiled_graph(ctx: GraphContext):
             identity_id=identity_id,
             enable_image_generation=ctx.settings.habitat_image_generation_enabled,
         )
-        cand = cand.model_copy(update={"raw_payload_json": raw})
+        # Emit normalization rescue event when the normalizer had to recover
+        rescue_paths = (cand.raw_payload_json or {}).get("_normalization_rescues")
+        if rescue_paths:
+            append_graph_run_event(
+                ctx.repo,
+                gid,
+                RunEventType.NORMALIZATION_RESCUE,
+                {
+                    "rescue_paths": rescue_paths,
+                    "build_candidate_id": str(cand.build_candidate_id),
+                },
+                thread_id=tid,
+            )
+            _log.info(
+                "graph_run graph_run_id=%s normalization_rescues=%s",
+                gid,
+                rescue_paths,
+            )
+
+        # Apply html_block_v1 artifacts to the current working staging (if any)
+        cand = _apply_html_blocks_to_candidate(ctx, cand, tid)
+
         ctx.repo.save_build_candidate(cand)
+        block_anchors = (cand.working_state_patch_json or {}).get("block_preview_anchors") or []
         step_state = {
             **dict(state),
             "build_candidate": {
@@ -638,6 +843,7 @@ def build_compiled_graph(ctx: GraphContext):
                 "updated_state": raw.get("updated_state"),
                 "sandbox_ref": raw.get("sandbox_ref"),
                 "preview_url": raw.get("preview_url"),
+                "block_anchors": block_anchors if block_anchors else None,
             },
             "build_candidate_id": str(cand.build_candidate_id),
             "current_state": raw.get("updated_state") or state.get("current_state") or {},
@@ -902,6 +1108,15 @@ def build_compiled_graph(ctx: GraphContext):
         out: dict[str, Any] = {"decision": decision}
         if interrupt_reason:
             out["interrupt_reason"] = interrupt_reason
+
+        # Track pass_count for quality-based visibility (currently informational;
+        # enables future policy: "require N consecutive passes before staging").
+        current_pass_count = int(state.get("pass_count") or 0)
+        if status == "pass":
+            out["pass_count"] = current_pass_count + 1
+        else:
+            out["pass_count"] = 0
+
         if decision == "iterate":
             next_iteration = iteration + 1
             out["iteration_index"] = next_iteration
@@ -919,7 +1134,12 @@ def build_compiled_graph(ctx: GraphContext):
             ctx.repo,
             gid,
             RunEventType.DECISION_MADE,
-            {"decision": decision, "interrupt_reason": interrupt_reason},
+            {
+                "decision": decision,
+                "interrupt_reason": interrupt_reason,
+                "pass_count": out["pass_count"],
+                "evaluation_status": status,
+            },
         )
         return out
 
@@ -1129,6 +1349,41 @@ def build_compiled_graph(ctx: GraphContext):
                 else None,
             },
         )
+
+        # --- Evaluator → identity feedback loop ---
+        # Upsert evaluation signals back into identity_profile so future planner
+        # invocations on the same identity receive richer context about what has
+        # and hasn't worked across runs.
+        if thread.identity_id is not None:
+            try:
+                upsert_identity_evolution_signal(
+                    ctx.repo,
+                    thread.identity_id,
+                    graph_run_id=gid,
+                    evaluation_status=ev.status,
+                    evaluation_summary=ev.summary or "",
+                    issue_count=len(ev.issues_json),
+                    staging_snapshot_id=ssid,
+                )
+                append_graph_run_event(
+                    ctx.repo,
+                    gid,
+                    RunEventType.IDENTITY_FEEDBACK_UPSERT,
+                    {
+                        "identity_id": str(thread.identity_id),
+                        "evaluation_status": ev.status,
+                        "issue_count": len(ev.issues_json),
+                        "staging_snapshot_id": str(ssid),
+                    },
+                    thread_id=tid,
+                )
+            except Exception as fb_exc:
+                _log.warning(
+                    "identity_feedback_upsert failed (non-fatal) identity_id=%s exc=%s",
+                    thread.identity_id,
+                    type(fb_exc).__name__,
+                )
+
         _log.info(
             "graph_run graph_run_id=%s stage=staging_done working_staging_id=%s mode=%s revision=%d snapshot_id=%s elapsed_ms=%.1f",
             gid, ws.working_staging_id, mode, ws.revision, ssid,

@@ -28,6 +28,12 @@ class GraphState(TypedDict, total=False):
     iteration_index: int
     max_iterations: int
 
+    # Accumulated count of consecutive evaluator "pass" decisions within this run.
+    # Used for quality-based early termination: once the output reaches "pass",
+    # the decision_router routes to staging immediately, so this counter supports
+    # future policy changes (e.g. "require two consecutive passes before staging").
+    pass_count: int
+
     decision: str | None
     interrupt_reason: str | None
     status: str

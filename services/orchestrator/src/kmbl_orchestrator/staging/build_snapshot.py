@@ -144,6 +144,9 @@ class StagingPayloadMetadataV1(BaseModel):
         default=None,
         description="When prior staging exists: generated images / gallery URLs may repeat as content.",
     )
+    # Preview anchors derived from html_block_v1 amendments.
+    # The first entry is the primary anchor to append to the staging preview URL.
+    block_preview_anchors: list[str] = Field(default_factory=list)
 
 
 class StagingSnapshotPayloadV1(BaseModel):
@@ -375,6 +378,10 @@ def build_staging_snapshot_payload(
     fs = derive_frontend_static_v1(artifact_refs, wsp)
     habitat = derive_habitat_v1(artifact_refs, wsp)
 
+    # Extract block preview anchors from working_state_patch (set by generator_node)
+    raw_anchors = wsp.get("block_preview_anchors")
+    block_preview_anchors: list[str] = list(raw_anchors) if isinstance(raw_anchors, list) else []
+
     prior_s = str(prior_staging_snapshot_id) if prior_staging_snapshot_id is not None else None
     reuse_note: str | None = None
     if prior_staging_snapshot_id is not None:
@@ -416,6 +423,7 @@ def build_staging_snapshot_payload(
             frontend_static=fs,
             habitat=habitat,
             content_reuse_note=reuse_note,
+            block_preview_anchors=block_preview_anchors,
         ),
     )
     return body.model_dump(mode="json")

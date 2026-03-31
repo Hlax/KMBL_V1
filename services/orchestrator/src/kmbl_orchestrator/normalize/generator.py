@@ -468,18 +468,25 @@ def normalize_generator_output(
         rescue_paths.append(f"artifact_norm_fallback:{type(exc).__name__}")
 
     pre_count = len(artifacts)
-    artifacts = _recover_static_files_from_proposed_changes(
-        raw.get("proposed_changes"), artifacts
+    # Only attempt static file recovery when there are NO html_block_v1 artifacts
+    # (blocks are intentional partial outputs, not a missing-content scenario)
+    has_blocks = any(
+        isinstance(a, dict) and a.get("role") == "html_block_v1"
+        for a in artifacts
     )
-    if len(artifacts) > pre_count:
-        rescue_paths.append(f"recover_from_proposed_changes:{len(artifacts) - pre_count}")
+    if not has_blocks:
+        artifacts = _recover_static_files_from_proposed_changes(
+            raw.get("proposed_changes"), artifacts
+        )
+        if len(artifacts) > pre_count:
+            rescue_paths.append(f"recover_from_proposed_changes:{len(artifacts) - pre_count}")
 
-    pre_count = len(artifacts)
-    artifacts = _recover_static_files_from_updated_state(
-        raw.get("updated_state"), artifacts
-    )
-    if len(artifacts) > pre_count:
-        rescue_paths.append(f"recover_from_updated_state:{len(artifacts) - pre_count}")
+        pre_count = len(artifacts)
+        artifacts = _recover_static_files_from_updated_state(
+            raw.get("updated_state"), artifacts
+        )
+        if len(artifacts) > pre_count:
+            rescue_paths.append(f"recover_from_updated_state:{len(artifacts) - pre_count}")
 
     artifacts = _assemble_habitat_if_present(
         artifacts,

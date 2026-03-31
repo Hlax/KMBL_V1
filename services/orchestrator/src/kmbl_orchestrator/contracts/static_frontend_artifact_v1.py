@@ -157,11 +157,12 @@ def normalize_combined_artifact_outputs_list(raw: Any) -> list[Any]:
     """
     Combined normalization pipeline for all artifact types.
     
-    Order: gallery images → universal images → static frontend files
+    Order: gallery images → universal images → html blocks → static frontend files
     """
     gal = _gallery_normalize(raw)
     img = _image_artifact_normalize(gal)
-    return normalize_static_frontend_artifact_outputs_list(img)
+    blk = _html_block_normalize(img)
+    return normalize_static_frontend_artifact_outputs_list(blk)
 
 
 def _gallery_normalize(raw: Any) -> list[Any]:
@@ -178,3 +179,11 @@ def _image_artifact_normalize(raw: list[Any]) -> list[Any]:
     )
 
     return normalize_image_artifact_outputs_list(raw)
+
+
+def _html_block_normalize(raw: list[Any]) -> list[Any]:
+    from kmbl_orchestrator.contracts.html_block_artifact_v1 import (
+        normalize_html_block_outputs_list,
+    )
+
+    return normalize_html_block_outputs_list(raw)

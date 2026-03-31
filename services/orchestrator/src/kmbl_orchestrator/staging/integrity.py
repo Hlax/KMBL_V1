@@ -40,19 +40,29 @@ def validate_generator_output_for_candidate(output: dict[str, Any]) -> None:
     Ensure generator output is meaningful before ``build_candidate`` persistence.
 
     Raises ValueError on invalid shape or empty primary payload.
+    Accepts ``html_block_v1`` artifacts in ``artifact_outputs`` as a valid form
+    of non-empty output (incremental block amendments).
     """
     pc = output.get("proposed_changes")
     ao = output.get("artifact_outputs")
     us = output.get("updated_state")
 
+    # Check html_block_v1 artifacts separately so a block-only output is valid
+    has_blocks = isinstance(ao, list) and any(
+        isinstance(a, dict) and a.get("role") == "html_block_v1"
+        for a in ao
+    )
+
     if not (
         _is_nonempty_proposed_changes(pc)
         or _is_nonempty_artifact_outputs(ao)
         or _is_nonempty_updated_state(us)
+        or has_blocks
     ):
         raise ValueError(
             "generator output must include at least one non-empty primary field "
-            "(proposed_changes, artifact_outputs, updated_state)"
+            "(proposed_changes, artifact_outputs, updated_state) "
+            "or at least one html_block_v1 artifact"
         )
 
     sr = output.get("sandbox_ref", None)

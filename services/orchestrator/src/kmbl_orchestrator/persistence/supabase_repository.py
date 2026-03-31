@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal, cast
 from uuid import UUID
@@ -332,6 +334,10 @@ class SupabaseRepository:
             settings.supabase_url,
             settings.supabase_service_role_key,
         )
+        # Thread-level advisory locks (single-process; for multi-process use DB-level locks)
+        self._thread_locks: dict[str, threading.Lock] = {}
+        self._thread_lock_guard = threading.Lock()
+        self._thread_lock_holders: dict[str, str] = {}
 
     def _run(
         self,
@@ -1998,6 +2004,65 @@ class SupabaseRepository:
         if not res.data:
             return []
         return [_row_to_staging_checkpoint(r) for r in res.data]
+
+    # --- Transaction & Thread Locking ---
+
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        """Best-effort atomicity for PostgREST (HTTP) writes.
+
+        Since supabase-py uses PostgREST, true SQL transactions are unavailable.
+        Writes execute in call order within the block.  The existing
+        ``ignore_duplicates=True`` upsert pattern provides idempotent retry
+        safety: if the process crashes mid-sequence and the operation is retried,
+        previously-committed rows are silently skipped.
+
+        **This is NOT true ACID.**  It guarantees ordering and idempotent retry
+        but cannot roll back already-committed HTTP writes on failure.
+        """
+        yield
+
+    def _get_thread_lock(self, thread_id: UUID) -> threading.Lock:
+        key = str(thread_id)
+        with self._thread_lock_guard:
+            if key not in self._thread_locks:
+                self._thread_locks[key] = threading.Lock()
+            return self._thread_locks[key]
+
+    @contextmanager
+    def thread_lock(self, thread_id: UUID, timeout_seconds: int = 300) -> Iterator[None]:
+        acquired = self.try_acquire_thread_lock(
+            thread_id, locked_by="thread_lock_ctx", timeout_seconds=timeout_seconds,
+        )
+        if not acquired:
+            raise TimeoutError(
+                f"Could not acquire thread lock for {thread_id} "
+                f"within {timeout_seconds}s"
+            )
+        try:
+            yield
+        finally:
+            self.release_thread_lock(thread_id)
+
+    def try_acquire_thread_lock(
+        self, thread_id: UUID, locked_by: str, timeout_seconds: int = 300,
+    ) -> bool:
+        lock = self._get_thread_lock(thread_id)
+        acquired = lock.acquire(timeout=timeout_seconds)
+        if acquired:
+            self._thread_lock_holders[str(thread_id)] = locked_by
+        return acquired
+
+    def release_thread_lock(self, thread_id: UUID) -> None:
+        key = str(thread_id)
+        with self._thread_lock_guard:
+            self._thread_lock_holders.pop(key, None)
+            lock = self._thread_locks.get(key)
+        if lock is not None:
+            try:
+                lock.release()
+            except RuntimeError:
+                pass  # already released
 
 
 def _row_to_identity_source(row: dict[str, Any]) -> IdentitySourceRecord:

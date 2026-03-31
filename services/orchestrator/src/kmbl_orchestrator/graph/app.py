@@ -594,29 +594,30 @@ def build_compiled_graph(ctx: GraphContext):
             planner_invocation_id=inv.role_invocation_id,
         )
         spec = spec.model_copy(update={"raw_payload_json": raw})
-        ctx.repo.save_build_spec(spec)
-        step_state = {
-            **dict(state),
-            "build_spec": raw.get("build_spec"),
-            "build_spec_id": str(spec.build_spec_id),
-        }
-        _save_checkpoint_with_event(
-            ctx,
-            CheckpointRecord(
-                checkpoint_id=uuid4(),
-                thread_id=tid,
-                graph_run_id=gid,
-                checkpoint_kind="post_step",
-                state_json=step_state,
-                context_compaction_json=None,
-            ),
-        )
-        append_graph_run_event(
-            ctx.repo,
-            gid,
-            RunEventType.PLANNER_INVOCATION_COMPLETED,
-            {"build_spec_id": str(spec.build_spec_id)},
-        )
+        with ctx.repo.transaction():
+            ctx.repo.save_build_spec(spec)
+            step_state = {
+                **dict(state),
+                "build_spec": raw.get("build_spec"),
+                "build_spec_id": str(spec.build_spec_id),
+            }
+            _save_checkpoint_with_event(
+                ctx,
+                CheckpointRecord(
+                    checkpoint_id=uuid4(),
+                    thread_id=tid,
+                    graph_run_id=gid,
+                    checkpoint_kind="post_step",
+                    state_json=step_state,
+                    context_compaction_json=None,
+                ),
+            )
+            append_graph_run_event(
+                ctx.repo,
+                gid,
+                RunEventType.PLANNER_INVOCATION_COMPLETED,
+                {"build_spec_id": str(spec.build_spec_id)},
+            )
         return {
             "build_spec": raw.get("build_spec"),
             "build_spec_id": str(spec.build_spec_id),
@@ -886,38 +887,39 @@ def build_compiled_graph(ctx: GraphContext):
         # Apply html_block_v1 artifacts to the current working staging (if any)
         cand = _apply_html_blocks_to_candidate(ctx, cand, tid)
 
-        ctx.repo.save_build_candidate(cand)
-        block_anchors = (cand.working_state_patch_json or {}).get("block_preview_anchors") or []
-        step_state = {
-            **dict(state),
-            "build_candidate": {
-                "proposed_changes": raw.get("proposed_changes"),
-                "artifact_outputs": raw.get("artifact_outputs"),
-                "updated_state": raw.get("updated_state"),
-                "sandbox_ref": raw.get("sandbox_ref"),
-                "preview_url": raw.get("preview_url"),
-                "block_anchors": block_anchors if block_anchors else None,
-            },
-            "build_candidate_id": str(cand.build_candidate_id),
-            "current_state": raw.get("updated_state") or state.get("current_state") or {},
-        }
-        _save_checkpoint_with_event(
-            ctx,
-            CheckpointRecord(
-                checkpoint_id=uuid4(),
-                thread_id=tid,
-                graph_run_id=gid,
-                checkpoint_kind="post_step",
-                state_json=step_state,
-                context_compaction_json=None,
-            ),
-        )
-        append_graph_run_event(
-            ctx.repo,
-            gid,
-            RunEventType.GENERATOR_INVOCATION_COMPLETED,
-            {"build_candidate_id": str(cand.build_candidate_id)},
-        )
+        with ctx.repo.transaction():
+            ctx.repo.save_build_candidate(cand)
+            block_anchors = (cand.working_state_patch_json or {}).get("block_preview_anchors") or []
+            step_state = {
+                **dict(state),
+                "build_candidate": {
+                    "proposed_changes": raw.get("proposed_changes"),
+                    "artifact_outputs": raw.get("artifact_outputs"),
+                    "updated_state": raw.get("updated_state"),
+                    "sandbox_ref": raw.get("sandbox_ref"),
+                    "preview_url": raw.get("preview_url"),
+                    "block_anchors": block_anchors if block_anchors else None,
+                },
+                "build_candidate_id": str(cand.build_candidate_id),
+                "current_state": raw.get("updated_state") or state.get("current_state") or {},
+            }
+            _save_checkpoint_with_event(
+                ctx,
+                CheckpointRecord(
+                    checkpoint_id=uuid4(),
+                    thread_id=tid,
+                    graph_run_id=gid,
+                    checkpoint_kind="post_step",
+                    state_json=step_state,
+                    context_compaction_json=None,
+                ),
+            )
+            append_graph_run_event(
+                ctx.repo,
+                gid,
+                RunEventType.GENERATOR_INVOCATION_COMPLETED,
+                {"build_candidate_id": str(cand.build_candidate_id)},
+            )
         return {
             "build_candidate": step_state["build_candidate"],
             "build_candidate_id": str(cand.build_candidate_id),
@@ -1130,7 +1132,6 @@ def build_compiled_graph(ctx: GraphContext):
             "alignment_score": alignment_score,
             "alignment_signals_json": alignment_signals,
         })
-        ctx.repo.save_evaluation_report(report)
 
         # Update alignment score history in state
         alignment_history: list[dict[str, Any]] = list(
@@ -1158,23 +1159,25 @@ def build_compiled_graph(ctx: GraphContext):
             "alignment_score_history": alignment_history,
             "last_alignment_score": alignment_score,
         }
-        _save_checkpoint_with_event(
-            ctx,
-            CheckpointRecord(
-                checkpoint_id=uuid4(),
-                thread_id=tid,
-                graph_run_id=gid,
-                checkpoint_kind="post_step",
-                state_json=step_state,
-                context_compaction_json=None,
-            ),
-        )
-        append_graph_run_event(
-            ctx.repo,
-            gid,
-            RunEventType.EVALUATOR_INVOCATION_COMPLETED,
-            {"evaluation_report_id": str(report.evaluation_report_id)},
-        )
+        with ctx.repo.transaction():
+            ctx.repo.save_evaluation_report(report)
+            _save_checkpoint_with_event(
+                ctx,
+                CheckpointRecord(
+                    checkpoint_id=uuid4(),
+                    thread_id=tid,
+                    graph_run_id=gid,
+                    checkpoint_kind="post_step",
+                    state_json=step_state,
+                    context_compaction_json=None,
+                ),
+            )
+            append_graph_run_event(
+                ctx.repo,
+                gid,
+                RunEventType.EVALUATOR_INVOCATION_COMPLETED,
+                {"evaluation_report_id": str(report.evaluation_report_id)},
+            )
         return {
             "evaluation_report": step_state["evaluation_report"],
             "evaluation_report_id": str(report.evaluation_report_id),
@@ -1651,6 +1654,30 @@ def run_graph(
         "run_graph graph_run_id=%s stage=langgraph_invoke_start elapsed_ms=0.0",
         gid0,
     )
+    # Acquire thread-level advisory lock to prevent interleaved writes
+    _tid_raw = base.get("thread_id")
+    _thread_lock_ctx = (
+        repo.thread_lock(UUID(str(_tid_raw))) if _tid_raw else _noop_ctx()
+    )
+    with _thread_lock_ctx:
+        return _run_graph_inner(repo, ctx, app, base, gid0, t_run)
+
+
+def _noop_ctx():
+    """Trivial context manager for the no-thread-id case."""
+    from contextlib import nullcontext
+    return nullcontext()
+
+
+def _run_graph_inner(
+    repo: Repository,
+    ctx: GraphContext,
+    app,
+    base: dict[str, Any],
+    gid0,
+    t_run: float,
+) -> GraphState:
+    """Inner body of ``run_graph`` — runs inside the optional thread lock."""
     try:
         final = app.invoke(base)
     except RoleInvocationFailed as e:
@@ -1775,27 +1802,28 @@ def run_graph(
         gid_u = UUID(gid)
         tid_u = UUID(tid_s) if tid_s else None
         try:
-            if tid_s:
-                post = CheckpointRecord(
-                    checkpoint_id=uuid4(),
-                    thread_id=UUID(tid_s),
-                    graph_run_id=gid_u,
-                    checkpoint_kind="post_role",
-                    state_json=dict(final),
-                    context_compaction_json=None,
+            with repo.transaction():
+                if tid_s:
+                    post = CheckpointRecord(
+                        checkpoint_id=uuid4(),
+                        thread_id=UUID(tid_s),
+                        graph_run_id=gid_u,
+                        checkpoint_kind="post_role",
+                        state_json=dict(final),
+                        context_compaction_json=None,
+                    )
+                    _save_checkpoint_with_event(ctx, post)
+                    repo.update_thread_current_checkpoint(UUID(tid_s), post.checkpoint_id)
+                ended = datetime.now(timezone.utc).isoformat()
+                repo.update_graph_run_status(gid_u, "completed", ended)
+                repo.attach_run_snapshot(gid_u, dict(final))
+                append_graph_run_event(
+                    repo,
+                    gid_u,
+                    RunEventType.GRAPH_RUN_COMPLETED,
+                    {},
+                    thread_id=tid_u,
                 )
-                _save_checkpoint_with_event(ctx, post)
-                repo.update_thread_current_checkpoint(UUID(tid_s), post.checkpoint_id)
-            ended = datetime.now(timezone.utc).isoformat()
-            repo.update_graph_run_status(gid_u, "completed", ended)
-            repo.attach_run_snapshot(gid_u, dict(final))
-            append_graph_run_event(
-                repo,
-                gid_u,
-                RunEventType.GRAPH_RUN_COMPLETED,
-                {},
-                thread_id=tid_u,
-            )
         except Exception as post_exc:
             _log.exception(
                 "run_graph post-invoke persistence failed graph_run_id=%s exc=%s",

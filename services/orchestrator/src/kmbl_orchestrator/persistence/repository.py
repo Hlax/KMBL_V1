@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+import copy
+import logging
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal, Protocol
 from uuid import UUID
+
+_log = logging.getLogger(__name__)
 
 from kmbl_orchestrator.domain import (
     AutonomousLoopRecord,
@@ -309,6 +316,47 @@ class Repository(Protocol):
     ) -> list[StagingCheckpointRecord]:
         """Newest ``created_at`` first."""
 
+    # --- Transaction & Thread Locking ---
+
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        """Context manager for atomic multi-write operations.
+
+        All writes within the context are committed together or rolled back.
+        Implementations may provide best-effort atomicity depending on backend
+        constraints (e.g. PostgREST has no true SQL transactions).
+        """
+        yield  # default: no-op passthrough
+
+    @contextmanager
+    def thread_lock(self, thread_id: UUID, timeout_seconds: int = 300) -> Iterator[None]:
+        """Advisory lock for thread-level concurrency control.
+
+        Prevents concurrent graph runs on the same thread.  Acquires on entry,
+        releases on exit (including on exception).
+        """
+        acquired = self.try_acquire_thread_lock(
+            thread_id, locked_by="thread_lock_ctx", timeout_seconds=timeout_seconds,
+        )
+        if not acquired:
+            raise TimeoutError(
+                f"Could not acquire thread lock for {thread_id} "
+                f"within {timeout_seconds}s"
+            )
+        try:
+            yield
+        finally:
+            self.release_thread_lock(thread_id)
+
+    def try_acquire_thread_lock(
+        self, thread_id: UUID, locked_by: str, timeout_seconds: int = 300,
+    ) -> bool:
+        """Try to acquire an advisory lock on a thread. Returns True if acquired."""
+        return True  # default: always succeeds (no-op)
+
+    def release_thread_lock(self, thread_id: UUID) -> None:
+        """Release advisory lock on a thread."""
+
 
 class InMemoryRepository:
     """Development / unit tests — no external DB."""
@@ -330,6 +378,10 @@ class InMemoryRepository:
         self._identity_sources: list[IdentitySourceRecord] = []
         self._identity_profiles: dict[str, IdentityProfileRecord] = {}
         self._autonomous_loops: dict[str, AutonomousLoopRecord] = {}
+        # Thread-level advisory locks
+        self._thread_locks: dict[str, threading.Lock] = {}
+        self._thread_lock_guard = threading.Lock()
+        self._thread_lock_holders: dict[str, str] = {}
 
     def ensure_thread(self, record: ThreadRecord) -> None:
         key = str(record.thread_id)
@@ -998,3 +1050,69 @@ class InMemoryRepository:
         ]
         rows.sort(key=lambda r: r.created_at, reverse=True)
         return rows[:limit]
+
+    # --- Transaction & Thread Locking ---
+
+    _SNAPSHOT_ATTRS = (
+        "_threads", "_graph_runs", "_checkpoints", "_role_invocations",
+        "_build_specs", "_build_candidates", "_evaluation_reports",
+        "_run_snapshots", "_graph_run_events", "_staging_snapshots",
+        "_working_stagings", "_staging_checkpoints", "_publications",
+        "_identity_sources", "_identity_profiles", "_autonomous_loops",
+    )
+
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        """Snapshot/rollback: all writes within the block succeed or are reverted."""
+        snapshot: dict[str, Any] = {}
+        for attr in self._SNAPSHOT_ATTRS:
+            val = getattr(self, attr)
+            snapshot[attr] = copy.copy(val)
+        try:
+            yield
+        except BaseException:
+            for attr, val in snapshot.items():
+                setattr(self, attr, val)
+            raise
+
+    def _get_thread_lock(self, thread_id: UUID) -> threading.Lock:
+        key = str(thread_id)
+        with self._thread_lock_guard:
+            if key not in self._thread_locks:
+                self._thread_locks[key] = threading.Lock()
+            return self._thread_locks[key]
+
+    @contextmanager
+    def thread_lock(self, thread_id: UUID, timeout_seconds: int = 300) -> Iterator[None]:
+        acquired = self.try_acquire_thread_lock(
+            thread_id, locked_by="thread_lock_ctx", timeout_seconds=timeout_seconds,
+        )
+        if not acquired:
+            raise TimeoutError(
+                f"Could not acquire thread lock for {thread_id} "
+                f"within {timeout_seconds}s"
+            )
+        try:
+            yield
+        finally:
+            self.release_thread_lock(thread_id)
+
+    def try_acquire_thread_lock(
+        self, thread_id: UUID, locked_by: str, timeout_seconds: int = 300,
+    ) -> bool:
+        lock = self._get_thread_lock(thread_id)
+        acquired = lock.acquire(timeout=timeout_seconds)
+        if acquired:
+            self._thread_lock_holders[str(thread_id)] = locked_by
+        return acquired
+
+    def release_thread_lock(self, thread_id: UUID) -> None:
+        key = str(thread_id)
+        with self._thread_lock_guard:
+            self._thread_lock_holders.pop(key, None)
+            lock = self._thread_locks.get(key)
+        if lock is not None:
+            try:
+                lock.release()
+            except RuntimeError:
+                pass  # already released

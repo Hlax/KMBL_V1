@@ -41,6 +41,12 @@ from kmbl_orchestrator.identity.hydrate import (
     build_planner_identity_context,
     upsert_identity_evolution_signal,
 )
+from kmbl_orchestrator.identity.brief import build_identity_brief_from_repo
+from kmbl_orchestrator.identity.alignment import (
+    compute_alignment_trend,
+    score_alignment,
+    select_retry_direction,
+)
 from kmbl_orchestrator.normalize import (
     normalize_evaluator_output,
     normalize_generator_output,
@@ -381,15 +387,26 @@ def build_compiled_graph(ctx: GraphContext):
 
     def context_hydrator(state: GraphState) -> dict[str, Any]:
         iid_raw = state.get("identity_id")
+        identity_brief_payload: dict[str, Any] | None = None
         if iid_raw:
             try:
+                iid_uuid = UUID(str(iid_raw))
                 ic = build_planner_identity_context(
-                    ctx.repo, UUID(str(iid_raw)), settings=ctx.settings
+                    ctx.repo, iid_uuid, settings=ctx.settings
                 )
+                # Build identity_brief independently of what planner will do with ic.
+                # This is the fix: identity survives past the planner boundary.
+                brief = build_identity_brief_from_repo(ctx.repo, iid_uuid)
+                if brief is not None:
+                    identity_brief_payload = brief.to_generator_payload()
             except ValueError:
                 ic = {}
         else:
             ic = state.get("identity_context") or {}
+        # If identity_brief was already set in state (e.g. resume), keep it
+        if identity_brief_payload is None:
+            identity_brief_payload = state.get("identity_brief")
+
         gid = state.get("graph_run_id")
         tid = state.get("thread_id")
         ei = merge_session_staging_into_event_input(
@@ -398,13 +415,16 @@ def build_compiled_graph(ctx: GraphContext):
             graph_run_id=str(gid) if gid else None,
             thread_id=str(tid) if tid else None,
         )
-        return {
+        out: dict[str, Any] = {
             "identity_context": ic,
             "memory_context": state.get("memory_context") or {},
             "current_state": state.get("current_state") or {},
             "compacted_context": state.get("compacted_context") or {},
             "event_input": ei,
         }
+        if identity_brief_payload is not None:
+            out["identity_brief"] = identity_brief_payload
+        return out
 
     def checkpoint_pre(state: GraphState) -> dict[str, Any]:
         gid = UUID(state["graph_run_id"])
@@ -686,7 +706,18 @@ def build_compiled_graph(ctx: GraphContext):
             "iteration_plan": iteration_plan,
             "event_input": state.get("event_input") or {},
             "working_staging_facts": ws_facts,
+            # Fix 1: identity_brief injected directly — survives planner reinterpretation
+            "identity_brief": state.get("identity_brief"),
+            # Fix 3: retry_context carries orchestrator-selected direction on iterations
+            # Generator must use retry_context.retry_direction to determine approach
         }
+        # Merge retry_context into iteration_plan when present (iteration > 0)
+        if iteration > 0 and state.get("retry_context"):
+            rc = state.get("retry_context") or {}
+            if payload["iteration_plan"] is None:
+                payload["iteration_plan"] = {}
+            # retry_context fields take precedence over iteration_plan fields
+            payload["iteration_plan"] = {**payload["iteration_plan"], **rc}
         try:
             gen_key, routing_meta = select_generator_provider_config(
                 ctx.settings,
@@ -944,6 +975,8 @@ def build_compiled_graph(ctx: GraphContext):
             "iteration_hint": state.get("iteration_index", 0),
             "working_staging_facts": ws_facts,
             "user_rating_context": user_rating_context,
+            # Fix 1+2: identity_brief enables evaluator to produce alignment_report
+            "identity_brief": state.get("identity_brief"),
         }
         t_ev = time.perf_counter()
         inv, raw = ctx.invoker.invoke(
@@ -1033,8 +1066,45 @@ def build_compiled_graph(ctx: GraphContext):
                     thread_id=tid,
                 )
         report = apply_preview_surface_gate(report, is_static_vertical=is_static_vertical)
-        report = report.model_copy(update={"raw_payload_json": raw})
+
+        # Fix 2: compute alignment score from evaluator output + identity_brief
+        identity_brief = state.get("identity_brief")
+        alignment_score: float | None = None
+        alignment_signals: dict[str, Any] = {}
+        if identity_brief:
+            cand_artifact_refs: list[Any] = []
+            if bc_row is not None:
+                cand_artifact_refs = list(bc_row.artifact_refs_json or [])
+            alignment_score, alignment_signals = score_alignment(
+                metrics=report.metrics_json,
+                artifact_refs=cand_artifact_refs,
+                identity_brief=identity_brief,
+            )
+            if alignment_score is not None:
+                _log.info(
+                    "graph_run graph_run_id=%s alignment_score=%.3f source=%s",
+                    gid,
+                    alignment_score,
+                    alignment_signals.get("source", "unknown"),
+                )
+
+        report = report.model_copy(update={
+            "raw_payload_json": raw,
+            "alignment_score": alignment_score,
+            "alignment_signals_json": alignment_signals,
+        })
         ctx.repo.save_evaluation_report(report)
+
+        # Update alignment score history in state
+        alignment_history: list[dict[str, Any]] = list(
+            state.get("alignment_score_history") or []
+        )
+        if alignment_score is not None:
+            alignment_history.append({
+                "iteration_index": int(state.get("iteration_index", 0)),
+                "score": alignment_score,
+            })
+
         step_state = {
             **dict(state),
             "evaluation_report": {
@@ -1043,8 +1113,13 @@ def build_compiled_graph(ctx: GraphContext):
                 "issues": report.issues_json,
                 "metrics": report.metrics_json,
                 "artifacts": report.artifacts_json,
+                # Include alignment so decision_router can use it
+                "alignment_score": alignment_score,
+                "alignment_signals": alignment_signals,
             },
             "evaluation_report_id": str(report.evaluation_report_id),
+            "alignment_score_history": alignment_history,
+            "last_alignment_score": alignment_score,
         }
         _save_checkpoint_with_event(
             ctx,
@@ -1066,6 +1141,8 @@ def build_compiled_graph(ctx: GraphContext):
         return {
             "evaluation_report": step_state["evaluation_report"],
             "evaluation_report_id": str(report.evaluation_report_id),
+            "alignment_score_history": step_state["alignment_score_history"],
+            "last_alignment_score": step_state["last_alignment_score"],
         }
 
     def decision_router(state: GraphState) -> dict[str, Any]:
@@ -1119,9 +1196,58 @@ def build_compiled_graph(ctx: GraphContext):
         else:
             out["pass_count"] = 0
 
+        # Fix 3: compute retry_direction and retry_context for next iteration.
+        # This is orchestrator-owned — the planner receives a concrete direction,
+        # not just a request to "do better." The direction is deterministic from
+        # alignment trend + evaluator status + stagnation.
         if decision == "iterate":
             next_iteration = iteration + 1
             out["iteration_index"] = next_iteration
+
+            alignment_score: float | None = state.get("last_alignment_score")
+            alignment_history: list[dict[str, Any]] = list(
+                state.get("alignment_score_history") or []
+            )
+            alignment_trend = compute_alignment_trend(alignment_history)
+            stagnation = int(
+                (state.get("current_state") or {}).get("stagnation_count", 0)
+            )
+            prior_direction: str | None = state.get("retry_direction")
+
+            retry_dir = select_retry_direction(
+                alignment_score=alignment_score,
+                alignment_trend=alignment_trend,
+                evaluator_status=status,
+                iteration_index=iteration,
+                stagnation_count=stagnation,
+                prior_direction=prior_direction,
+            )
+            out["retry_direction"] = retry_dir
+
+            # Extract failed criteria IDs from issues for planner context
+            issues = ev.get("issues") or []
+            failed_criteria = [
+                iss.get("type") or iss.get("id") or iss.get("criterion")
+                for iss in issues
+                if isinstance(iss, dict)
+            ]
+            failed_criteria = [f for f in failed_criteria if f][:8]
+
+            retry_context: dict[str, Any] = {
+                "retry_direction": retry_dir,
+                "iteration_strategy": retry_dir,  # mirrors iteration_plan key
+                "prior_alignment_score": alignment_score,
+                "alignment_trend": alignment_trend,
+                "failed_criteria_ids": failed_criteria,
+                "iteration_index": next_iteration,
+                "orchestrator_note": (
+                    f"Direction selected by orchestrator based on alignment_trend={alignment_trend} "
+                    f"status={status} iteration={iteration}. "
+                    f"This is binding — use {retry_dir} strategy."
+                ),
+            }
+            out["retry_context"] = retry_context
+
             append_graph_run_event(
                 ctx.repo,
                 gid,
@@ -1130,6 +1256,9 @@ def build_compiled_graph(ctx: GraphContext):
                     "iteration_index": next_iteration,
                     "previous_status": status,
                     "max_iterations": max_iter,
+                    "retry_direction": retry_dir,
+                    "alignment_score": alignment_score,
+                    "alignment_trend": alignment_trend,
                 },
             )
         append_graph_run_event(
@@ -1141,6 +1270,8 @@ def build_compiled_graph(ctx: GraphContext):
                 "interrupt_reason": interrupt_reason,
                 "pass_count": out["pass_count"],
                 "evaluation_status": status,
+                "retry_direction": out.get("retry_direction"),
+                "last_alignment_score": state.get("last_alignment_score"),
             },
         )
         return out
@@ -1285,6 +1416,11 @@ def build_compiled_graph(ctx: GraphContext):
                 },
             )
 
+        # Persist alignment score on working staging for trend detection
+        alignment_score_for_ws: float | None = state.get("last_alignment_score")
+        if alignment_score_for_ws is not None:
+            ws.last_alignment_score = alignment_score_for_ws
+
         ctx.repo.save_working_staging(ws)
 
         event_payload: dict[str, Any] = {
@@ -1366,6 +1502,8 @@ def build_compiled_graph(ctx: GraphContext):
                     evaluation_summary=ev.summary or "",
                     issue_count=len(ev.issues_json),
                     staging_snapshot_id=ssid,
+                    # Fix 2: alignment score is now part of the evolution signal
+                    alignment_score=ev.alignment_score,
                 )
                 append_graph_run_event(
                     ctx.repo,

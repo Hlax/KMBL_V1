@@ -15,6 +15,11 @@ from kmbl_orchestrator.domain import AutonomousLoopRecord
 from kmbl_orchestrator.identity.extract import extract_identity_from_url
 from kmbl_orchestrator.identity.hydrate import persist_identity_from_seed
 from kmbl_orchestrator.seeds import build_identity_url_static_frontend_event_input
+from kmbl_orchestrator.autonomous.directions import (
+    build_initial_directions_for_identity,
+    direction_to_retry_context,
+    validate_direction,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -172,11 +177,20 @@ async def _tick_identity_fetch(
 
     persist_identity_from_seed(repo, seed, identity_id=loop.identity_id)
 
+    # Build initial typed exploration directions from the identity brief.
+    # This replaces the previous untyped list[dict] with no schema.
+    from kmbl_orchestrator.identity.brief import build_identity_brief_from_repo
+    brief = build_identity_brief_from_repo(repo, loop.identity_id)
+    initial_directions = build_initial_directions_for_identity(
+        identity_brief=brief.to_generator_payload() if brief else None,
+    )
+
     repo.update_loop_state(
         loop.loop_id,
         phase="graph_cycle",
         status="running",
         reset_loop_error=True,
+        exploration_directions=initial_directions,
     )
 
     return LoopTickResult(
@@ -222,23 +236,70 @@ async def _tick_graph_run(
         identity_url=loop.identity_url,
     )
 
+    # Determine retry_context from current pending direction (if any).
+    # The direction queue is processed in order; the orchestrator picks the
+    # first pending direction and translates it into a retry_context for the graph.
+    directions = loop.exploration_directions or []
+    completed_ids = {d.get("id") for d in (loop.completed_directions or []) if d.get("id")}
+    pending = [d for d in directions if validate_direction(d) and d.get("id") not in completed_ids]
+    current_direction = pending[0] if pending else None
+
+    retry_context: dict[str, Any] | None = None
+    if current_direction and iteration > 1:
+        # iteration 1 = fresh start (no retry_context); subsequent iterations use directions
+        retry_context = direction_to_retry_context(
+            current_direction,
+            iteration_index=iteration,
+            prior_alignment_score=loop.last_alignment_score,
+        )
+        _log.info(
+            "Loop %s: applying direction_id=%s type=%s for iteration %d",
+            loop.loop_id,
+            current_direction.get("id"),
+            current_direction.get("type"),
+            iteration,
+        )
+
     try:
         result = await run_graph_fn(
             identity_url=loop.identity_url,
             identity_id=loop.identity_id,
             event_input=event_input,
             thread_id=loop.current_thread_id,
+            retry_context=retry_context,
         )
 
         graph_run_id = result.get("graph_run_id")
         thread_id = result.get("thread_id")
         staging_snapshot_id = result.get("staging_snapshot_id")
         evaluator_status = result.get("evaluator_status")
-        evaluator_score = result.get("evaluator_score")
+        # alignment_score is now returned from run_graph_fn (graph final state)
+        alignment_score: float | None = result.get("last_alignment_score")
+        # last_evaluator_score is alignment_score when present, else None
+        evaluator_score = alignment_score  # this is the real score now
 
         staging_count = loop.total_staging_count
         if staging_snapshot_id:
             staging_count += 1
+
+        # Mark the current direction as completed if alignment improved
+        # or if we've run at least one graph_cycle for this direction.
+        updated_completed = list(loop.completed_directions or [])
+        if current_direction:
+            prior_score = loop.last_alignment_score or 0.0
+            current_score = alignment_score or 0.0
+            # Mark direction complete when: alignment improved, or evaluator pass
+            if evaluator_status == "pass" or (
+                alignment_score is not None and current_score >= prior_score + 0.05
+            ):
+                updated_completed.append(current_direction)
+                _log.info(
+                    "Loop %s: direction %s marked complete (alignment %.3f → %.3f)",
+                    loop.loop_id,
+                    current_direction.get("id"),
+                    prior_score,
+                    current_score,
+                )
 
         repo.update_loop_state(
             loop.loop_id,
@@ -248,7 +309,9 @@ async def _tick_graph_run(
             last_staging_snapshot_id=UUID(staging_snapshot_id) if staging_snapshot_id else None,
             last_evaluator_status=evaluator_status,
             last_evaluator_score=evaluator_score,
+            last_alignment_score=alignment_score,
             total_staging_count=staging_count,
+            completed_directions=updated_completed if updated_completed != list(loop.completed_directions or []) else None,
             phase="proposing" if evaluator_status == "pass" else "graph_cycle",
             reset_loop_error=True,
         )

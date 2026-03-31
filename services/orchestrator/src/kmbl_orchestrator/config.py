@@ -47,7 +47,10 @@ class Settings(BaseSettings):
             "orchestrator_allow_dev_role_invoke",
         ),
     )
-    # When true (default): empty identity profile gets DEFAULT_FALLBACK_PROFILE for local dev.
+    # LOCAL DEV ONLY — when true: empty identity profile silently substitutes DEFAULT_FALLBACK_PROFILE.
+    # Default is true for local dev convenience. MUST be false in production / CI to prevent
+    # silent identity substitution masquerading as real identity-driven generation.
+    # Set KMBL_IDENTITY_ALLOW_FALLBACK_PROFILE=false to enforce real identity data.
     identity_allow_fallback_profile: bool = Field(
         default=True,
         validation_alias=AliasChoices(

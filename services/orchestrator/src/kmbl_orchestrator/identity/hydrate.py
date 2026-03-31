@@ -18,11 +18,16 @@ _log = logging.getLogger(__name__)
 # Max evolution signals to retain in identity_profile.facets_json
 _MAX_EVOLUTION_SIGNALS = 20
 
+# Fallback profile is ONLY used in local dev when KMBL_IDENTITY_ALLOW_FALLBACK_PROFILE=true.
+# It is ALWAYS marked is_fallback=True so downstream consumers can detect it.
+# The identity brief will propagate is_fallback=True to generator and evaluator.
+# Production systems should set KMBL_IDENTITY_ALLOW_FALLBACK_PROFILE=false.
 DEFAULT_FALLBACK_PROFILE: dict[str, Any] = {
     "profile_summary": "Creative Architect — versatile digital creator with a modern aesthetic sensibility",
     "facets_json": {
         "tone_keywords": ["professional", "innovative", "approachable"],
         "aesthetic_keywords": ["modern", "clean", "balanced"],
+        "is_fallback": True,  # MUST be present so IdentityBrief.is_fallback=True downstream
     },
 }
 
@@ -71,8 +76,15 @@ def build_planner_identity_context(
     if not out.get("profile_summary") and not out.get("facets_json"):
         if s.identity_allow_fallback_profile:
             out["profile_summary"] = DEFAULT_FALLBACK_PROFILE["profile_summary"]
-            out["facets_json"] = DEFAULT_FALLBACK_PROFILE["facets_json"]
+            out["facets_json"] = dict(DEFAULT_FALLBACK_PROFILE["facets_json"])
             out["is_fallback"] = True
+            # Log visibly — fallback firing silently was the audit's #1 honesty problem
+            _log.warning(
+                "identity_context fallback fired identity_id=%s: "
+                "no real profile found; using DEFAULT_FALLBACK_PROFILE. "
+                "Set KMBL_IDENTITY_ALLOW_FALLBACK_PROFILE=false to prevent this in production.",
+                identity_id,
+            )
         else:
             out["identity_unresolved"] = True
             out["identity_unresolved_reason"] = "no_profile_or_facets"
@@ -141,6 +153,7 @@ def upsert_identity_evolution_signal(
     user_rating: int | None = None,
     user_feedback: str | None = None,
     staging_snapshot_id: UUID | None = None,
+    alignment_score: float | None = None,
 ) -> None:
     """Upsert a structured evaluation signal into identity_profile.facets_json.
 
@@ -165,6 +178,9 @@ def upsert_identity_evolution_signal(
         signal["user_feedback"] = user_feedback[:300]
     if staging_snapshot_id:
         signal["staging_snapshot_id"] = str(staging_snapshot_id)
+    # Fix 2: alignment score is now part of every evolution signal
+    if alignment_score is not None:
+        signal["alignment_score"] = round(float(alignment_score), 3)
 
     signals.append(signal)
     # Retain only the most recent N signals
@@ -183,6 +199,23 @@ def upsert_identity_evolution_signal(
         facets["recent_quality_trend"] = "stuck"
     else:
         facets["recent_quality_trend"] = "mixed"
+
+    # Fix 2: derive alignment trend from scored signals
+    # This gives the planner a concrete alignment direction, not just eval status
+    scored = [
+        {"iteration_index": i, "score": s["alignment_score"]}
+        for i, s in enumerate(signals[-5:])
+        if s.get("alignment_score") is not None
+    ]
+    if scored:
+        from kmbl_orchestrator.identity.alignment import compute_alignment_trend
+        facets["alignment_trend"] = compute_alignment_trend(scored)
+        facets["recent_alignment_scores"] = [
+            round(s["alignment_score"], 3)
+            for s in signals[-5:]
+            if s.get("alignment_score") is not None
+        ]
+        facets["latest_alignment_score"] = scored[-1]["score"]
 
     # Persist recent ratings trend
     recent_ratings = [

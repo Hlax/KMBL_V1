@@ -162,6 +162,10 @@ class WorkingStagingRecord(BaseModel):
         default=0,
         description="Issue count from most recent evaluation (for stagnation detection).",
     )
+    last_alignment_score: float | None = Field(
+        default=None,
+        description="Most recent identity alignment score (0-1) for trend detection.",
+    )
     last_revision_summary_json: dict[str, Any] = Field(
         default_factory=dict,
         description="Structured summary of the most recent revision for audit/display.",
@@ -267,6 +271,24 @@ class EvaluationReportRecord(BaseModel):
     metrics_json: dict[str, Any] = Field(default_factory=dict)
     artifacts_json: list[Any] = Field(default_factory=list)
     raw_payload_json: dict[str, Any] | None = None
+    # Identity alignment — computable signal, not prose
+    alignment_score: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "0-1 score measuring how well the output reflects the identity brief. "
+            "Computed by orchestrator from evaluator alignment_report block. "
+            "None when no identity brief was present."
+        ),
+    )
+    alignment_signals_json: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Structured per-criterion alignment results: "
+            "palette_used, name_present, tone_match, must_mention_hit_rate, etc."
+        ),
+    )
     created_at: str = Field(default_factory=_utc_now_iso)
 
 
@@ -297,9 +319,21 @@ class AutonomousLoopRecord(BaseModel):
     last_staging_snapshot_id: UUID | None = None
     last_evaluator_status: str | None = None
     last_evaluator_score: float | None = None
+    last_alignment_score: float | None = Field(
+        default=None,
+        description="Most recent identity alignment score (0-1). Populated from EvaluationReportRecord.alignment_score.",
+    )
 
-    # Planner exploration state
-    exploration_directions: list[dict[str, Any]] = Field(default_factory=list)
+    # Planner exploration state — typed directions replace the old untyped list[dict]
+    exploration_directions: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description=(
+            "List of ExplorationDirection dicts. Each must have: "
+            "id (str), type (one of: refine|pivot_layout|pivot_palette|pivot_content|fresh_start), "
+            "rationale (str, why this direction), "
+            "retry_hint (dict, extra planner context for this direction)."
+        ),
+    )
     completed_directions: list[dict[str, Any]] = Field(default_factory=list)
 
     # Auto-publication settings

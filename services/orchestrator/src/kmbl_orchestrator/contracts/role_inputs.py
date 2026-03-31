@@ -52,6 +52,20 @@ class GeneratorRoleInput(BaseModel):
         default=None,
         description="Structured summary of current working staging surface for amendment context.",
     )
+    # Identity brief: orchestrator-built constraints that survive past the planner boundary.
+    # Contains: display_name, role_or_title, short_bio, palette_hex, tone_keywords,
+    # aesthetic_keywords, layout_hints, headings_sample, must_mention, image_refs.
+    # When present: must_mention items MUST appear in output. palette_hex MUST influence styling.
+    identity_brief: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Orchestrator-built identity constraints injected directly (not via planner). "
+            "Fields: identity_id, source_url, display_name, role_or_title, short_bio, "
+            "palette_hex (use at least one), primary_palette, tone_keywords, aesthetic_keywords, "
+            "layout_hints, headings_sample, must_mention (strings that MUST appear in output), "
+            "image_refs, confidence, is_fallback."
+        ),
+    )
 
 
 class EvaluatorRoleInput(BaseModel):
@@ -69,6 +83,16 @@ class EvaluatorRoleInput(BaseModel):
     user_rating_context: dict[str, Any] | None = Field(
         default=None,
         description="User's rating and feedback from prior staging snapshots for calibration.",
+    )
+    # Identity brief: same object passed to generator. Evaluator uses must_mention,
+    # palette_hex, tone_keywords to produce alignment_report in output.
+    identity_brief: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Same identity brief passed to generator. Use to produce alignment_report: "
+            "check must_mention items present, palette colors used, tone reflected. "
+            "Report as alignment_report block in output metrics."
+        ),
     )
 
 

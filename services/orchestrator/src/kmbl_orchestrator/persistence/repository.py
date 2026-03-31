@@ -233,6 +233,7 @@ class Repository(Protocol):
         last_staging_snapshot_id: UUID | None = None,
         last_evaluator_status: str | None = None,
         last_evaluator_score: float | None = None,
+        last_alignment_score: float | None = None,
         exploration_directions: list | None = None,
         completed_directions: list | None = None,
         proposed_staging_id: UUID | None = None,
@@ -820,6 +821,7 @@ class InMemoryRepository:
         last_staging_snapshot_id: UUID | None = None,
         last_evaluator_status: str | None = None,
         last_evaluator_score: float | None = None,
+        last_alignment_score: float | None = None,
         exploration_directions: list | None = None,
         completed_directions: list | None = None,
         proposed_staging_id: UUID | None = None,
@@ -835,7 +837,7 @@ class InMemoryRepository:
         loop = self._autonomous_loops.get(key)
         if loop is None:
             return None
-        updates = {"updated_at": datetime.now(timezone.utc).isoformat()}
+        updates: dict = {"updated_at": datetime.now(timezone.utc).isoformat()}
         if status is not None:
             updates["status"] = status
             if status == "completed":
@@ -854,6 +856,8 @@ class InMemoryRepository:
             updates["last_evaluator_status"] = last_evaluator_status
         if last_evaluator_score is not None:
             updates["last_evaluator_score"] = last_evaluator_score
+        if last_alignment_score is not None:
+            updates["last_alignment_score"] = last_alignment_score
         if exploration_directions is not None:
             updates["exploration_directions"] = exploration_directions
         if completed_directions is not None:

@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -24,6 +24,7 @@ from kmbl_orchestrator.domain import (
     AutonomousLoopRecord,
     EvaluationReportRecord,
 )
+from kmbl_orchestrator.roles.invoke import DefaultRoleInvoker
 from kmbl_orchestrator.identity.hydrate import persist_identity_from_seed
 from kmbl_orchestrator.identity.seed import IdentitySeed
 from kmbl_orchestrator.persistence.repository import InMemoryRepository
@@ -120,7 +121,7 @@ class TestRetryContextDelivery:
             finally:
                 loops_mod.run_graph = original
 
-        asyncio.get_event_loop().run_until_complete(_run())
+        asyncio.run(_run())
 
         assert "initial" in captured, "run_graph was not called"
         assert "retry_context" in captured["initial"], (
@@ -163,7 +164,7 @@ class TestRetryContextDelivery:
             finally:
                 loops_mod.run_graph = original
 
-        asyncio.get_event_loop().run_until_complete(_run())
+        asyncio.run(_run())
         assert "retry_context" not in captured.get("initial", {}), (
             "retry_context should not be set when None"
         )
@@ -394,7 +395,7 @@ class TestLoopScorePropagation:
             finally:
                 loops_mod.run_graph = original
 
-        asyncio.get_event_loop().run_until_complete(_run())
+        asyncio.run(_run())
 
         assert result.get("last_alignment_score") == 0.77, (
             "last_alignment_score should be propagated from graph state"
@@ -439,7 +440,7 @@ class TestLoopScorePropagation:
             finally:
                 loops_mod.run_graph = original
 
-        asyncio.get_event_loop().run_until_complete(_run())
+        asyncio.run(_run())
 
         assert result.get("last_alignment_score") is None
         assert result.get("evaluator_score") is None
@@ -472,7 +473,7 @@ class TestLoopScorePropagation:
         alignment_score = 0.72
         updated = repo.update_loop_state(
             loop.loop_id,
-            evaluator_score=alignment_score,
+            last_evaluator_score=alignment_score,
             last_alignment_score=alignment_score,
             last_evaluator_status="partial",
             iteration_count=1,
@@ -488,3 +489,92 @@ class TestLoopScorePropagation:
         assert updated.last_alignment_score < updated.auto_publish_threshold, (
             "alignment score below threshold should not trigger auto-publish"
         )
+
+
+# ---------------------------------------------------------------------------
+# Cross-tick: orchestrator retry_context → generator iteration_plan (real graph)
+# ---------------------------------------------------------------------------
+
+
+class TestAutonomousLoopRetryContextGeneratorMerge:
+    """
+    When the autonomous loop supplies retry_context on tick 2+ (new run_graph,
+    iteration_index=0), the generator must still merge it into iteration_plan.
+    """
+
+    def test_tick_loop_merges_retry_context_into_generator_iteration_plan(self):
+        from kmbl_orchestrator.api.loops import run_graph_for_loop
+        from kmbl_orchestrator.autonomous.directions import make_direction
+        from kmbl_orchestrator.autonomous.loop_service import tick_loop
+
+        repo, iid_str = _make_repo_with_identity()
+        iid = UUID(iid_str)
+        settings = Settings.model_construct(
+            kiloclaw_transport="stub",
+            graph_max_iterations_default=2,
+            habitat_image_generation_enabled=False,
+            identity_allow_fallback_profile=True,
+        )
+
+        direction = make_direction(
+            "pivot_layout",
+            rationale="Test direction for retry merge",
+            retry_hint={"custom_hint": "merge_me"},
+            direction_id="dir_retry_merge_test",
+        )
+
+        loop = AutonomousLoopRecord(
+            loop_id=uuid4(),
+            identity_id=iid,
+            identity_url="https://test.example.com",
+            status="running",
+            phase="graph_cycle",
+            iteration_count=1,
+            exploration_directions=[direction],
+            completed_directions=[],
+            last_alignment_score=0.4,
+        )
+        repo.save_autonomous_loop(loop)
+
+        gen_payloads: list[dict[str, Any]] = []
+        orig_invoke = DefaultRoleInvoker.invoke
+
+        def _capture_invoke(self, *args: Any, **kwargs: Any):
+            if kwargs.get("role_type") == "generator":
+                gen_payloads.append(dict(kwargs.get("input_payload") or {}))
+            return orig_invoke(self, *args, **kwargs)
+
+        DefaultRoleInvoker.invoke = _capture_invoke  # type: ignore[method-assign]
+
+        async def _bridge(
+            *,
+            identity_url: str,
+            identity_id: Any,
+            event_input: dict[str, Any],
+            thread_id: Any = None,
+            retry_context: dict[str, Any] | None = None,
+        ) -> dict[str, Any]:
+            return await run_graph_for_loop(
+                repo=repo,
+                settings=settings,
+                identity_url=identity_url,
+                identity_id=identity_id,
+                event_input=event_input,
+                thread_id=thread_id,
+                retry_context=retry_context,
+            )
+
+        async def _run_tick():
+            return await tick_loop(repo, loop, run_graph_fn=_bridge)
+
+        try:
+            asyncio.run(_run_tick())
+        finally:
+            DefaultRoleInvoker.invoke = orig_invoke  # type: ignore[method-assign]
+
+        assert gen_payloads, "generator should have been invoked"
+        ip = gen_payloads[0].get("iteration_plan")
+        assert isinstance(ip, dict), f"iteration_plan should be dict, got {ip!r}"
+        assert ip.get("retry_direction") == "pivot_layout"
+        assert ip.get("direction_id") == "dir_retry_merge_test"
+        assert ip.get("custom_hint") == "merge_me"

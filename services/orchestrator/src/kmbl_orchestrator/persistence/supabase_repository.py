@@ -1042,6 +1042,24 @@ class SupabaseRepository:
             return None
         return _row_to_evaluation_report(res.data[0])
 
+    def list_evaluation_reports_for_graph_run(
+        self, graph_run_id: UUID, *, limit: int = 50
+    ) -> list[EvaluationReportRecord]:
+        res = self._run(
+            "list_evaluation_reports_for_graph_run",
+            "evaluation_report",
+            lambda: self._client.table("evaluation_report")
+            .select("*")
+            .eq("graph_run_id", str(graph_run_id))
+            .order("created_at", desc=False)
+            .limit(limit)
+            .execute(),
+            graph_run_id=str(graph_run_id),
+        )
+        if not res.data:
+            return []
+        return [_row_to_evaluation_report(row) for row in res.data]
+
     def _next_graph_run_event_sequence_index(self, graph_run_id: UUID) -> int | None:
         """
         Next ``sequence_index`` for ``graph_run_event`` when the table has that column

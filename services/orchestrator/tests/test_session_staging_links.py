@@ -21,6 +21,7 @@ def test_build_paths_and_optional_urls() -> None:
     assert d["orchestrator_staging_preview_path"] == "/orchestrator/runs/g1/staging-preview"
     assert d["orchestrator_working_staging_json_path"] == "/orchestrator/working-staging/t1"
     assert d["control_plane_staging_preview_path"] == "/api/runs/g1/staging-preview"
+    assert d["control_plane_live_habitat_path"] == "/habitat/live/t1"
     assert d["orchestrator_staging_preview_url"] == "http://127.0.0.1:8010/orchestrator/runs/g1/staging-preview"
 
 

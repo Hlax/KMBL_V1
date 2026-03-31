@@ -87,6 +87,31 @@ def test_http_client_posts_chat_completions_and_parses_planner(mock_client_cls: 
 
 
 @patch("kmbl_orchestrator.providers.kiloclaw.httpx.Client")
+def test_http_client_appends_thread_id_to_chat_user(mock_client_cls: MagicMock) -> None:
+    """Isolate OpenClaw session per thread — bare kmbl-orchestrator can 500 on the gateway."""
+    planner_out = {
+        "build_spec": {"type": "http_test", "title": "t", "steps": []},
+        "constraints": {},
+        "success_criteria": [],
+        "evaluation_targets": [],
+    }
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = _chat_response(planner_out)
+    mock_inst = MagicMock()
+    mock_inst.post.return_value = mock_resp
+    mock_client_cls.return_value.__enter__.return_value = mock_inst
+    mock_client_cls.return_value.__exit__.return_value = None
+
+    c = KiloClawHttpClient(settings=_settings())
+    tid = "11111111-2222-3333-4444-555555555555"
+    c.invoke_role("planner", "kmbl-planner", {"thread_id": tid, "task": "x"})
+
+    body = mock_inst.post.call_args[1]["json"]
+    assert body["user"] == f"kmbl-orchestrator:e2e-test:{tid}"
+
+
+@patch("kmbl_orchestrator.providers.kiloclaw.httpx.Client")
 def test_http_client_planner_recovers_variation_only_echo(mock_client_cls: MagicMock) -> None:
     """Live varied gallery sometimes returns only ``variation`` keys — narrow synthetic contract."""
     variation_only = {

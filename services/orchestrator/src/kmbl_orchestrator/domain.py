@@ -68,7 +68,7 @@ class GraphRunRecord(BaseModel):
     graph_run_id: UUID
     thread_id: UUID
     identity_id: UUID | None = None
-    trigger_type: Literal["prompt", "resume", "schedule", "system"]
+    trigger_type: Literal["prompt", "resume", "schedule", "system", "autonomous_loop"]
     status: Literal["running", "paused", "completed", "failed"]
     started_at: str = Field(default_factory=_utc_now_iso)
     ended_at: str | None = None

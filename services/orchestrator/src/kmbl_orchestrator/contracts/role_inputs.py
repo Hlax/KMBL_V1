@@ -29,6 +29,13 @@ class PlannerRoleInput(BaseModel):
         default=None,
         description="User interrupt messages from the autonomous loop.",
     )
+    identity_url: str | None = Field(
+        default=None,
+        description=(
+            "Echo of event_input.identity_url when present — source URL for identity extraction "
+            "and optional Playwright/mcporter grounding (kmbl-planner)."
+        ),
+    )
 
 
 class GeneratorRoleInput(BaseModel):
@@ -93,6 +100,21 @@ class EvaluatorRoleInput(BaseModel):
             "check must_mention items present, palette colors used, tone reflected. "
             "Report as alignment_report block in output metrics."
         ),
+    )
+    preview_url: str | None = Field(
+        default=None,
+        description=(
+            "Resolved preview URL for visual evaluation — prefers orchestrator staging-preview "
+            "when orchestrator_public_base_url is set, else build_candidate.preview_url."
+        ),
+    )
+    iteration_context: dict[str, Any] | None = Field(
+        default=None,
+        description="Iteration index and flags for bounded visual-delta evaluation.",
+    )
+    previous_evaluation_report: dict[str, Any] | None = Field(
+        default=None,
+        description="Prior evaluator JSON on this run when iteration_hint > 0 (sameness / delta).",
     )
 
 

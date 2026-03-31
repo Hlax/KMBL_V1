@@ -57,3 +57,19 @@ def test_sanitize_includes_gallery_variation_provenance() -> None:
 
 def test_sanitize_none() -> None:
     assert sanitize_checkpoint_state_for_api(None) is None
+
+
+def test_sanitize_includes_last_alignment_score_and_history() -> None:
+    raw = {
+        "thread_id": "a",
+        "graph_run_id": "b",
+        "last_alignment_score": 0.73,
+        "alignment_score_history": [
+            {"score": 0.5, "i": 0},
+            {"score": 0.73, "i": 1},
+        ],
+    }
+    out = sanitize_checkpoint_state_for_api(raw)
+    assert out is not None
+    assert out.get("last_alignment_score") == 0.73
+    assert out.get("alignment_score_history") == raw["alignment_score_history"]

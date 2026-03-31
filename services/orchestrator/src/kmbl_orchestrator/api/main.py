@@ -15,6 +15,7 @@ from fastapi import BackgroundTasks, Body, Depends, FastAPI, HTTPException, Quer
 from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 
+from kmbl_orchestrator.api.middleware_api_key import optional_api_key_middleware
 from kmbl_orchestrator.config import Settings, get_settings
 from kmbl_orchestrator.errors import RoleInvocationFailed, StagingIntegrityFailed
 from kmbl_orchestrator.graph.app import persist_graph_run_start, run_graph
@@ -80,6 +81,7 @@ from kmbl_orchestrator.staging.static_preview_assembly import (
     assemble_static_preview_html,
     resolve_static_preview_entry_path,
 )
+from kmbl_orchestrator.staging.static_preview_assembly_live import live_habitat_preview_surface
 from kmbl_orchestrator.staging.read_model import (
     evaluation_summary_from_payload,
     evaluation_summary_section_from_payload,
@@ -93,6 +95,7 @@ from kmbl_orchestrator.staging.read_model import (
     staging_lineage_read_model,
     staging_lifecycle_timeline,
     staging_snapshot_list_item,
+    working_staging_read_model,
 )
 from kmbl_orchestrator.staging.proposals_queue import (
     fetch_limit as proposals_fetch_limit,
@@ -134,6 +137,7 @@ from kmbl_orchestrator.seeds import (
 )
 
 app = FastAPI(title="KMBL Orchestrator", version="0.1.0")
+app.middleware("http")(optional_api_key_middleware)
 _log = logging.getLogger(__name__)
 
 # Register extracted route modules
@@ -305,6 +309,21 @@ class EvaluationSummary(BaseModel):
     evaluation_report_id: str
     status: str
     summary: str | None = None
+    evaluator_iteration_index: int | None = Field(
+        default=None,
+        description=(
+            "Graph iteration_index for this evaluator invocation when known "
+            "(from role_invocation)."
+        ),
+    )
+    alignment_score: float | None = Field(
+        default=None,
+        description="Orchestrator-computed identity alignment (0-1) when an identity brief was present.",
+    )
+    alignment_signals_json: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Per-criterion alignment breakdown (e.g. must_mention_hit_rate, source).",
+    )
 
 
 class RunTimelineEventSummary(BaseModel):
@@ -321,6 +340,7 @@ class SessionStagingLinks(BaseModel):
     orchestrator_staging_preview_path: str
     orchestrator_working_staging_json_path: str
     control_plane_staging_preview_path: str
+    control_plane_live_habitat_path: str
     note: str
     orchestrator_staging_preview_url: str | None = None
     orchestrator_working_staging_json_url: str | None = None
@@ -362,6 +382,13 @@ class RunStatusResponse(BaseModel):
     build_spec: BuildSpecSummary | None = None
     build_candidate: BuildCandidateSummary | None = None
     evaluation: EvaluationSummary | None = None
+    evaluation_history: list[EvaluationSummary] = Field(
+        default_factory=list,
+        description=(
+            "All evaluation_report rows for this graph run, oldest first (per-iteration view). "
+            "``evaluation`` remains the latest row for backward compatibility."
+        ),
+    )
     snapshot: dict[str, Any] | None = Field(
         default=None,
         description=(
@@ -435,6 +462,14 @@ class AssociatedOutputsBlock(BaseModel):
     evaluation_report_id: str | None = None
     staging_snapshot_id: str | None = None
     publication_snapshot_id: str | None = None
+    alignment_score: float | None = Field(
+        default=None,
+        description="From latest evaluation_report row when present.",
+    )
+    alignment_signals_json: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Structured alignment signals from evaluation_report.",
+    )
 
 
 class RunTimelineItem(BaseModel):
@@ -873,12 +908,43 @@ def _candidate_summary(rec: BuildCandidateRecord) -> BuildCandidateSummary:
     )
 
 
-def _eval_summary(rec: EvaluationReportRecord) -> EvaluationSummary:
+def _eval_summary(
+    rec: EvaluationReportRecord,
+    *,
+    evaluator_iteration_index: int | None = None,
+) -> EvaluationSummary:
     return EvaluationSummary(
         evaluation_report_id=str(rec.evaluation_report_id),
         status=rec.status,
         summary=rec.summary,
+        evaluator_iteration_index=evaluator_iteration_index,
+        alignment_score=rec.alignment_score,
+        alignment_signals_json=dict(rec.alignment_signals_json or {}),
     )
+
+
+def _evaluator_iteration_by_invocation_id(
+    repo: Repository, graph_run_id: UUID
+) -> dict[str, int]:
+    """Map evaluator role_invocation_id -> iteration_index for this run."""
+    invs = repo.list_role_invocations_for_graph_run(graph_run_id)
+    out: dict[str, int] = {}
+    for inv in invs:
+        if inv.role_type == "evaluator":
+            out[str(inv.role_invocation_id)] = int(inv.iteration_index)
+    return out
+
+
+def _evaluation_history_summaries(
+    repo: Repository, graph_run_id: UUID
+) -> list[EvaluationSummary]:
+    rows = repo.list_evaluation_reports_for_graph_run(graph_run_id, limit=50)
+    iters = _evaluator_iteration_by_invocation_id(repo, graph_run_id)
+    result: list[EvaluationSummary] = []
+    for rec in rows:
+        ii = iters.get(str(rec.evaluator_invocation_id))
+        result.append(_eval_summary(rec, evaluator_iteration_index=ii))
+    return result
 
 
 class InvokeRoleBody(BaseModel):
@@ -1471,6 +1537,7 @@ def run_status(
     bs = repo.get_latest_build_spec_for_graph_run(gid)
     bc = repo.get_latest_build_candidate_for_graph_run(gid)
     ev = repo.get_latest_evaluation_report_for_graph_run(gid)
+    eval_hist = _evaluation_history_summaries(repo, gid)
 
     fv = build_run_failure_view(repo, gid, status=gr.status)
     timeline_raw = repo.list_graph_run_events(gid, limit=120)
@@ -1495,7 +1562,8 @@ def run_status(
         decision=decision,
         build_spec=_spec_summary(bs) if bs else None,
         build_candidate=_candidate_summary(bc) if bc else None,
-        evaluation=_eval_summary(ev) if ev else None,
+        evaluation=eval_hist[-1] if eval_hist else None,
+        evaluation_history=eval_hist,
         snapshot=sanitize_checkpoint_state_for_api(snap),
         scenario_tag=_scenario_tag_from_snapshot(snap),
         run_event_input=_run_event_input_from_snapshot(snap),
@@ -2368,6 +2436,15 @@ class WorkingStagingResponse(BaseModel):
     payload_json: dict[str, Any] = Field(default_factory=dict)
 
 
+class LiveWorkingStagingResponse(BaseModel):
+    """Live evolving working staging — operator read model + preview surface hints (not a review snapshot)."""
+
+    kind: Literal["live_working_staging"] = "live_working_staging"
+    read_model: dict[str, Any]
+    preview_surface: dict[str, Any]
+    thread: dict[str, Any] | None = None
+
+
 class WorkingStagingCheckpointItem(BaseModel):
     staging_checkpoint_id: str
     working_staging_id: str
@@ -2423,6 +2500,47 @@ def get_working_staging(
     if ws is None:
         raise HTTPException(status_code=404, detail="no working staging for this thread")
     return _ws_response(ws)
+
+
+@app.get(
+    "/orchestrator/working-staging/{thread_id}/live",
+    response_model=LiveWorkingStagingResponse,
+)
+def get_working_staging_live(
+    thread_id: str,
+    repo: Repository = Depends(get_repo),
+) -> LiveWorkingStagingResponse:
+    """Compact live read model + preview surface hints for the mutable working staging (no snapshot row)."""
+    try:
+        tid = UUID(thread_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="invalid thread_id") from e
+    ws = repo.get_working_staging_for_thread(tid)
+    if ws is None:
+        raise HTTPException(status_code=404, detail="no working staging for this thread")
+    rm = working_staging_read_model(ws)
+    rm["last_alignment_score"] = ws.last_alignment_score
+    rm["last_update_graph_run_id"] = (
+        str(ws.last_update_graph_run_id) if ws.last_update_graph_run_id else None
+    )
+    rm["last_update_build_candidate_id"] = (
+        str(ws.last_update_build_candidate_id) if ws.last_update_build_candidate_id else None
+    )
+    rm["current_checkpoint_id"] = str(ws.current_checkpoint_id) if ws.current_checkpoint_id else None
+    preview_surface = live_habitat_preview_surface(dict(ws.payload_json))
+    thread_info: dict[str, Any] | None = None
+    tr = repo.get_thread(tid)
+    if tr is not None:
+        thread_info = {
+            "thread_id": str(tr.thread_id),
+            "identity_id": str(tr.identity_id) if tr.identity_id else None,
+            "current_checkpoint_id": str(tr.current_checkpoint_id) if tr.current_checkpoint_id else None,
+        }
+    return LiveWorkingStagingResponse(
+        read_model=rm,
+        preview_surface=preview_surface,
+        thread=thread_info,
+    )
 
 
 @app.get("/orchestrator/working-staging/{thread_id}/preview")

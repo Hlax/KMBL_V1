@@ -269,6 +269,8 @@ export type SessionStagingLinks = {
   orchestrator_staging_preview_path: string;
   orchestrator_working_staging_json_path: string;
   control_plane_staging_preview_path: string;
+  /** Control plane page: live mutable working habitat (not review snapshot). */
+  control_plane_live_habitat_path?: string;
   note: string;
   orchestrator_staging_preview_url?: string | null;
   orchestrator_working_staging_json_url?: string | null;

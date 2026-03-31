@@ -6,9 +6,11 @@
 
 ## Inputs
 
-**build_candidate**, **build_spec**, **success_criteria**, **evaluation_targets**, **iteration_hint**, **thread_id** as defined by KMBL. Criteria come from the persisted plan—**do not invent** new success conditions.
+**Orchestrator wire shape (`EvaluatorRoleInput`):** **`thread_id`**, **`build_candidate`**, **`success_criteria`**, **`evaluation_targets`**, **`iteration_hint`**, and optionally **`working_staging_facts`**, **`user_rating_context`**, **`identity_brief`**, **`preview_url`** (resolved: prefers orchestrator **staging-preview** when **`ORCHESTRATOR_PUBLIC_BASE_URL`** is set), **`iteration_context`**, **`previous_evaluation_report`** (prior evaluator JSON on this run when **`iteration_hint` > 0** — use for sameness / visual-delta).
 
-**`build_spec`**: the planner-created specification for this run (persisted). Contains scenario type, constraints, and expected output shape. Use it for context on what the generator was asked to produce (e.g. `build_spec.type` for scenario classification).
+**There is no `build_spec` key** on the JSON KMBL sends to this role. The planner’s **`build_spec`** row lives in KMBL’s database; the orchestrator forwards **`success_criteria`** and **`evaluation_targets`** sliced from that plan. Use those arrays (plus **`identity_brief`** when present) as the checklist—**do not invent** new success conditions.
+
+**Scenario / constraints context:** If you need scenario flavor, take it from **evaluation_targets** / **success_criteria** entries, **event_input** echoes inside **build_candidate** when present, and **identity_brief**—not from a separate **`build_spec`** object in this payload.
 
 **Persistence:** **KMBL** stores your output as the persisted **evaluation report** tied to **`build_candidate`** / graph run. You do not write storage APIs from this role.
 
@@ -64,7 +66,7 @@ These weights are **documentation for humans**; your scores are still independen
 ## Rules
 
 - Do not patch code, mutate databases, or publish.
-- Do not redefine goals or **build_spec**.
+- Do not redefine goals or the **success_criteria** / **evaluation_targets** KMBL sent (do not invent substitute criteria for the persisted plan).
 - **KMBL orchestrates. KiloClaw executes. This role is stateless per invocation**; only the payload is authoritative.
 - **Images / previews:** Assess outputs against criteria; you may flag inconsistent or dubious **source** / linkage for image artifacts (gallery strip or other v1 image rows). Do **not** fix images, choose OpenClaw agent ids, change provider routing, or depend on image API access—report via **issues** / **metrics** only.
 - **preview_url present:** Treat the preview as the primary behavioral surface when targets require it: confirm load health (successful navigation, no obvious blank shell), scan for expected UI or artifact-backed elements, and record missing pieces, visible defects, and console/runtime issues you can observe. Stay read-only—no edits, no "fixing" the deployment. If browser tooling fails, say so briefly and rely on remaining evidence.
@@ -93,7 +95,7 @@ When evaluating **`habitat_manifest_v2`** candidates, check all three layers sys
 - Note if custom JS executes in IIFE wrapper
 
 **Multi-page validation:**
-- Count pages vs `build_spec.pages` expectation
+- Count pages vs **evaluation_targets** / **success_criteria** (or explicit multi-page hints in **build_candidate**)—there is no **`build_spec`** object in this payload
 - Verify navigation links work between pages
 - Check layout consistency (header/footer on all pages)
 

@@ -184,12 +184,16 @@ export default async function GraphRunDetailPage({
             not change when new iterations land.
           </p>
           <p className="small" style={{ marginBottom: 0 }}>
+            <Link href={data.session_staging.control_plane_live_habitat_path ?? `/habitat/live/${encodeURIComponent(s.thread_id)}`}>
+              Open live habitat page
+            </Link>
+            <span className="muted small"> — human view of mutable working staging · </span>
             <a
               href={`/api/runs/${encodeURIComponent(graphRunId)}/staging-preview`}
               target="_blank"
               rel="noopener noreferrer"
             >
-              Open live preview
+              raw HTML preview
             </a>
             <span className="muted small">
               {" "}

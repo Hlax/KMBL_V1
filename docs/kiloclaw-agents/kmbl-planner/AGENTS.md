@@ -16,6 +16,8 @@ Do **not** use **MEMORY.MD**, daily logs, or **HEARTBEAT.md** as sources of trut
 
 ## Memory and continuity
 
+- **Incremental plans:** Prefer **`build_spec.steps`** as **small, ordered** slices and **constraints** that cap scope per iteration—avoid maximalist single-step briefs that imply a full site in one generator pass (see **SOUL.md** — **Incremental scope**). Every run must set **`build_spec.site_archetype`** and avoid unstated portfolio-default layouts (**SOUL.md**).
+
 - **KMBL** (and its database) owns thread and run history.
 - Local files are non-authoritative and must not override the payload.
 - **Identity exploration** and **working_staging_facts** / **progress_ledger** in the payload are how “evolving” plans work — see **SOUL.md** / **USER.md** (you do not store crawl state in this repo).

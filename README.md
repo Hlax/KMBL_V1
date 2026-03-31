@@ -12,7 +12,7 @@ Canon architecture and naming live under [`docs/`](docs/).
 | [`services/orchestrator/`](services/orchestrator/) | FastAPI service, LangGraph runtime, role invocation, normalization, placeholder persistence |
 | [`packages/contracts/`](packages/contracts/) | Shared placeholder schemas (Zod) for API and persistence shapes |
 | [`packages/config/`](packages/config/) | Typed environment parsing for JS/TS consumers |
-| [`packages/storage/`](packages/storage/) | Supabase client stub (TODO: real schema wiring) |
+| [`packages/storage/`](packages/storage/) | TypeScript Supabase client package for future app-side use (orchestrator uses `supabase-py` directly) |
 | [`apps/control-plane/`](apps/control-plane/) | Minimal Next.js UI (home + status placeholder) |
 
 ## Prerequisites
@@ -62,6 +62,10 @@ Repos under **OneDrive** can add file-lock noise during installs or reload; if p
 - Run status: `GET /orchestrator/runs/{graph_run_id}`
 
 Keep **`NEXT_PUBLIC_ORCHESTRATOR_URL`** in [`apps/control-plane/.env.local`](apps/control-plane/.env.example) aligned with that host/port (e.g. `http://127.0.0.1:8010`).
+
+**Optional API key (production):** set `ORCHESTRATOR_API_KEY` so mutating routes require `X-API-Key` or `Authorization: Bearer` (same value). When unset, auth is disabled (local dev). See [docs/16_DEPLOYMENT_ARCHITECTURE.md](docs/16_DEPLOYMENT_ARCHITECTURE.md).
+
+**Graph run execution model:** in-process `BackgroundTasks` by default; for durable queue/worker patterns see [docs/18_DURABLE_GRAPH_RUNS.md](docs/18_DURABLE_GRAPH_RUNS.md). Evaluator iterate-vs-stage policy (alignment vs status) is documented in [docs/19_EVALUATOR_DECISION_POLICY.md](docs/19_EVALUATOR_DECISION_POLICY.md).
 
 **Supabase credentials:** pull from the Supabase dashboard (Project Settings → API / Database) into repo root `.env` or `.env.local`; the Cursor Supabase extension can help discover values, but the source of truth remains your project. Do not commit secrets.
 

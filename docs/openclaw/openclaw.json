@@ -1,0 +1,189 @@
+{
+  "meta": {
+    "lastTouchedVersion": "2026.3.13",
+    "lastTouchedAt": "2026-03-30T23:15:08.866Z"
+  },
+  "env": {
+    "OPENAI_API_KEY": "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"
+  },
+  "wizard": {
+    "lastRunAt": "2026-03-30T17:40:46.764Z",
+    "lastRunVersion": "2026.3.13",
+    "lastRunCommand": "doctor",
+    "lastRunMode": "local"
+  },
+  "update": {
+    "checkOnStart": false
+  },
+  "browser": {
+    "enabled": true,
+    "headless": true,
+    "noSandbox": true
+  },
+  "auth": {
+    "profiles": {
+      "kilocode:default": {
+        "provider": "kilocode",
+        "mode": "api_key"
+      }
+    }
+  },
+  "models": {
+    "mode": "merge"
+  },
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "kilocode/kilo-auto/balanced"
+      },
+      "workspace": "/root/.openclaw/workspace",
+      "compaction": {
+        "mode": "safeguard"
+      }
+    },
+    "list": [
+      {
+        "id": "kmbl-image-gen",
+        "name": "KMBL Image Generator",
+        "workspace": "~/.openclaw/workspace-kmbl-image-gen",
+        "skills": [
+          "openai-image-gen"
+        ],
+        "tools": {
+          "deny": []
+        }
+      },
+      {
+        "id": "kmbl-planner",
+        "name": "KMBL Planner",
+        "workspace": "~/.openclaw/workspace-kmbl-planner",
+        "skills": [
+          "mcporter"
+        ],
+        "tools": {
+          "deny": []
+        }
+      },
+      {
+        "id": "kmbl-generator",
+        "name": "KMBL Generator",
+        "workspace": "~/.openclaw/workspace-kmbl-generator",
+        "skills": [
+          "mcporter"
+        ],
+        "tools": {
+          "deny": []
+        }
+      },
+      {
+        "id": "kmbl-evaluator",
+        "name": "KMBL Evaluator",
+        "workspace": "~/.openclaw/workspace-kmbl-evaluator",
+        "skills": [
+          "mcporter"
+        ],
+        "tools": {
+          "deny": []
+        }
+      }
+    ]
+  },
+  "tools": {
+    "profile": "full",
+    "agentToAgent": {
+      "enabled": true,
+      "allow": [
+        ""
+      ]
+    },
+    "exec": {
+      "host": "gateway",
+      "security": "full",
+      "ask": "off"
+    }
+  },
+  "commands": {
+    "native": "auto",
+    "nativeSkills": "auto",
+    "restart": true,
+    "ownerDisplay": "raw"
+  },
+  "session": {
+    "dmScope": "per-channel-peer"
+  },
+  "channels": {
+    "discord": {
+      "enabled": true,
+      "token": "MTQ4MzY1ODczNzEyNTI5NDI0Mg.GKGUqi.sMSEYCXBUhDutzXWq1OuZxXn_9Z8dZjwzq9Ips",
+      "groupPolicy": "allowlist",
+      "streaming": "off",
+      "dmPolicy": "pairing",
+      "allowFrom": [],
+      "dm": {
+        "policy": "pairing",
+        "allowFrom": []
+      }
+    },
+    "streamchat": {
+      "apiKey": "tgvk4c8hgjxd",
+      "botUserId": "bot-OTEzZmY3ZTQtODRlMS00N2IyLTlkMjMtZDNkZjI1NDAwMjRj",
+      "botUserToken": "eyJhbGciOiJIUzI1NiJ9.eyJ1c2VyX2lkIjoiYm90LU9URXpabVkzWlRRdE9EUmxNUzAwTjJJeUxUbGtNak10WkROa1pqSTFOREF3TWpSaiJ9.-x9mLwIBMTJEAhYNT2S0bVF62n_JKIJkO2KAXLFjt8Y",
+      "botUserName": "KiloClaw",
+      "enabled": true
+    }
+  },
+  "gateway": {
+    "port": 3001,
+    "mode": "local",
+    "bind": "tailnet",
+    "controlUi": {
+      "allowedOrigins": [
+        "https://claw.kilosessions.ai",
+        "https://kilo.ai",
+        "https://www.kilo.ai"
+      ],
+      "allowInsecureAuth": true
+    },
+    "auth": {
+      "mode": "token",
+      "token": "1188973fa1f039fe5ab56e68fcd643f4d37514cbb035a39157f7aa0d38809b63"
+    },
+    "tailscale": {
+      "mode": "off",
+      "resetOnExit": false
+    },
+    "http": {
+      "endpoints": {
+        "chatCompletions": {
+          "enabled": true
+        },
+        "responses": {
+          "enabled": true
+        }
+      }
+    }
+  },
+  "skills": {
+    "entries": {
+      "openai-image-gen": {
+        "enabled": true,
+        "apiKey": "python -m uvicorn kmbl_orchestrator.api.main:app --host 127.0.0.1 --port 8010"
+      }
+    }
+  },
+  "plugins": {
+    "load": {
+      "paths": [
+        "/usr/local/lib/node_modules/@wunderchat/openclaw-channel-streamchat"
+      ]
+    },
+    "entries": {
+      "discord": {
+        "enabled": true
+      },
+      "streamchat": {
+        "enabled": true
+      }
+    }
+  }
+}

@@ -12,7 +12,14 @@ KMBL orchestrates; KiloClaw runs this workspace. The evaluator **assesses only**
 
 ### Browser automation (read-only preview)
 
-When **preview_url** is present and criteria/targets warrant it, you may use the host’s **built-in browser tooling** (whatever the gateway exposes) for **read-only validation**: open the preview URL, confirm the page loads successfully, inspect DOM structure, check for expected rendered elements or artifact-driven UI (e.g. images, key regions implied by **evaluation_targets**), and surface console or runtime errors visible to the page. For the **locked static frontend** vertical, KMBL may also attach orchestrator-side preview checks—your narrative in **summary** / **issues** should still align with **what actually rendered**; do not claim **pass** if the preview surface is blank, errored, or missing required visible content.
+When **`preview_url`** is present (orchestrator may set it to the **staging-preview** URL for this run) and criteria/targets warrant it, use **mcporter** Playwright when the gateway exposes it:
+
+1. `mcporter call playwright.browser_navigate url=<preview_url>`
+2. `mcporter call playwright.browser_snapshot`
+3. `mcporter call playwright.browser_take_screenshot type=png fullPage=true`
+4. `mcporter call playwright.browser_close`
+
+Confirm load health, inspect structure vs **evaluation_targets**, and surface console/runtime issues. Use **`previous_evaluation_report`** when present to compare **visual delta** across iterations. For the **locked static frontend** vertical, KMBL may also attach orchestrator-side preview checks—your narrative in **summary** / **issues** should still align with **what actually rendered**; do not claim **pass** if the preview surface is blank, errored, or missing required visible content.
 
 **Pass X:** “Page loaded” in **metrics** must correspond to a **real** navigation/check when you used browser tooling; if you could not verify load, say so and set **status** accordingly—**KMBL** owns routing and will not treat decorative **metrics** as green lights. If the environment supports it, you may attach **screenshots** as **evaluation evidence** in **artifacts** / **metrics**—evidence only, not a repair step.
 

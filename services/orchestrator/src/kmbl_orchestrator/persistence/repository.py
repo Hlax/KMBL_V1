@@ -99,6 +99,11 @@ class Repository(Protocol):
         self, graph_run_id: UUID
     ) -> EvaluationReportRecord | None: ...
 
+    def list_evaluation_reports_for_graph_run(
+        self, graph_run_id: UUID, *, limit: int = 50
+    ) -> list[EvaluationReportRecord]:
+        """Evaluation rows for this graph run, oldest ``created_at`` first (iteration order)."""
+
     def get_latest_failed_role_invocation_for_graph_run(
         self, graph_run_id: UUID
     ) -> RoleInvocationRecord | None:
@@ -526,6 +531,15 @@ class InMemoryRepository:
         if not matches:
             return None
         return max(matches, key=lambda e: e.created_at)
+
+    def list_evaluation_reports_for_graph_run(
+        self, graph_run_id: UUID, *, limit: int = 50
+    ) -> list[EvaluationReportRecord]:
+        rows = [
+            e for e in self._evaluation_reports.values() if e.graph_run_id == graph_run_id
+        ]
+        rows.sort(key=lambda e: e.created_at)
+        return rows[:limit] if limit else rows
 
     def get_latest_failed_role_invocation_for_graph_run(
         self, graph_run_id: UUID

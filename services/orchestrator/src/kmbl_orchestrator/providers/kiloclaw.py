@@ -570,7 +570,14 @@ class KiloClawHttpClient:
         }
         user_content = json.dumps(envelope, ensure_ascii=False)
         model = f"openclaw:{provider_config_key}"
+        # OpenAI `user` is forwarded to the gateway. A single shared id (e.g. bare
+        # ``kmbl-orchestrator``) can hit OpenClaw/KiloClaw internal errors (HTTP 500
+        # ``api_error`` / "internal error") once session state grows; isolating by
+        # ``thread_id`` fixes planner/generator/evaluator on the live stack.
         chat_user = (self._settings.kiloclaw_chat_completions_user or "").strip() or "kmbl-orchestrator"
+        tid = (payload.get("thread_id") or "").strip()
+        if tid:
+            chat_user = f"{chat_user}:{tid}"
         body: dict[str, Any] = {
             "model": model,
             "messages": [
@@ -887,6 +894,8 @@ class KiloClawStubClient:
                     "type": "stub",
                     "title": "stub_spec",
                     "steps": [],
+                    # Contract smoke: archetype-aware planning (see kmbl-planner SOUL)
+                    "site_archetype": "editorial",
                 },
                 "constraints": {"scope": "minimal"},
                 "success_criteria": ["loop_reaches_evaluator"],
@@ -900,6 +909,12 @@ class KiloClawStubClient:
                 "updated_state": {"revision": 1},
                 "sandbox_ref": "stub-sandbox",
                 "preview_url": "https://preview.example.invalid",
+                # Bounded-iteration smoke (see kmbl-generator SOUL)
+                "_kmbl_primary_move": {
+                    "mode": "refine",
+                    "move_type": "typography",
+                    "primary_surface": "hero",
+                },
             }
             return _apply_role_contract(role_type, raw)
         if role_type == "evaluator":

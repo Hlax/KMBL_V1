@@ -100,7 +100,9 @@ class Settings(BaseSettings):
     kiloclaw_base_url: str = "https://kiloclaw.example.invalid"
     # KiloClaw gateway OpenAI-compatible chat: POST {base}{path} (default /v1/chat/completions).
     kiloclaw_invoke_path: str = "/v1/chat/completions"
-    # OpenAI `user` field for stable sessions (gateway routing); optional.
+    # OpenAI ``user`` field (gateway session routing). HTTP client appends ``:{thread_id}``
+    # from the role payload when present; bare ``kmbl-orchestrator`` alone can trigger
+    # gateway 500 on some OpenClaw builds.
     kiloclaw_chat_completions_user: str = "kmbl-orchestrator"
     # auto | stub | http | openclaw_cli — auto: use http when KILOCLAW_API_KEY set, else stub.
     kiloclaw_transport: str = "auto"
@@ -151,6 +153,25 @@ class Settings(BaseSettings):
     supabase_url: str = ""
     supabase_service_role_key: str = ""
     supabase_db_url: str = ""
+
+    # When set, mutating HTTP methods require X-API-Key or Authorization: Bearer <same>.
+    # Empty (default): no auth (local dev). See docs/16_DEPLOYMENT_ARCHITECTURE.md.
+    orchestrator_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "ORCHESTRATOR_API_KEY",
+            "orchestrator_api_key",
+        ),
+    )
+    # fastapi_background: POST /runs/start enqueues BackgroundTasks (process-local).
+    # external_worker: reserved; future queue consumer — see docs/18_DURABLE_GRAPH_RUNS.md.
+    orchestrator_graph_run_dispatch: str = Field(
+        default="fastapi_background",
+        validation_alias=AliasChoices(
+            "ORCHESTRATOR_GRAPH_RUN_DISPATCH",
+            "orchestrator_graph_run_dispatch",
+        ),
+    )
 
     # Image generation via habitat assembly (uses KiloClaw kmbl-image-gen agent).
     # Set to False in tests/CI to skip image generation and use placeholder mode.

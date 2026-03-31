@@ -215,6 +215,10 @@ def build_graph_run_detail_read_model(
             "evaluation_report_id": str(ev.evaluation_report_id) if ev else None,
             "staging_snapshot_id": staging_id,
             "publication_snapshot_id": pub_id,
+            "alignment_score": ev.alignment_score if ev else None,
+            "alignment_signals_json": dict(ev.alignment_signals_json or {})
+            if ev
+            else {},
         },
         "timeline": timeline,
     }

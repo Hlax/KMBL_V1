@@ -42,3 +42,5 @@ See **`docs/LOCAL_MILESTONE_RUN.md`** for the full local Supabase milestone.
 - [`DEPLOY.md`](DEPLOY.md) — VPS, systemd, reverse proxy, env
 - [`../../docs/16_DEPLOYMENT_ARCHITECTURE.md`](../../docs/16_DEPLOYMENT_ARCHITECTURE.md) — end-to-end deployment model
 - [`../../docs/17_LOCAL_TUNNEL_DEV.md`](../../docs/17_LOCAL_TUNNEL_DEV.md) — **cloudflared / ngrok** so Vercel can reach localhost without a VPS
+- [`../../docs/18_DURABLE_GRAPH_RUNS.md`](../../docs/18_DURABLE_GRAPH_RUNS.md) — background tasks vs queue/worker
+- [`../../docs/19_EVALUATOR_DECISION_POLICY.md`](../../docs/19_EVALUATOR_DECISION_POLICY.md) — iterate vs stage rules

@@ -20,6 +20,7 @@ _SAFE_SCALAR_KEYS: frozenset[str] = frozenset(
         "build_spec_id",
         "build_candidate_id",
         "evaluation_report_id",
+        "last_alignment_score",
     }
 )
 
@@ -59,4 +60,8 @@ def sanitize_checkpoint_state_for_api(state: dict[str, Any] | None) -> dict[str,
             slim["variation"] = var
         if slim:
             out["event_input"] = slim
+    # Bounded list: per-iteration alignment snapshots (no role payloads).
+    ash = state.get("alignment_score_history")
+    if isinstance(ash, list) and ash:
+        out["alignment_score_history"] = ash[-20:]
     return out

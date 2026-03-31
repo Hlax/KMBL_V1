@@ -1,6 +1,10 @@
 # OpenClaw gateway — `kmbl-image-gen` (repo scaffold)
 
+**Secrets:** Do **not** commit live API keys, Discord tokens, gateway auth tokens, or Stream Chat credentials. Use **`openclaw.json.example`** as the safe template; copy it to a **local** `openclaw.json` (or merge into your gateway host config) and fill values **only on the machine** that runs the gateway. If real secrets were ever committed to git, **rotate them** in each provider’s dashboard—git history may retain old values.
+
 This folder holds a **mergeable** `agents.list` entry for the **`kmbl-image-gen`** full agent. **KMBL** is unchanged here; set **`KILOCLAW_GENERATOR_OPENAI_IMAGE_CONFIG_KEY=kmbl-image-gen`** on the orchestrator when you wire routing.
+
+**Operator visibility (KMBL control plane):** The mutable **working staging** surface for a thread is viewable as **live habitat** at **`/habitat/live/{thread_id}`** (same assembled HTML as the orchestrator preview, not a review snapshot). Session staging links in graph run payloads include **`control_plane_live_habitat_path`**. This is independent of OpenClaw agent workspaces; it only needs the orchestrator + control plane apps running.
 
 ## Where to add it
 

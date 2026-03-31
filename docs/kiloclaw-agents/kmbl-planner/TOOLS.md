@@ -6,9 +6,14 @@ KMBL orchestrates; KiloClaw runs this workspace. The planner **plans only**: it 
 
 ## Tooling stance
 
-- **Default:** No terminal, build, install, git, or repo-mutation tools. Do not browse the network or open editors to “explore” the codebase.
-- **Allowed:** Reasoning and structured JSON output only. If the host exposes a **read-only** tool strictly to load text the payload already references (e.g. a cited path), use it only when necessary to disambiguate **event_input**—never to drive implementation or scope expansion.
-- **Disallowed:** Filesystem writes, package managers, test runners, deploy hooks, sandbox provisioning, image-generation or image-hosting API calls, and any tool whose purpose is building or verifying artifacts (that is **kmbl-generator** / **kmbl-evaluator**). Planning stays JSON-only; **KMBL** owns provider secrets and routing.
+- **Default:** No terminal, build, install, git, or repo-mutation tools. Do not browse the codebase as a coding agent.
+- **Playwright via mcporter (identity grounding):** When **`identity_url`** is present in the payload and useful for design DNA (and the gateway exposes **mcporter**), you may call **read-only** browser steps to inform the plan — not to implement or publish:
+  - `mcporter call playwright.browser_navigate url=<identity_url>`
+  - `mcporter call playwright.browser_snapshot`
+  - `mcporter call playwright.browser_close`
+  Synthesize **design DNA** (layout structure, composition, hierarchy, typography character, interaction style, content framing, visual tone) into **`identity_context`-aligned** notes inside **`build_spec`** / **`constraints`** as structured intent. If tools are unavailable, rely on **`identity_context`** / **`identity_brief`** only.
+- **Allowed:** Reasoning and structured JSON output; optional mcporter Playwright calls as above.
+- **Disallowed:** Filesystem writes, package managers, test runners, deploy hooks, sandbox provisioning, image-generation or image-hosting API calls, and any tool whose purpose is building or verifying **this run’s** output artifacts (that is **kmbl-generator** / **kmbl-evaluator**). Planning stays JSON-only for the contract; **KMBL** owns provider secrets and routing.
 
 ## Environment (informational)
 

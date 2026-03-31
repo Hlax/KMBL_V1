@@ -88,7 +88,10 @@ from kmbl_orchestrator.runtime.kilo_model_routing import (
 from kmbl_orchestrator.runtime.evaluation_surface_gate import apply_preview_surface_gate
 from kmbl_orchestrator.runtime.iteration_plan import build_iteration_plan_for_generator
 from kmbl_orchestrator.runtime.run_events import RunEventType, append_graph_run_event
-from kmbl_orchestrator.runtime.session_staging_links import merge_session_staging_into_event_input
+from kmbl_orchestrator.runtime.session_staging_links import (
+    merge_session_staging_into_event_input,
+    resolve_evaluator_preview_url,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -333,6 +336,8 @@ def compute_evaluator_decision(
 ) -> tuple[Literal["stage", "iterate", "interrupt"], str | None]:
     """Pure decision logic: maps evaluator status + iteration to a routing decision.
 
+    Alignment scores do **not** affect this branch — see ``docs/19_EVALUATOR_DECISION_POLICY.md``.
+
     Returns (decision, interrupt_reason).
 
     - pass: always stage (no retry needed)
@@ -509,15 +514,24 @@ def build_compiled_graph(ctx: GraphContext):
             except Exception:
                 pass
 
+        ei = state.get("event_input") if isinstance(state.get("event_input"), dict) else {}
+        identity_url = ei.get("identity_url")
+        if not isinstance(identity_url, str) or not identity_url.strip():
+            identity_url = None
+        else:
+            identity_url = identity_url.strip()
+
         payload = {
             "thread_id": state["thread_id"],
             "identity_context": state.get("identity_context") or {},
             "memory_context": state.get("memory_context") or {},
-            "event_input": state.get("event_input") or {},
+            "event_input": ei,
             "current_state_summary": state.get("current_state") or {},
             "working_staging_facts": ws_facts,
             "user_rating_context": user_rating_context,
             "user_interrupts": user_interrupts if user_interrupts else None,
+            # Explicit for identity-vertical + Playwright grounding (see kmbl-planner SOUL)
+            "identity_url": identity_url,
         }
         t_pl = time.perf_counter()
         inv, raw = ctx.invoker.invoke(
@@ -711,12 +725,18 @@ def build_compiled_graph(ctx: GraphContext):
             # Fix 3: retry_context carries orchestrator-selected direction on iterations
             # Generator must use retry_context.retry_direction to determine approach
         }
-        # Merge retry_context into iteration_plan when present (iteration > 0)
-        if iteration > 0 and state.get("retry_context"):
-            rc = state.get("retry_context") or {}
+        # Merge retry_context into iteration_plan when present.
+        # In-graph retries: iteration > 0 (evaluator feedback from prior step).
+        # Autonomous loop ticks: each run_graph starts at iteration_index 0, but the loop
+        # still passes orchestrator retry_context — merge when trigger_type is autonomous_loop.
+        rc = state.get("retry_context") or {}
+        should_merge_retry_context = bool(rc) and (
+            iteration > 0
+            or str(state.get("trigger_type") or "") == "autonomous_loop"
+        )
+        if should_merge_retry_context:
             if payload["iteration_plan"] is None:
                 payload["iteration_plan"] = {}
-            # retry_context fields take precedence over iteration_plan fields
             payload["iteration_plan"] = {**payload["iteration_plan"], **rc}
         try:
             gen_key, routing_meta = select_generator_provider_config(
@@ -967,16 +987,33 @@ def build_compiled_graph(ctx: GraphContext):
                 }
                 break
 
+        bc = state.get("build_candidate") if isinstance(state.get("build_candidate"), dict) else {}
+        iter_hint = int(state.get("iteration_index", 0))
+        prev_ev = state.get("evaluation_report") if iter_hint > 0 else None
+        preview_url = resolve_evaluator_preview_url(
+            ctx.settings,
+            graph_run_id=str(gid),
+            thread_id=str(tid),
+            build_candidate=bc,
+        )
         payload = {
             "thread_id": state["thread_id"],
-            "build_candidate": state.get("build_candidate") or {},
+            "build_candidate": bc,
             "success_criteria": success,
             "evaluation_targets": targets,
-            "iteration_hint": state.get("iteration_index", 0),
+            "iteration_hint": iter_hint,
             "working_staging_facts": ws_facts,
             "user_rating_context": user_rating_context,
             # Fix 1+2: identity_brief enables evaluator to produce alignment_report
             "identity_brief": state.get("identity_brief"),
+            # Prefer live assembled staging preview for Playwright / visual grounding
+            "preview_url": preview_url,
+            "iteration_context": {
+                "iteration_index": iter_hint,
+                "has_previous_evaluation_report": bool(prev_ev),
+            },
+            # Prior evaluator JSON (same thread run) for visual-delta / sameness checks
+            "previous_evaluation_report": prev_ev if iter_hint > 0 else None,
         }
         t_ev = time.perf_counter()
         inv, raw = ctx.invoker.invoke(
@@ -1824,7 +1861,14 @@ def persist_graph_run_start(
         thread_id=tid_u,
         identity_id=UUID(identity_id) if identity_id else None,
         trigger_type=cast(
-            Literal["prompt", "resume", "schedule", "system"], trigger_type
+            Literal[
+                "prompt",
+                "resume",
+                "schedule",
+                "system",
+                "autonomous_loop",
+            ],
+            trigger_type,
         ),
         status="running",
     )

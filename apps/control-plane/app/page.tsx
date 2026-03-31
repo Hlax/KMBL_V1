@@ -60,7 +60,9 @@ export default async function HomePage() {
         Refresh to update counts; execution stays in the Python service. Use the global{" "}
         <strong>Flow</strong> strip in the header: <strong>Run</strong> → <strong>Review</strong> →{" "}
         <strong>Preview</strong> → <strong>Publish</strong> — then drill into a run or staging row
-        for image and static output.
+        for image and static output. From a graph run, open{" "}
+        <strong>Live habitat</strong> (<code className="mono">/habitat/live/{"{thread_id}"}</code>) to
+        watch the current working staging evolve — not a review snapshot.
       </p>
 
       <p className="op-banner op-banner--neutral">

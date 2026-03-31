@@ -1,7 +1,14 @@
-"""Mutation intent: normalized mutation semantics for staging application.
+"""
+Staging mutation intent — forward-compatible layer for generator-declared mutation semantics.
 
-Provides a forward-compatible mutation intent layer that can influence staging
-application while allowing current generators to function with fallback logic.
+CURRENT STATUS: The fallback path is always used in practice because no KiloClaw agent
+currently emits _kmbl_mutation_intent or mutation_intent fields. The intent system exists
+to allow future generators to declare explicit mutation modes (append, replace, merge, etc.)
+without requiring orchestrator code changes.
+
+When a generator starts emitting mutation_intent, this module will transparently activate.
+Until then, extract_mutation_intent() returns None and resolve_mutation_plan() uses the
+simple fallback (path-keyed merge on patch, full replace on rebuild).
 """
 
 from __future__ import annotations

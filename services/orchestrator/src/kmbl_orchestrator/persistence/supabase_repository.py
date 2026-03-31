@@ -135,6 +135,13 @@ def _row_to_build_candidate(row: dict[str, Any]) -> BuildCandidateRecord:
 def _row_to_evaluation_report(row: dict[str, Any]) -> EvaluationReportRecord:
     sm = row.get("summary")
     summary = "" if sm is None else str(sm)
+    raw_alignment = row.get("alignment_score")
+    alignment_score: float | None = None
+    if raw_alignment is not None:
+        try:
+            alignment_score = float(raw_alignment)
+        except (TypeError, ValueError):
+            pass
     return EvaluationReportRecord(
         evaluation_report_id=UUID(row["evaluation_report_id"]),
         thread_id=UUID(row["thread_id"]),
@@ -151,6 +158,8 @@ def _row_to_evaluation_report(row: dict[str, Any]) -> EvaluationReportRecord:
         raw_payload_json=row.get("raw_payload_json")
         if isinstance(row.get("raw_payload_json"), dict)
         else None,
+        alignment_score=alignment_score,
+        alignment_signals_json=row.get("alignment_signals_json") or {},
         created_at=_ts_to_iso(row.get("created_at")) or "",
     )
 
@@ -221,6 +230,7 @@ def _row_to_autonomous_loop(row: dict[str, Any]) -> AutonomousLoopRecord:
         last_staging_snapshot_id=_uuid_or_none(row.get("last_staging_snapshot_id")),
         last_evaluator_status=row.get("last_evaluator_status"),
         last_evaluator_score=row.get("last_evaluator_score"),
+        last_alignment_score=row.get("last_alignment_score"),
         exploration_directions=row.get("exploration_directions") or [],
         completed_directions=row.get("completed_directions") or [],
         auto_publish_threshold=row.get("auto_publish_threshold", 0.85),
@@ -880,6 +890,10 @@ class SupabaseRepository:
             "created_at": record.created_at,
             "raw_payload_json": record.raw_payload_json,
             "summary": record.summary,
+            # Alignment scoring — written only when present so existing rows with NULL columns
+            # are left untouched on upsert (ignore_duplicates=True handles retry safety).
+            "alignment_score": record.alignment_score,
+            "alignment_signals_json": record.alignment_signals_json or {},
         }
         self._run(
             "save_evaluation_report",
@@ -1570,6 +1584,7 @@ class SupabaseRepository:
         last_staging_snapshot_id: UUID | None = None,
         last_evaluator_status: str | None = None,
         last_evaluator_score: float | None = None,
+        last_alignment_score: float | None = None,
         exploration_directions: list | None = None,
         completed_directions: list | None = None,
         proposed_staging_id: UUID | None = None,
@@ -1602,6 +1617,8 @@ class SupabaseRepository:
             patch["last_evaluator_status"] = last_evaluator_status
         if last_evaluator_score is not None:
             patch["last_evaluator_score"] = last_evaluator_score
+        if last_alignment_score is not None:
+            patch["last_alignment_score"] = last_alignment_score
         if exploration_directions is not None:
             patch["exploration_directions"] = exploration_directions
         if completed_directions is not None:

@@ -1,4 +1,4 @@
-"""Pass L — operator-triggered actions derived from graph_run_event rows only."""
+"""Operator action read model — operator-triggered actions derived from graph_run_event rows."""
 
 from __future__ import annotations
 

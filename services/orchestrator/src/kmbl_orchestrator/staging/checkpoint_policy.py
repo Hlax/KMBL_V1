@@ -1,7 +1,9 @@
-"""Checkpoint policy: intentional checkpoint creation and retention.
+"""
+Staging checkpoint policy — when to create and retain working staging checkpoints.
 
-Provides clear policies for when checkpoints should be created and retained,
-with categories and reasons for each checkpoint.
+Provides typed decisions for pre-rebuild safety snapshots, first-previewable milestones,
+and patch milestones. All checkpoint decisions are derived from this module; callers
+in working_staging_ops.py should not encode checkpoint logic inline.
 """
 
 from __future__ import annotations

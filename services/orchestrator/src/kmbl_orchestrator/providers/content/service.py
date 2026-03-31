@@ -1,10 +1,11 @@
 """
 Content service for habitat text generation.
 
-Provides text content generation via:
-1. KiloClaw kmbl-generator agent (production)
-2. Identity context extraction
-3. Placeholder for deferred generation
+NOT USED IN THE CANONICAL IDENTITY→STATIC-FRONTEND VERTICAL.
+
+Future extension point: text content generation during habitat assembly.
+Not called from graph/app.py, the autonomous loop, or any API route handler.
+The canonical vertical uses KiloClaw agents (planner/generator/evaluator) for all content.
 """
 
 from __future__ import annotations

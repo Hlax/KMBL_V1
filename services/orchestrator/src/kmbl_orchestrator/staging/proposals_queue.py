@@ -1,4 +1,4 @@
-"""Pass N — proposals list filtering and sorting over persisted staging rows only."""
+"""Proposals queue — filtering and sorting for staging snapshot proposals list."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Pass H: compact operator read model for a single graph_run — persisted rows only."""
+"""Graph run detail read model — operator-facing view of a single graph run from persisted rows."""
 
 from __future__ import annotations
 

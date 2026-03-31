@@ -47,7 +47,10 @@ class Settings(BaseSettings):
             "orchestrator_allow_dev_role_invoke",
         ),
     )
-    # When true (default): empty identity profile gets DEFAULT_FALLBACK_PROFILE for local dev.
+    # LOCAL DEV ONLY — when true: empty identity profile silently substitutes DEFAULT_FALLBACK_PROFILE.
+    # Default is true for local dev convenience. MUST be false in production / CI to prevent
+    # silent identity substitution masquerading as real identity-driven generation.
+    # Set KMBL_IDENTITY_ALLOW_FALLBACK_PROFILE=false to enforce real identity data.
     identity_allow_fallback_profile: bool = Field(
         default=True,
         validation_alias=AliasChoices(
@@ -149,35 +152,11 @@ class Settings(BaseSettings):
     supabase_service_role_key: str = ""
     supabase_db_url: str = ""
 
-    # --- Legacy: orchestrator direct OpenAI Images API (disabled; use KiloClaw kmbl-image-gen only) ---
-    kmb_legacy_orchestrator_openai_images: bool = Field(
-        default=False,
-        validation_alias=AliasChoices(
-            "KMB_LEGACY_ORCHESTRATOR_OPENAI_IMAGES",
-            "kmb_legacy_orchestrator_openai_images",
-        ),
-    )
-    kmb_image_generation_enabled: bool = Field(
-        default=False,
-        validation_alias=AliasChoices("KMB_IMAGE_GENERATION_ENABLED", "kmb_image_generation_enabled"),
-    )
-    kmb_openai_image_api_key: str = Field(
-        default="",
-        validation_alias=AliasChoices("KMB_OPENAI_IMAGE_API_KEY", "kmb_openai_image_api_key"),
-    )
-    kmb_openai_image_model: str = Field(
-        default="dall-e-3",
-        validation_alias=AliasChoices("KMB_OPENAI_IMAGE_MODEL", "kmb_openai_image_model"),
-    )
-    kmb_max_images_per_graph_run: int = Field(
-        default=4,
-        validation_alias=AliasChoices(
-            "KMB_MAX_IMAGES_PER_GRAPH_RUN", "kmb_max_images_per_graph_run"
-        ),
-    )
+    # Image generation via habitat assembly (uses KiloClaw kmbl-image-gen agent).
+    # Set to False in tests/CI to skip image generation and use placeholder mode.
     habitat_image_generation_enabled: bool = Field(
         default=True,
-        description="Enable image generation during habitat assembly (uses OpenAI API)",
+        description="Enable image generation during habitat assembly (uses KiloClaw kmbl-image-gen).",
         validation_alias=AliasChoices(
             "HABITAT_IMAGE_GENERATION_ENABLED", "habitat_image_generation_enabled"
         ),

@@ -1,4 +1,4 @@
-"""Pass J — review queue action state from persisted staging + publication counts only."""
+"""Review action state — derives review/publish action status from staging and publication rows."""
 
 from __future__ import annotations
 

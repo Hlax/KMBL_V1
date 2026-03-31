@@ -100,52 +100,17 @@ class ImageService:
 
     def _generate_openai(self, request: HabitatImageRequest) -> HabitatImageResult:
         """
-        Generate image via OpenAI API.
+        Direct OpenAI image generation — disabled.
 
-        Note: This is the legacy path. Production should use KiloClaw.
+        This legacy path has been removed. Production image generation uses KiloClaw
+        (kmbl-image-gen agent). The image_provider package has been deleted.
+        Use mode='kiloclaw' or mode='placeholder' instead.
         """
         try:
-            from kmbl_orchestrator.image_provider import (
-                ImageGenerationRequest,
-                get_image_generation_service,
+            raise NotImplementedError(
+                "Direct OpenAI image generation is disabled. "
+                "Use KiloClaw (mode='kiloclaw') for image generation."
             )
-
-            if not request.graph_run_id or not request.thread_id:
-                return HabitatImageResult(
-                    status="failed",
-                    error="graph_run_id and thread_id required for OpenAI generation",
-                )
-
-            legacy_request = ImageGenerationRequest(
-                prompt=request.prompt,
-                size=request.size,
-                style=request.style,
-                graph_run_id=request.graph_run_id,
-                thread_id=request.thread_id,
-                identity_id=request.identity_id,
-                artifact_key=request.key,
-            )
-
-            service = get_image_generation_service(self._settings)
-            result = service.generate(legacy_request)
-
-            if result.status == "generated" and result.gallery_artifact:
-                artifact = ImageArtifactV1(
-                    role="image_artifact_v1",
-                    key=request.key,
-                    url=result.gallery_artifact.get("url", ""),
-                    alt=request.alt or request.prompt[:100],
-                    source="generated",
-                    generation_prompt=request.prompt,
-                    placement_hint=request.placement,
-                )
-                return HabitatImageResult(status="generated", artifact=artifact)
-
-            return HabitatImageResult(
-                status="failed",
-                error=result.fallback_reason or "OpenAI generation failed",
-            )
-
         except Exception as exc:
             _log.warning("OpenAI image generation failed: %s", exc)
             return HabitatImageResult(status="failed", error=str(exc))

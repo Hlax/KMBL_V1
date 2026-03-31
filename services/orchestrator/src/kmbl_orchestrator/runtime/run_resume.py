@@ -1,4 +1,4 @@
-"""Pass K — operator resume eligibility (persisted rows only)."""
+"""Operator resume eligibility — determines whether a graph run can be re-executed."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Pass I: compact list read model for graph_run rows — persisted only."""
+"""Graph run list read model — compact index view of graph run rows for the operator dashboard."""
 
 from __future__ import annotations
 

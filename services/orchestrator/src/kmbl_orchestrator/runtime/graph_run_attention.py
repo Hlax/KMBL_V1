@@ -1,4 +1,4 @@
-"""Pass J — operator attention for graph runs (persisted fields only)."""
+"""Graph run attention — derives operator attention flags from persisted graph run fields."""
 
 from __future__ import annotations
 

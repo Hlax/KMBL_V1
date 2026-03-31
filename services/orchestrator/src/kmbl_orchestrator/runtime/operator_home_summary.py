@@ -1,4 +1,4 @@
-"""Pass O — compact operator home summary from persisted rows only."""
+"""Operator home summary — compact dashboard read model from persisted rows."""
 
 from __future__ import annotations
 

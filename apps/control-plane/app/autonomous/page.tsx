@@ -236,6 +236,23 @@ export default function AutonomousPage() {
         </div>
       )}
 
+      <details style={{ marginBottom: "1rem", fontSize: "0.85rem", color: "#aaa" }}>
+        <summary style={{ cursor: "pointer", color: "#3498db" }}>
+          Orchestrator autonomous loop phases (cron / POST /orchestrator/loops)
+        </summary>
+        <ul style={{ margin: "0.5rem 0 0 1rem", padding: 0 }}>
+          <li><code style={{ color: "#ccc" }}>identity_fetch</code> — scrape URL into identity profile</li>
+          <li><code style={{ color: "#ccc" }}>graph_cycle</code> — one full LangGraph run (planner → generator → evaluator → staging)</li>
+          <li><code style={{ color: "#ccc" }}>proposing</code> — auto-publish threshold check</li>
+          <li><code style={{ color: "#ccc" }}>idle</code> — completed or waiting</li>
+        </ul>
+        <p style={{ margin: "0.5rem 0 0 0" }}>
+          GET <code style={{ color: "#ccc" }}>/orchestrator/loops/{"{id}"}</code> includes{" "}
+          <code style={{ color: "#ccc" }}>last_error</code> and{" "}
+          <code style={{ color: "#ccc" }}>consecutive_graph_failures</code> for operator visibility.
+        </p>
+      </details>
+
       {/* URL Input */}
       <div style={{ background: "#1a1a2e", padding: "1rem", borderRadius: 8, marginBottom: "1rem", border: "1px solid #333" }}>
         <div style={{ display: "flex", gap: "0.5rem", marginBottom: savedUrl ? "0.5rem" : 0 }}>

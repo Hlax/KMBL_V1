@@ -1,0 +1,14 @@
+{
+  "response": {
+    "meta": { "ok": true },
+    "plan": {
+      "build_spec": {
+        "type": "kmbl_nested_fixture_v1",
+        "title": "Nested planner fixture",
+        "steps": [{ "n": 1, "what": "Prove nested JSON recovery" }]
+      },
+      "success_criteria": ["nested_fixture_ok"],
+      "evaluation_targets": [{ "id": "e1", "description": "check" }]
+    }
+  }
+}

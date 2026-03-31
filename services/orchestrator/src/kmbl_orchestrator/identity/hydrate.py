@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 from kmbl_orchestrator.domain import IdentityProfileRecord, IdentitySourceRecord
 from kmbl_orchestrator.persistence.repository import Repository
+
+if TYPE_CHECKING:
+    from kmbl_orchestrator.config import Settings
 
 _log = logging.getLogger(__name__)
 
@@ -34,9 +37,15 @@ def _snippet(text: str | None, max_len: int = 200) -> str | None:
 
 
 def build_planner_identity_context(
-    repo: Repository, identity_id: UUID | None
+    repo: Repository,
+    identity_id: UUID | None,
+    *,
+    settings: "Settings | None" = None,
 ) -> dict[str, Any]:
     """Return JSON-serializable dict for ``PlannerRoleInput.identity_context``."""
+    from kmbl_orchestrator.config import get_settings
+
+    s = settings or get_settings()
     if identity_id is None:
         return {}
     profile = repo.get_identity_profile(identity_id)
@@ -60,9 +69,14 @@ def build_planner_identity_context(
     }
 
     if not out.get("profile_summary") and not out.get("facets_json"):
-        out["profile_summary"] = DEFAULT_FALLBACK_PROFILE["profile_summary"]
-        out["facets_json"] = DEFAULT_FALLBACK_PROFILE["facets_json"]
-        out["is_fallback"] = True
+        if s.identity_allow_fallback_profile:
+            out["profile_summary"] = DEFAULT_FALLBACK_PROFILE["profile_summary"]
+            out["facets_json"] = DEFAULT_FALLBACK_PROFILE["facets_json"]
+            out["is_fallback"] = True
+        else:
+            out["identity_unresolved"] = True
+            out["identity_unresolved_reason"] = "no_profile_or_facets"
+            out["facets_json"] = {}
 
     return out
 

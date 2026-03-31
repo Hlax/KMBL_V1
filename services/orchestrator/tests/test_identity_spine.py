@@ -77,6 +77,15 @@ def test_hydrate_empty_without_identity() -> None:
     assert build_planner_identity_context(repo, None) == {}
 
 
+def test_hydrate_identity_unresolved_without_fallback() -> None:
+    repo = InMemoryRepository()
+    iid = uuid4()
+    s = Settings.model_construct(identity_allow_fallback_profile=False)
+    ctx = build_planner_identity_context(repo, iid, settings=s)
+    assert ctx.get("identity_unresolved") is True
+    assert ctx.get("identity_unresolved_reason") == "no_profile_or_facets"
+
+
 def test_run_without_identity_id_empty_identity_context() -> None:
     class Cap:
         def __init__(self) -> None:

@@ -201,12 +201,19 @@ def _row_to_autonomous_loop(row: dict[str, Any]) -> AutonomousLoopRecord:
     def _uuid_or_none(val: Any) -> UUID | None:
         return UUID(val) if val else None
 
+    raw_phase = row.get("phase", "identity_fetch") or "identity_fetch"
+    if raw_phase in ("planning", "generating", "evaluating"):
+        raw_phase = "graph_cycle"
+    _valid_phases = frozenset({"identity_fetch", "graph_cycle", "proposing", "idle"})
+    if raw_phase not in _valid_phases:
+        raw_phase = "graph_cycle"
+
     return AutonomousLoopRecord(
         loop_id=UUID(row["loop_id"]),
         identity_id=UUID(row["identity_id"]),
         identity_url=row["identity_url"],
         status=row.get("status", "pending"),
-        phase=row.get("phase", "identity_fetch"),
+        phase=raw_phase,
         iteration_count=row.get("iteration_count", 0),
         max_iterations=row.get("max_iterations", 50),
         current_thread_id=_uuid_or_none(row.get("current_thread_id")),
@@ -227,6 +234,8 @@ def _row_to_autonomous_loop(row: dict[str, Any]) -> AutonomousLoopRecord:
         total_staging_count=row.get("total_staging_count", 0),
         total_publication_count=row.get("total_publication_count", 0),
         best_rating=row.get("best_rating"),
+        last_error=row.get("last_error"),
+        consecutive_graph_failures=int(row.get("consecutive_graph_failures") or 0),
     )
 
 
@@ -1435,6 +1444,8 @@ class SupabaseRepository:
             "total_staging_count": record.total_staging_count,
             "total_publication_count": record.total_publication_count,
             "best_rating": record.best_rating,
+            "last_error": record.last_error,
+            "consecutive_graph_failures": record.consecutive_graph_failures,
         }
 
         def _query() -> Any:
@@ -1564,6 +1575,9 @@ class SupabaseRepository:
         proposed_staging_id: UUID | None = None,
         total_staging_count: int | None = None,
         best_rating: int | None = None,
+        last_error: str | None = None,
+        consecutive_graph_failures: int | None = None,
+        reset_loop_error: bool = False,
     ) -> "AutonomousLoopRecord | None":
         from datetime import datetime, timezone
 
@@ -1599,6 +1613,13 @@ class SupabaseRepository:
             patch["total_staging_count"] = total_staging_count
         if best_rating is not None:
             patch["best_rating"] = best_rating
+        if reset_loop_error:
+            patch["last_error"] = None
+            patch["consecutive_graph_failures"] = 0
+        if last_error is not None:
+            patch["last_error"] = last_error
+        if consecutive_graph_failures is not None:
+            patch["consecutive_graph_failures"] = consecutive_graph_failures
 
         def _query() -> Any:
             return self._client.table("autonomous_loop").update(patch).eq("loop_id", str(loop_id)).execute()

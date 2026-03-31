@@ -383,7 +383,9 @@ def build_compiled_graph(ctx: GraphContext):
         iid_raw = state.get("identity_id")
         if iid_raw:
             try:
-                ic = build_planner_identity_context(ctx.repo, UUID(str(iid_raw)))
+                ic = build_planner_identity_context(
+                    ctx.repo, UUID(str(iid_raw)), settings=ctx.settings
+                )
             except ValueError:
                 ic = {}
         else:

@@ -280,12 +280,16 @@ class AutonomousLoopRecord(BaseModel):
     # Loop state
     status: Literal["pending", "running", "paused", "completed", "failed"] = "pending"
     phase: Literal[
-        "identity_fetch", "planning", "generating", "evaluating", "proposing", "idle"
+        "identity_fetch", "graph_cycle", "proposing", "idle"
     ] = "identity_fetch"
 
     # Iteration tracking
     iteration_count: int = 0
     max_iterations: int = 50
+
+    # Operator-visible failure surface (Supabase: autonomous_loop.last_error, consecutive_graph_failures)
+    last_error: str | None = None
+    consecutive_graph_failures: int = 0
 
     # Current work references
     current_thread_id: UUID | None = None

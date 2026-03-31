@@ -39,6 +39,42 @@ class Settings(BaseSettings):
     orchestrator_run_start_sync_timeout_sec: float = 120.0
     # If true: background work runs only one planner role + persist (no generator/evaluator/staging).
     orchestrator_smoke_planner_only: bool = False
+    # When false: POST /orchestrator/invoke-role returns 404 (production uses LangGraph only).
+    orchestrator_allow_dev_role_invoke: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "KMBL_ORCHESTRATOR_ALLOW_DEV_ROLE_INVOKE",
+            "orchestrator_allow_dev_role_invoke",
+        ),
+    )
+    # When true (default): empty identity profile gets DEFAULT_FALLBACK_PROFILE for local dev.
+    identity_allow_fallback_profile: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "KMBL_IDENTITY_ALLOW_FALLBACK_PROFILE",
+            "identity_allow_fallback_profile",
+        ),
+    )
+    # autonomous loop / identity_fetch: fail when seed.confidence is below this (0–1). 0 = disabled.
+    identity_minimum_confidence: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        validation_alias=AliasChoices(
+            "KMBL_IDENTITY_MINIMUM_CONFIDENCE",
+            "identity_minimum_confidence",
+        ),
+    )
+    # After this many consecutive graph tick failures, autonomous loop status becomes failed.
+    autonomous_loop_max_consecutive_failures: int = Field(
+        default=5,
+        ge=1,
+        le=100,
+        validation_alias=AliasChoices(
+            "KMBL_AUTONOMOUS_LOOP_MAX_CONSECUTIVE_FAILURES",
+            "autonomous_loop_max_consecutive_failures",
+        ),
+    )
     # LangGraph generator↔evaluator loop: default max iterations (exploratory runs; Anthropic-style harness).
     graph_max_iterations_default: int = Field(
         default=10,

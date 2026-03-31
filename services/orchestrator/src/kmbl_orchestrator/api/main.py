@@ -2663,8 +2663,10 @@ def invoke_role(
     """
     Internal dev hook — production path is the LangGraph nodes.
 
-    TODO: Remove or protect when KiloClaw is only reachable from orchestrator graph.
+    Disabled unless ``ORCHESTRATOR_ALLOW_DEV_ROLE_INVOKE`` / ``orchestrator_allow_dev_role_invoke`` is true.
     """
+    if not settings.orchestrator_allow_dev_role_invoke:
+        raise HTTPException(status_code=404, detail="Not found")
     # Minimal synthetic IDs for standalone calls
     gid = UUID(int=0)
     tid = UUID(int=1)
@@ -2799,6 +2801,8 @@ def get_loop(
         "total_staging_count": loop.total_staging_count,
         "total_publication_count": loop.total_publication_count,
         "best_rating": loop.best_rating,
+        "last_error": loop.last_error,
+        "consecutive_graph_failures": loop.consecutive_graph_failures,
     }
 
 
@@ -2817,11 +2821,7 @@ async def cron_tick(
     from functools import partial
 
     from kmbl_orchestrator.autonomous import tick_loop
-    from kmbl_orchestrator.graph.app import (
-        build_graph_context,
-        persist_graph_run_start,
-        run_graph,
-    )
+    from kmbl_orchestrator.graph.app import persist_graph_run_start, run_graph
 
     loop_record = repo.get_next_pending_loop()
     if loop_record is None:
@@ -2892,6 +2892,14 @@ async def cron_tick(
             return await loop_ev.run_in_executor(None, _sync_run)
 
         result = await tick_loop(repo, loop_record, run_graph_fn=_run_graph_for_loop)
+        _log.info(
+            "cron_tick_completed loop_id=%s identity_id=%s phase=%s action=%s error=%s",
+            loop_record.loop_id,
+            loop_record.identity_id,
+            loop_record.phase,
+            result.action,
+            result.error,
+        )
         return {
             "status": "tick_completed",
             **result.to_dict(),

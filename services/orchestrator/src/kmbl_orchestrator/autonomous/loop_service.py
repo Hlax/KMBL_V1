@@ -1,15 +1,16 @@
-"""Autonomous loop service - runs creative iterations until completion or proposal."""
+"""Autonomous loop service — one URL → identity → repeated LangGraph runs until done or proposal."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 if TYPE_CHECKING:
     from kmbl_orchestrator.persistence.repository import Repository
 
+from kmbl_orchestrator.config import get_settings
 from kmbl_orchestrator.domain import AutonomousLoopRecord
 from kmbl_orchestrator.identity.extract import extract_identity_from_url
 from kmbl_orchestrator.identity.hydrate import persist_identity_from_seed
@@ -89,30 +90,28 @@ async def tick_loop(
 ) -> LoopTickResult:
     """
     Execute one tick of the autonomous loop.
-    
-    Phases:
-    - identity_fetch: Extract identity from URL
-    - planning: Invoke planner (via graph)
-    - generating: Invoke generator (via graph)
-    - evaluating: Invoke evaluator (via graph)
-    - proposing: Check if evaluator wants to propose for publication
-    - idle: Waiting for next direction or user input
+
+    Phases (one graph invocation = ``graph_cycle`` per tick, not separate planner/generator/evaluator phases):
+    - identity_fetch: extract identity from URL and persist under ``loop.identity_id``
+    - graph_cycle: run full LangGraph (planner → generator → evaluator → decision → staging)
+    - proposing: decide auto-publish vs continue
+    - idle: optional exploration / completion
     """
     loop_id = loop.loop_id
-    
+
     try:
         if loop.phase == "identity_fetch":
             return await _tick_identity_fetch(repo, loop)
-        
-        if loop.phase in ("planning", "generating", "evaluating"):
+
+        if loop.phase == "graph_cycle":
             return await _tick_graph_run(repo, loop, run_graph_fn=run_graph_fn)
-        
+
         if loop.phase == "proposing":
             return await _tick_proposing(repo, loop)
-        
+
         if loop.phase == "idle":
             return await _tick_idle(repo, loop)
-        
+
         return LoopTickResult(
             loop_id=loop_id,
             action="unknown_phase",
@@ -120,10 +119,14 @@ async def tick_loop(
             iteration=loop.iteration_count,
             error=f"Unknown phase: {loop.phase}",
         )
-    
+
     except Exception as e:
         _log.exception("Loop %s tick failed: %s", loop_id, e)
-        repo.update_loop_state(loop_id, status="failed")
+        repo.update_loop_state(
+            loop_id,
+            status="failed",
+            last_error=str(e)[:2000],
+        )
         return LoopTickResult(
             loop_id=loop_id,
             action="error",
@@ -137,32 +140,49 @@ async def _tick_identity_fetch(
     repo: "Repository",
     loop: AutonomousLoopRecord,
 ) -> LoopTickResult:
-    """Fetch identity from URL and persist."""
+    """Fetch identity from URL and persist under the loop's pre-assigned ``identity_id``."""
+    settings = get_settings()
     _log.info("Loop %s: fetching identity from %s", loop.loop_id, loop.identity_url)
-    
-    seed = await extract_identity_from_url(loop.identity_url, deep_crawl=True)
-    if seed is None:
-        repo.update_loop_state(loop.loop_id, status="failed")
+
+    seed = await asyncio.to_thread(
+        lambda: extract_identity_from_url(loop.identity_url, deep_crawl=True),
+    )
+
+    if (
+        settings.identity_minimum_confidence > 0
+        and float(seed.confidence) < settings.identity_minimum_confidence
+    ):
+        msg = (
+            f"identity confidence {seed.confidence:.3f} below "
+            f"identity_minimum_confidence {settings.identity_minimum_confidence}"
+        )
+        repo.update_loop_state(
+            loop.loop_id,
+            status="failed",
+            phase="identity_fetch",
+            last_error=msg,
+        )
         return LoopTickResult(
             loop_id=loop.loop_id,
             action="identity_fetch_failed",
             phase_after="identity_fetch",
             iteration=0,
-            error="Could not extract identity from URL",
+            error=msg,
         )
-    
-    identity_id = await persist_identity_from_seed(repo, seed)
-    
+
+    persist_identity_from_seed(repo, seed, identity_id=loop.identity_id)
+
     repo.update_loop_state(
         loop.loop_id,
-        phase="planning",
+        phase="graph_cycle",
         status="running",
+        reset_loop_error=True,
     )
-    
+
     return LoopTickResult(
         loop_id=loop.loop_id,
         action="identity_fetched",
-        phase_after="planning",
+        phase_after="graph_cycle",
         iteration=0,
     )
 
@@ -173,7 +193,8 @@ async def _tick_graph_run(
     *,
     run_graph_fn: Any = None,
 ) -> LoopTickResult:
-    """Run a graph iteration (planner → generator → evaluator)."""
+    """Run one full graph (single LangGraph invocation)."""
+    settings = get_settings()
     if run_graph_fn is None:
         return LoopTickResult(
             loop_id=loop.loop_id,
@@ -182,9 +203,9 @@ async def _tick_graph_run(
             iteration=loop.iteration_count,
             error="No graph runner provided",
         )
-    
+
     iteration = loop.iteration_count + 1
-    
+
     if iteration > loop.max_iterations:
         repo.update_loop_state(loop.loop_id, status="completed", phase="idle")
         return LoopTickResult(
@@ -194,14 +215,13 @@ async def _tick_graph_run(
             iteration=iteration,
             completed=True,
         )
-    
+
     _log.info("Loop %s: starting graph iteration %d", loop.loop_id, iteration)
-    
+
     event_input = build_identity_url_static_frontend_event_input(
         identity_url=loop.identity_url,
-        identity_id=loop.identity_id,
     )
-    
+
     try:
         result = await run_graph_fn(
             identity_url=loop.identity_url,
@@ -209,17 +229,17 @@ async def _tick_graph_run(
             event_input=event_input,
             thread_id=loop.current_thread_id,
         )
-        
+
         graph_run_id = result.get("graph_run_id")
         thread_id = result.get("thread_id")
         staging_snapshot_id = result.get("staging_snapshot_id")
         evaluator_status = result.get("evaluator_status")
         evaluator_score = result.get("evaluator_score")
-        
+
         staging_count = loop.total_staging_count
         if staging_snapshot_id:
             staging_count += 1
-        
+
         repo.update_loop_state(
             loop.loop_id,
             iteration_count=iteration,
@@ -229,27 +249,47 @@ async def _tick_graph_run(
             last_evaluator_status=evaluator_status,
             last_evaluator_score=evaluator_score,
             total_staging_count=staging_count,
-            phase="proposing" if evaluator_status == "pass" else "planning",
+            phase="proposing" if evaluator_status == "pass" else "graph_cycle",
+            reset_loop_error=True,
         )
-        
+
         return LoopTickResult(
             loop_id=loop.loop_id,
             action="graph_iteration_completed",
-            phase_after="proposing" if evaluator_status == "pass" else "planning",
+            phase_after="proposing" if evaluator_status == "pass" else "graph_cycle",
             iteration=iteration,
             graph_run_id=UUID(graph_run_id) if graph_run_id else None,
             staging_snapshot_id=UUID(staging_snapshot_id) if staging_snapshot_id else None,
         )
-    
+
     except Exception as e:
         _log.exception("Loop %s graph run failed: %s", loop.loop_id, e)
-        repo.update_loop_state(loop.loop_id, phase="planning")
+        new_fail = (loop.consecutive_graph_failures or 0) + 1
+        err_msg = str(e)[:2000]
+        max_c = settings.autonomous_loop_max_consecutive_failures
+
+        if new_fail >= max_c:
+            repo.update_loop_state(
+                loop.loop_id,
+                phase="graph_cycle",
+                status="failed",
+                last_error=err_msg,
+                consecutive_graph_failures=new_fail,
+            )
+        else:
+            repo.update_loop_state(
+                loop.loop_id,
+                phase="graph_cycle",
+                last_error=err_msg,
+                consecutive_graph_failures=new_fail,
+            )
+
         return LoopTickResult(
             loop_id=loop.loop_id,
             action="graph_iteration_failed",
-            phase_after="planning",
+            phase_after="graph_cycle",
             iteration=iteration,
-            error=str(e),
+            error=err_msg,
         )
 
 
@@ -259,7 +299,7 @@ async def _tick_proposing(
 ) -> LoopTickResult:
     """Check if we should propose this build for publication."""
     score = loop.last_evaluator_score or 0.0
-    
+
     if score >= loop.auto_publish_threshold and loop.last_staging_snapshot_id:
         _log.info(
             "Loop %s: proposing staging %s for publication (score %.2f >= %.2f)",
@@ -268,13 +308,13 @@ async def _tick_proposing(
             score,
             loop.auto_publish_threshold,
         )
-        
+
         repo.update_loop_state(
             loop.loop_id,
             proposed_staging_id=loop.last_staging_snapshot_id,
             phase="idle",
         )
-        
+
         return LoopTickResult(
             loop_id=loop.loop_id,
             action="proposed_for_publication",
@@ -283,12 +323,12 @@ async def _tick_proposing(
             staging_snapshot_id=loop.last_staging_snapshot_id,
             proposed=True,
         )
-    
-    repo.update_loop_state(loop.loop_id, phase="planning")
+
+    repo.update_loop_state(loop.loop_id, phase="graph_cycle")
     return LoopTickResult(
         loop_id=loop.loop_id,
         action="continuing_iteration",
-        phase_after="planning",
+        phase_after="graph_cycle",
         iteration=loop.iteration_count,
     )
 
@@ -297,17 +337,12 @@ async def _tick_idle(
     repo: "Repository",
     loop: AutonomousLoopRecord,
 ) -> LoopTickResult:
-    """
-    Idle phase - check if planner has new exploration directions.
-    
-    If planner suggested new directions and we haven't explored them all,
-    pick one and continue iterating.
-    """
+    """Idle — exploration directions or completion when nothing pending."""
     directions = loop.exploration_directions or []
-    completed = set(d.get("id") for d in (loop.completed_directions or []) if d.get("id"))
-    
+    completed = {d.get("id") for d in (loop.completed_directions or []) if d.get("id")}
+
     pending = [d for d in directions if d.get("id") not in completed]
-    
+
     if not pending:
         if loop.iteration_count >= loop.max_iterations:
             repo.update_loop_state(loop.loop_id, status="completed")
@@ -318,26 +353,26 @@ async def _tick_idle(
                 iteration=loop.iteration_count,
                 completed=True,
             )
-        
-        repo.update_loop_state(loop.loop_id, phase="planning")
+
+        repo.update_loop_state(loop.loop_id, phase="graph_cycle")
         return LoopTickResult(
             loop_id=loop.loop_id,
             action="exploring_new_direction",
-            phase_after="planning",
+            phase_after="graph_cycle",
             iteration=loop.iteration_count,
         )
-    
+
     next_direction = pending[0]
     new_completed = (loop.completed_directions or []) + [next_direction]
     repo.update_loop_state(
         loop.loop_id,
         completed_directions=new_completed,
-        phase="planning",
+        phase="graph_cycle",
     )
-    
+
     return LoopTickResult(
         loop_id=loop.loop_id,
         action="exploring_direction",
-        phase_after="planning",
+        phase_after="graph_cycle",
         iteration=loop.iteration_count,
     )

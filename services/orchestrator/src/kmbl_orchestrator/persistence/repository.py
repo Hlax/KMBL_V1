@@ -205,7 +205,7 @@ class Repository(Protocol):
     ) -> list["AutonomousLoopRecord"]: ...
 
     def get_next_pending_loop(self) -> "AutonomousLoopRecord | None":
-        """Get next loop that's pending or running and not locked."""
+        """Next loop with ``status`` in (pending, running), lock expired or unset — cron driver."""
         ...
 
     def try_acquire_loop_lock(
@@ -238,6 +238,9 @@ class Repository(Protocol):
         proposed_staging_id: UUID | None = None,
         total_staging_count: int | None = None,
         best_rating: int | None = None,
+        last_error: str | None = None,
+        consecutive_graph_failures: int | None = None,
+        reset_loop_error: bool = False,
     ) -> "AutonomousLoopRecord | None": ...
 
     def save_publication_snapshot(self, record: PublicationSnapshotRecord) -> None: ...
@@ -822,6 +825,9 @@ class InMemoryRepository:
         proposed_staging_id: UUID | None = None,
         total_staging_count: int | None = None,
         best_rating: int | None = None,
+        last_error: str | None = None,
+        consecutive_graph_failures: int | None = None,
+        reset_loop_error: bool = False,
     ) -> AutonomousLoopRecord | None:
         from datetime import datetime, timezone
 
@@ -859,6 +865,13 @@ class InMemoryRepository:
             updates["total_staging_count"] = total_staging_count
         if best_rating is not None:
             updates["best_rating"] = best_rating
+        if reset_loop_error:
+            updates["last_error"] = None
+            updates["consecutive_graph_failures"] = 0
+        if last_error is not None:
+            updates["last_error"] = last_error
+        if consecutive_graph_failures is not None:
+            updates["consecutive_graph_failures"] = consecutive_graph_failures
         updated = AutonomousLoopRecord(**{**loop.model_dump(), **updates})
         self._autonomous_loops[key] = updated
         return updated

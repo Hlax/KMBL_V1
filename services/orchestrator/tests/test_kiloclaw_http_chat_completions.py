@@ -51,7 +51,7 @@ def _chat_response(
     }
 
 
-@patch("kmbl_orchestrator.providers.kiloclaw.httpx.Client")
+@patch("kmbl_orchestrator.providers.kiloclaw_http.httpx.Client")
 def test_http_client_posts_chat_completions_and_parses_planner(mock_client_cls: MagicMock) -> None:
     planner_out = {
         "build_spec": {"type": "http_test", "title": "t", "steps": []},
@@ -86,7 +86,7 @@ def test_http_client_posts_chat_completions_and_parses_planner(mock_client_cls: 
     assert user_obj["payload"] == {"task": "x"}
 
 
-@patch("kmbl_orchestrator.providers.kiloclaw.httpx.Client")
+@patch("kmbl_orchestrator.providers.kiloclaw_http.httpx.Client")
 def test_http_client_appends_thread_id_to_chat_user(mock_client_cls: MagicMock) -> None:
     """Isolate OpenClaw session per thread — bare kmbl-orchestrator can 500 on the gateway."""
     planner_out = {
@@ -111,7 +111,7 @@ def test_http_client_appends_thread_id_to_chat_user(mock_client_cls: MagicMock) 
     assert body["user"] == f"kmbl-orchestrator:e2e-test:{tid}"
 
 
-@patch("kmbl_orchestrator.providers.kiloclaw.httpx.Client")
+@patch("kmbl_orchestrator.providers.kiloclaw_http.httpx.Client")
 def test_http_client_planner_recovers_variation_only_echo(mock_client_cls: MagicMock) -> None:
     """Live varied gallery sometimes returns only ``variation`` keys — narrow synthetic contract."""
     variation_only = {
@@ -137,7 +137,7 @@ def test_http_client_planner_recovers_variation_only_echo(mock_client_cls: Magic
     assert out["constraints"]["variation"]["run_nonce"] == "n1"
 
 
-@patch("kmbl_orchestrator.providers.kiloclaw.httpx.Client")
+@patch("kmbl_orchestrator.providers.kiloclaw_http.httpx.Client")
 def test_http_client_planner_reads_json_from_tool_calls_arguments(mock_client_cls: MagicMock) -> None:
     planner_out = {
         "build_spec": {"type": "http_test", "title": "from_tool_call", "steps": []},
@@ -165,7 +165,7 @@ def test_http_client_planner_reads_json_from_tool_calls_arguments(mock_client_cl
     assert out["build_spec"]["title"] == "from_tool_call"
 
 
-@patch("kmbl_orchestrator.providers.kiloclaw.httpx.Client")
+@patch("kmbl_orchestrator.providers.kiloclaw_http.httpx.Client")
 def test_http_client_planner_concatenated_json_objects(mock_client_cls: MagicMock) -> None:
     """Some models emit a short meta object then the plan — ``json.loads`` fails; first ``raw_decode`` would miss ``build_spec``."""
     planner_out = {
@@ -218,7 +218,7 @@ def test_parse_chat_completion_accepts_prose_before_json_object() -> None:
     assert parsed["build_spec"]["title"] == "t"
 
 
-@patch("kmbl_orchestrator.providers.kiloclaw.httpx.Client")
+@patch("kmbl_orchestrator.providers.kiloclaw_http.httpx.Client")
 def test_http_client_strips_markdown_fence(mock_client_cls: MagicMock) -> None:
     planner_out = {
         "build_spec": {"type": "http_test", "title": "t", "steps": []},
@@ -240,7 +240,7 @@ def test_http_client_strips_markdown_fence(mock_client_cls: MagicMock) -> None:
     assert out["build_spec"]["title"] == "t"
 
 
-@patch("kmbl_orchestrator.providers.kiloclaw.httpx.Client")
+@patch("kmbl_orchestrator.providers.kiloclaw_http.httpx.Client")
 def test_http_client_parses_prose_before_json_planner_output(mock_client_cls: MagicMock) -> None:
     planner_out = {
         "build_spec": {"type": "http_test", "title": "from_prose", "steps": []},
@@ -262,7 +262,7 @@ def test_http_client_parses_prose_before_json_planner_output(mock_client_cls: Ma
     assert out["build_spec"]["title"] == "from_prose"
 
 
-@patch("kmbl_orchestrator.providers.kiloclaw.httpx.Client")
+@patch("kmbl_orchestrator.providers.kiloclaw_http.httpx.Client")
 def test_http_client_unwraps_planner_output_nested_under_plan(mock_client_cls: MagicMock) -> None:
     """Models often nest the contract under ``plan``; varied prompts increase this pattern."""
     planner_inner = {
@@ -285,7 +285,7 @@ def test_http_client_unwraps_planner_output_nested_under_plan(mock_client_cls: M
     assert out["build_spec"]["title"] == "under_plan"
 
 
-@patch("kmbl_orchestrator.providers.kiloclaw.httpx.Client")
+@patch("kmbl_orchestrator.providers.kiloclaw_http.httpx.Client")
 def test_http_client_unwraps_planner_double_nested(mock_client_cls: MagicMock) -> None:
     """Varied prompts may yield ``wrapper.plan`` or similar — more than one level deep."""
     planner_inner = {
@@ -308,7 +308,7 @@ def test_http_client_unwraps_planner_double_nested(mock_client_cls: MagicMock) -
     assert out["build_spec"]["title"] == "double_nested"
 
 
-@patch("kmbl_orchestrator.providers.kiloclaw.httpx.Client")
+@patch("kmbl_orchestrator.providers.kiloclaw_http.httpx.Client")
 def test_http_client_unwraps_planner_nested_under_arbitrary_key(mock_client_cls: MagicMock) -> None:
     """Planner-only: contract may sit under ``response``, ``answer``, etc. (not only ``plan``)."""
     planner_inner = {
@@ -331,7 +331,7 @@ def test_http_client_unwraps_planner_nested_under_arbitrary_key(mock_client_cls:
     assert out["build_spec"]["title"] == "under_response"
 
 
-@patch("kmbl_orchestrator.providers.kiloclaw.httpx.Client")
+@patch("kmbl_orchestrator.providers.kiloclaw_http.httpx.Client")
 def test_http_client_validates_planner_missing_build_spec(mock_client_cls: MagicMock) -> None:
     # Object-shaped JSON that `_extract_http_role_dict` accepts as role output but fails planner rules.
     mock_resp = MagicMock()

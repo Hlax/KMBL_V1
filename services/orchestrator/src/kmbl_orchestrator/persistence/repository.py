@@ -35,17 +35,26 @@ _log = logging.getLogger(__name__)
 class Repository(Protocol):
     """System of record for runtime entities (docs/07)."""
 
-    def ensure_thread(self, record: ThreadRecord) -> None: ...
+    def ensure_thread(self, record: ThreadRecord) -> None:
+        """Upsert a thread row; preserves ``current_checkpoint_id`` on re-insert."""
+        ...
 
-    def get_thread(self, thread_id: UUID) -> ThreadRecord | None: ...
+    def get_thread(self, thread_id: UUID) -> ThreadRecord | None:
+        """Return the thread record or ``None`` if it does not exist."""
+        ...
 
     def update_thread_current_checkpoint(
         self, thread_id: UUID, checkpoint_id: UUID
     ) -> None:
         """Set thread.current_checkpoint_id (e.g. after post_role checkpoint)."""
 
-    def save_graph_run(self, record: GraphRunRecord) -> None: ...
-    def get_graph_run(self, graph_run_id: UUID) -> GraphRunRecord | None: ...
+    def save_graph_run(self, record: GraphRunRecord) -> None:
+        """Insert or replace a graph-run row (keyed by ``graph_run_id``)."""
+        ...
+
+    def get_graph_run(self, graph_run_id: UUID) -> GraphRunRecord | None:
+        """Return the graph-run record or ``None``."""
+        ...
 
     def list_graph_runs(
         self,
@@ -77,34 +86,64 @@ class Repository(Protocol):
         graph_run_id: UUID,
         status: Literal["running", "paused", "completed", "failed"],
         ended_at: str | None,
-    ) -> None: ...
+    ) -> None:
+        """Set ``status`` (and optional ``ended_at`` ISO timestamp) on a graph run."""
+        ...
 
     def mark_graph_run_resuming(self, graph_run_id: UUID) -> None:
         """Set ``status`` to ``running`` and clear ``ended_at`` (operator resume / Pass K)."""
 
-    def save_checkpoint(self, record: CheckpointRecord) -> None: ...
-    def save_role_invocation(self, record: RoleInvocationRecord) -> None: ...
-    def save_build_spec(self, record: BuildSpecRecord) -> None: ...
+    def save_checkpoint(self, record: CheckpointRecord) -> None:
+        """Persist a checkpoint (pre_role / post_step / interrupt)."""
+        ...
 
-    def get_build_spec(self, build_spec_id: UUID) -> BuildSpecRecord | None: ...
-    def save_build_candidate(self, record: BuildCandidateRecord) -> None: ...
-    def get_build_candidate(self, build_candidate_id: UUID) -> BuildCandidateRecord | None: ...
-    def save_evaluation_report(self, record: EvaluationReportRecord) -> None: ...
+    def save_role_invocation(self, record: RoleInvocationRecord) -> None:
+        """Persist a role invocation record (planner / generator / evaluator)."""
+        ...
+
+    def save_build_spec(self, record: BuildSpecRecord) -> None:
+        """Persist a build spec (planner output, keyed by ``build_spec_id``)."""
+        ...
+
+    def get_build_spec(self, build_spec_id: UUID) -> BuildSpecRecord | None:
+        """Return the build spec or ``None``."""
+        ...
+
+    def save_build_candidate(self, record: BuildCandidateRecord) -> None:
+        """Persist a build candidate (generator output, keyed by ``build_candidate_id``)."""
+        ...
+
+    def get_build_candidate(self, build_candidate_id: UUID) -> BuildCandidateRecord | None:
+        """Return the build candidate or ``None``."""
+        ...
+
+    def save_evaluation_report(self, record: EvaluationReportRecord) -> None:
+        """Persist an evaluation report (evaluator output, keyed by ``evaluation_report_id``)."""
+        ...
+
     def get_evaluation_report(
         self, evaluation_report_id: UUID
-    ) -> EvaluationReportRecord | None: ...
+    ) -> EvaluationReportRecord | None:
+        """Return the evaluation report or ``None``."""
+        ...
 
     def get_latest_build_spec_for_graph_run(
         self, graph_run_id: UUID
-    ) -> BuildSpecRecord | None: ...
+    ) -> BuildSpecRecord | None:
+        """Most recent build spec for this graph run (by ``created_at``)."""
+        ...
 
     def get_latest_build_candidate_for_graph_run(
         self, graph_run_id: UUID
-    ) -> BuildCandidateRecord | None: ...
+    ) -> BuildCandidateRecord | None:
+        """Most recent build candidate for this graph run (by ``created_at``)."""
+        ...
 
     def get_latest_evaluation_report_for_graph_run(
         self, graph_run_id: UUID
-    ) -> EvaluationReportRecord | None: ...
+    ) -> EvaluationReportRecord | None:
+        """Most recent evaluation report for this graph run (by ``created_at``)."""
+        ...
 
     def list_evaluation_reports_for_graph_run(
         self, graph_run_id: UUID, *, limit: int = 50
@@ -124,13 +163,19 @@ class Repository(Protocol):
     def attach_run_snapshot(self, graph_run_id: UUID, payload: dict[str, Any]) -> None:
         """Deprecated for DB path — post-run checkpoint holds state; kept for API compat."""
 
-    def get_run_snapshot(self, graph_run_id: UUID) -> dict[str, Any] | None: ...
+    def get_run_snapshot(self, graph_run_id: UUID) -> dict[str, Any] | None:
+        """Return the run snapshot attached via ``attach_run_snapshot``, or ``None``."""
+        ...
 
-    def save_graph_run_event(self, record: GraphRunEventRecord) -> None: ...
+    def save_graph_run_event(self, record: GraphRunEventRecord) -> None:
+        """Append a timeline event for a graph run (append-only)."""
+        ...
 
     def list_graph_run_events(
         self, graph_run_id: UUID, *, limit: int = 200
-    ) -> list[GraphRunEventRecord]: ...
+    ) -> list[GraphRunEventRecord]:
+        """Oldest ``created_at`` first (timeline order)."""
+        ...
 
     def list_role_invocations_for_graph_run(
         self, graph_run_id: UUID

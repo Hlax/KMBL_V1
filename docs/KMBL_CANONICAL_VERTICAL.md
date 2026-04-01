@@ -1,5 +1,7 @@
 # KMBL Canonical Vertical — Identity URL → Static Frontend
 
+**Operational surfaces (working staging vs review snapshots vs publication):** [`CURRENT_PRODUCT_MODEL.md`](CURRENT_PRODUCT_MODEL.md).
+
 This document defines the single canonical end-to-end proof path for KMBL V1.
 Everything else is additive or archival until this vertical is reliable.
 
@@ -33,9 +35,9 @@ Evaluator performs lightweight gate check
   ↓  (blocked → interrupt)
 Build candidate persisted with normalized artifacts
   ↓
-Staging snapshot created for review
+Staging node applies to working_staging; optional staging_snapshot per KMBL_STAGING_SNAPSHOT_POLICY (or materialize from live)
   ↓
-Static preview available at /orchestrator/staging/{id}/static-preview
+When a staging_snapshot row exists: static preview at /orchestrator/staging/{id}/static-preview
 ```
 
 ## How to Run Locally

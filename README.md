@@ -1,19 +1,19 @@
 # KMBL_V1
 
-KMBL is the orchestrator and control plane. External role execution (Planner, Generator, Evaluator) is hosted in KiloClaw; this repository implements the execution spine (Python + LangGraph + FastAPI), shared contracts, a Supabase-oriented storage stub, and a minimal Next.js control-plane shell.
+KMBL is the orchestrator and control plane. External role execution (Planner, Generator, Evaluator) is hosted in KiloClaw; this repository implements the execution spine (Python + LangGraph + FastAPI), shared contracts, Supabase-backed persistence (when configured), and a Next.js operator UI.
 
-Canon architecture and naming live under [`docs/`](docs/).
+Canon architecture and naming live under [`docs/`](docs/). **Current product behavior (graph runs, working staging, review snapshots, publication):** [`docs/CURRENT_PRODUCT_MODEL.md`](docs/CURRENT_PRODUCT_MODEL.md).
 
 ## Repository layout
 
 | Path | Purpose |
 |------|---------|
 | [`docs/`](docs/) | Canon specifications (source of truth) |
-| [`services/orchestrator/`](services/orchestrator/) | FastAPI service, LangGraph runtime, role invocation, normalization, placeholder persistence |
+| [`services/orchestrator/`](services/orchestrator/) | FastAPI service, LangGraph runtime, role invocation, normalization, Supabase or in-memory persistence |
 | [`packages/contracts/`](packages/contracts/) | Shared placeholder schemas (Zod) for API and persistence shapes |
 | [`packages/config/`](packages/config/) | Typed environment parsing for JS/TS consumers |
 | [`packages/storage/`](packages/storage/) | TypeScript Supabase client package for future app-side use (orchestrator uses `supabase-py` directly) |
-| [`apps/control-plane/`](apps/control-plane/) | Minimal Next.js UI (home + status placeholder) |
+| [`apps/control-plane/`](apps/control-plane/) | Next.js operator UI: Autonomous (runs), Live Habitat, graph runs list/detail, staging review queue, publication |
 
 ## Prerequisites
 
@@ -86,7 +86,7 @@ npm install
 npm run control-plane
 ```
 
-Open `http://localhost:3000` (home) and `http://localhost:3000/status` (orchestrator health check).
+Open `http://localhost:3000` — **Autonomous** (`/autonomous`) is the default home (session + run start). Primary nav: **Live staging** (habitat when a thread is stored), **Graph runs** (persisted runs), **Staging review** (immutable `staging_snapshot` queue), **Public** (publication). **`/status`** exposes orchestrator health and dev/debug panels.
 
 ### Environment files
 
@@ -108,16 +108,13 @@ Open `http://localhost:3000` (home) and `http://localhost:3000/status` (orchestr
 5. **Real KiloClaw client** — replace the stub only after persistence is trustworthy.
 6. **Role-config testing**, then **identity bootstrap** and the rest of the identity layer.
 
-## Known limitations (scaffold)
+## Known limitations
 
 - The pinned Next.js release may show `npm audit` advisories; upgrade to a patched minor when your team is ready, then re-run `npm run build` for the control-plane.
 - Python dependencies are pinned in `services/orchestrator/pyproject.toml` for reproducible installs; bump LangGraph deliberately when you adopt newer graph APIs.
-
-## What is intentionally thin
-
-- KiloClaw calls are stubbed; real HTTP/MCP wiring is TODO in `services/orchestrator`.
-- The orchestrator can persist to Supabase when env is set; `packages/storage` remains a TS stub for future app-side use.
-- No auth, no elaborate UI, no deployment manifests beyond run commands above.
+- Local dev may use **stub** KiloClaw transport when no API key is set (`KILOCLAW_TRANSPORT` / `KILOCLAW_API_KEY`); use HTTP/OpenClaw for real role execution.
+- `packages/storage` remains a TS package for future app-side Supabase use; the orchestrator uses `supabase-py` today.
+- Production hardening (auth on the orchestrator, deployment manifests) follows your environment—see [`docs/16_DEPLOYMENT_ARCHITECTURE.md`](docs/16_DEPLOYMENT_ARCHITECTURE.md).
 
 ## Next implementation steps
 

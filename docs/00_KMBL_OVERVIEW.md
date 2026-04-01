@@ -1,5 +1,7 @@
 # KMBL Overview
 
+**Normative product behavior (operators, engineers):** see [`CURRENT_PRODUCT_MODEL.md`](CURRENT_PRODUCT_MODEL.md). This page is **positioning and intent**, not a substitute for runtime semantics.
+
 ## What KMBL Is
 
 KMBL is a living, evolving digital entity.

@@ -17,9 +17,11 @@ Identity URL
   → Generator (static_frontend_file_v1 artifacts under component/)
   → Evaluator (lightweight: presence + structure checks)
   → BuildCandidateRecord (normalized artifacts)
-  → StagingSnapshot (review_ready)
-  → Static preview assembly (GET /orchestrator/staging/{id}/static-preview)
+  → Staging node: apply to working_staging (mutable); optional StagingSnapshot per policy
+  → [If review snapshot row exists] Static preview (GET /orchestrator/staging/{id}/static-preview)
 ```
+
+**Review snapshot row:** Not every stage produces a `staging_snapshot` row. Persistence follows **`KMBL_STAGING_SNAPSHOT_POLICY`** (`always` | `on_nomination` | `never`) and evaluator nomination when `on_nomination`. When skipped, **`staging_snapshot_skipped`** is recorded; **working staging** still updates. Operators can **materialize** a frozen review row from live working staging (`POST /orchestrator/working-staging/{thread_id}/review-snapshot`). See [`CURRENT_PRODUCT_MODEL.md`](CURRENT_PRODUCT_MODEL.md).
 
 ## Artifact Contract
 

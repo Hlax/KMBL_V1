@@ -1,5 +1,7 @@
 # State and Snapshots
 
+**Operational product model (current build):** [`CURRENT_PRODUCT_MODEL.md`](CURRENT_PRODUCT_MODEL.md).
+
 ## Overview
 
 KMBL distinguishes between mutable runtime state and immutable product snapshots.
@@ -29,12 +31,11 @@ Thread state supports continuity of execution.
 
 ---
 
-### Runs (Historical)
-- records of graph activity
-- summaries and outputs
-- node-level execution history
+### Graph runs (durable execution records)
+- persisted `graph_run` rows: status, timing, linkage to thread and identity
+- associated `role_invocation`, build/eval artifacts, and append-only `graph_run_event` timeline
 
-Runs are logs, not truth.
+Graph runs are the **operator-visible history** of execution. They are **not** immutable product canon (that is **publication** / approved snapshots), but they are **authoritative** as the record of what the orchestrator did—not disposable “logs only.”
 
 ---
 
@@ -75,13 +76,16 @@ Checkpoints are runtime artifacts, not public artifacts.
 
 ---
 
-### Snapshots (Immutable Product States)
-- frozen moments of KMBL
-- public states
-- milestone states
-- canonical historical releases
+### Snapshots (Immutable product states)
 
-Snapshots cannot be modified.
+Two distinct snapshot families matter in the current implementation:
+
+- **`staging_snapshot`** — frozen **review** rows (staging review queue); optional per `staging_snapshot_policy`; see [`CURRENT_PRODUCT_MODEL.md`](CURRENT_PRODUCT_MODEL.md).
+- **`publication_snapshot`** — operator-approved **public / canon** releases.
+
+Older prose below refers to “product snapshots” in the abstract; map mentally to **staging** vs **publication** rows in the database.
+
+Snapshots cannot be modified after write.
 
 ---
 

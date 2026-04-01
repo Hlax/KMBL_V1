@@ -27,7 +27,7 @@ export function ControlPlaneNav() {
   }, [open]);
 
   const homeActive = pathname === "/autonomous" || pathname === "/";
-  const reviewActive = pathname.startsWith("/runs");
+  const graphRunsActive = pathname.startsWith("/runs");
   const stagingReviewActive = pathname.startsWith("/review");
   const publicActive = pathname.startsWith("/publication");
 
@@ -42,8 +42,8 @@ export function ControlPlaneNav() {
             Home
           </Link>
           <LiveStagingNavLink />
-          <Link href="/runs" className={navClass(reviewActive)}>
-            Review
+          <Link href="/runs" className={navClass(graphRunsActive)}>
+            Graph runs
           </Link>
           <Link href="/review" className={navClass(stagingReviewActive)}>
             Staging review

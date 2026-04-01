@@ -31,6 +31,17 @@ def test_graph_run_attention_completed_no_staging() -> None:
     assert "staging" in reason.lower()
 
 
+def test_graph_run_attention_completed_snapshot_skipped_by_policy() -> None:
+    st, reason = derive_graph_run_attention(
+        status="completed",
+        has_interrupt_signal=False,
+        latest_staging_snapshot_id=None,
+        snapshot_skipped_intentionally=True,
+    )
+    assert st == "completed_snapshot_skipped_by_policy"
+    assert "policy" in reason.lower()
+
+
 def test_review_action_published_wins_over_status() -> None:
     rec = StagingSnapshotRecord(
         staging_snapshot_id=uuid4(),

@@ -25,7 +25,11 @@ from kmbl_orchestrator.domain import (
     GraphRunRecord,
     ThreadRecord,
 )
-from kmbl_orchestrator.errors import RoleInvocationFailed, StagingIntegrityFailed
+from kmbl_orchestrator.errors import (
+    RoleInvocationFailed,
+    RunInterrupted,
+    StagingIntegrityFailed,
+)
 from kmbl_orchestrator.graph.helpers import (
     _apply_html_blocks_to_candidate as _apply_html_blocks_to_candidate_impl,
     _extract_html_file_map_from_working_staging,  # noqa: F401  re-export for tests
@@ -45,6 +49,7 @@ from kmbl_orchestrator.graph.nodes import (
 from kmbl_orchestrator.graph.state import GraphState
 from kmbl_orchestrator.persistence.repository import Repository
 from kmbl_orchestrator.roles.invoke import DefaultRoleInvoker
+from kmbl_orchestrator.runtime.interrupt_checks import raise_if_interrupt_requested
 from kmbl_orchestrator.runtime.run_events import RunEventType, append_graph_run_event
 
 _log = logging.getLogger(__name__)
@@ -101,6 +106,8 @@ def build_compiled_graph(ctx: GraphContext):
 
     def checkpoint_pre(state: GraphState) -> dict[str, Any]:
         gid = UUID(state["graph_run_id"])
+        tid = UUID(state["thread_id"])
+        raise_if_interrupt_requested(ctx.repo, gid, tid)
         cp = CheckpointRecord(
             checkpoint_id=uuid4(),
             thread_id=UUID(state["thread_id"]),
@@ -215,8 +222,39 @@ def _run_graph_inner(
     t_run: float,
 ) -> GraphState:
     """Inner body of ``run_graph`` — runs inside the optional thread lock."""
+    if gid0:
+        gid_u = UUID(str(gid0))
+        gr0 = repo.get_graph_run(gid_u)
+        if gr0 is not None and gr0.status == "starting":
+            repo.update_graph_run_status(
+                gid_u, "running", None, clear_interrupt_requested=False
+            )
     try:
         final = app.invoke(base)
+    except RunInterrupted as e:
+        ended = datetime.now(timezone.utc).isoformat()
+        tid_u = e.thread_id
+        append_graph_run_event(
+            repo,
+            e.graph_run_id,
+            RunEventType.INTERRUPT_ACKNOWLEDGED,
+            {},
+            thread_id=tid_u,
+        )
+        append_graph_run_event(
+            repo,
+            e.graph_run_id,
+            RunEventType.GRAPH_RUN_INTERRUPTED,
+            {},
+            thread_id=tid_u,
+        )
+        repo.update_graph_run_status(e.graph_run_id, "interrupted", ended)
+        return {
+            **base,
+            "graph_run_id": str(e.graph_run_id),
+            "thread_id": str(tid_u),
+            "status": "interrupted",
+        }
     except RoleInvocationFailed as e:
         if gid0:
             gid_u = UUID(str(gid0))
@@ -435,7 +473,7 @@ def persist_graph_run_start(
             ],
             trigger_type,
         ),
-        status="running",
+        status="starting",
     )
     repo.save_graph_run(gr)
     append_graph_run_event(repo, UUID(gid), RunEventType.GRAPH_RUN_STARTED, {}, thread_id=tid_u)

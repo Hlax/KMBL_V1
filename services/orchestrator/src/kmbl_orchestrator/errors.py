@@ -47,3 +47,12 @@ class StagingIntegrityFailed(Exception):
         self.message = message
         self.detail = dict(detail) if detail else {}
         super().__init__(message)
+
+
+class RunInterrupted(Exception):
+    """Cooperative cancel: operator requested interrupt; graph exits at the next boundary."""
+
+    def __init__(self, *, graph_run_id: UUID, thread_id: UUID) -> None:
+        self.graph_run_id = graph_run_id
+        self.thread_id = thread_id
+        super().__init__("run interrupt requested")

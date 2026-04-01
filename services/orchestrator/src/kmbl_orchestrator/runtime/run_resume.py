@@ -27,10 +27,16 @@ def compute_resume_eligibility(
     if gr.status == "completed":
         return False, "Run already completed — nothing to resume."
 
-    if gr.status == "running":
+    if gr.status in ("starting", "running", "interrupt_requested"):
         return (
             False,
-            "Run is still marked running; wait for completion or stale reconciliation.",
+            "Run is still active — wait for completion, or request interrupt and wait for interrupted.",
+        )
+
+    if gr.status == "interrupted":
+        return (
+            False,
+            "Run was cooperatively interrupted — generic resume for this path is not implemented.",
         )
 
     if gr.status == "paused":

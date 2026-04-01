@@ -112,11 +112,11 @@ class SessionStagingLinks(BaseModel):
 class StartRunResponse(BaseModel):
     graph_run_id: str
     thread_id: str
-    status: Literal["running"] = Field(
-        default="running",
+    status: Literal["starting", "running"] = Field(
+        default="starting",
         description=(
-            "Run is accepted and executing asynchronously. Poll GET /orchestrator/runs/{id} "
-            "for completed / failed and error details."
+            "Persisted lifecycle: starting when enqueued, then running once the graph begins. "
+            "Poll GET /orchestrator/runs/{id} for interrupt_requested / completed / failed / interrupted."
         ),
     )
     failure_phase: Literal["planner", "generator", "evaluator"] | None = Field(
@@ -151,6 +151,13 @@ class StartRunResponse(BaseModel):
         default=None,
         description="Stable links to live working staging (also in event_input.kmbl_session_staging).",
     )
+
+
+class InterruptRunResponse(BaseModel):
+    graph_run_id: str
+    thread_id: str
+    status: str
+    interrupt_requested_at: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -275,6 +282,7 @@ class GraphRunSummaryBlock(BaseModel):
     )
     trigger_type: str
     status: str
+    interrupt_requested_at: str | None = None
     started_at: str
     ended_at: str | None = None
     max_iteration_index: int | None = None

@@ -29,6 +29,7 @@ from kmbl_orchestrator.runtime.kilo_model_routing import (
     select_generator_provider_config,
 )
 from kmbl_orchestrator.runtime.iteration_plan import build_iteration_plan_for_generator
+from kmbl_orchestrator.runtime.interrupt_checks import raise_if_interrupt_requested
 from kmbl_orchestrator.runtime.run_events import RunEventType, append_graph_run_event
 from kmbl_orchestrator.staging.facts import (
     build_working_staging_facts,
@@ -46,6 +47,7 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     """Invoke the generator role and persist the resulting build candidate."""
     gid = UUID(state["graph_run_id"])
     tid = UUID(state["thread_id"])
+    raise_if_interrupt_requested(ctx.repo, gid, tid)
     bsid = state.get("build_spec_id")
     if not bsid:
         raise RuntimeError("build_spec_id required before generator")

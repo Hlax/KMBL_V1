@@ -139,7 +139,7 @@ export default async function PublicationIndexPage({
 
   return (
     <>
-      <h1 className="pub-page-title">Publication</h1>
+      <h1 className="pub-page-title">Public releases</h1>
 
       {listUnimplemented || currentUnimplemented ? (
         <p className="op-banner op-banner--warn" role="status">
@@ -205,7 +205,7 @@ export default async function PublicationIndexPage({
         <p className="muted small">
           <Link href="/publication">Clear filters</Link>
           {" · "}
-          <Link href="/runs">Runs</Link> · <Link href="/review">Review</Link>
+          <Link href="/runs">Review (runs)</Link> · <Link href="/review">Staging review</Link>
         </p>
       </form>
 
@@ -306,14 +306,19 @@ export default async function PublicationIndexPage({
         {listErr ? (
           <p className="muted">List unavailable.</p>
         ) : pubs.length === 0 ? (
-          <div className="pub-empty">
+          <div className="pub-empty pub-empty--releases">
             <p className="pub-empty__title">
-              {hasFilters ? "No publications match these filters" : "No publications yet"}
+              {hasFilters ? "No releases match these filters" : "No public releases yet"}
             </p>
             <p className="pub-empty__body">
               {hasFilters
                 ? "Try clearing filters or widening visibility / limit."
-                : "When you publish from an approved staging snapshot, canon snapshots will appear here."}
+                : "Approved staging snapshots can be promoted to canon from Staging review. This page will list immutable publication snapshots as you ship — a calm, forward-looking release history."}
+            </p>
+            <p className="pub-empty__body muted small" style={{ marginTop: "0.75rem" }}>
+              <Link href="/review">Open Staging review</Link>
+              {" · "}
+              <Link href="/runs">Review graph runs</Link>
             </p>
           </div>
         ) : (
@@ -372,9 +377,9 @@ export default async function PublicationIndexPage({
       </div>
 
       <p className="muted small cp-crumb-line" style={{ marginBottom: 0 }}>
-        <Link href="/review">← Review (staging)</Link>
+        <Link href="/review">← Staging review</Link>
         {" · "}
-        <Link href="/runs">Runs</Link>
+        <Link href="/runs">Review (runs)</Link>
       </p>
     </>
   );

@@ -24,6 +24,14 @@ type RunResult = {
   error?: string;
 };
 
+/** Matches orchestrator persisted lifecycle — keep polling until terminal. */
+const GRAPH_RUN_TERMINAL_STATUSES = new Set([
+  "completed",
+  "failed",
+  "interrupted",
+  "paused",
+]);
+
 function pickSessionStaging(raw: Record<string, unknown> | null | undefined): SessionStagingLinks | null {
   if (!raw || typeof raw !== "object") return null;
   const ss = raw.session_staging;
@@ -59,6 +67,7 @@ export default function AutonomousPage() {
   const [running, setRunning] = useState(false);
   const [runCount, setRunCount] = useState(0);
   const [currentRun, setCurrentRun] = useState<string | null>(null);
+  const currentRunRef = useRef<string | null>(null);
   const [runs, setRuns] = useState<RunResult[]>([]);
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState<string[]>([]);
@@ -68,10 +77,50 @@ export default function AutonomousPage() {
   const runsEndRef = useRef<HTMLDivElement>(null);
   /** Latest session staging links from start or run-detail poll (updates during a run). */
   const [sessionStaging, setSessionStaging] = useState<SessionStagingLinks | null>(null);
+  /**
+   * Active graph_run on the server for this thread (from GET /api/runs), so refresh
+   * does not look "idle" while the orchestrator is still working.
+   */
+  const [serverActiveRun, setServerActiveRun] = useState<{
+    graph_run_id: string;
+    status: string;
+  } | null>(null);
 
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
+
+  useEffect(() => {
+    if (!threadId) {
+      setServerActiveRun(null);
+      return;
+    }
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const r = await fetch(`/api/runs?limit=50`, { cache: "no-store" });
+        if (!r.ok || cancelled) return;
+        const j = (await r.json()) as {
+          runs?: Array<{ thread_id: string; graph_run_id: string; status: string }>;
+        };
+        const hit = j.runs?.find(
+          (x) => x.thread_id === threadId && !GRAPH_RUN_TERMINAL_STATUSES.has(x.status),
+        );
+        if (cancelled) return;
+        setServerActiveRun(
+          hit ? { graph_run_id: hit.graph_run_id, status: hit.status } : null,
+        );
+      } catch {
+        /* ignore */
+      }
+    };
+    void poll();
+    const id = setInterval(() => void poll(), 8000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [threadId]);
 
   useEffect(() => {
     const stored = localStorage.getItem(LS_URL);
@@ -184,13 +233,14 @@ export default function AutonomousPage() {
       const graphRunId = typeof data.graph_run_id === "string" ? data.graph_run_id : null;
       if (graphRunId) {
         setCurrentRun(graphRunId);
+        currentRunRef.current = graphRunId;
       }
 
       let status = "running";
       let stagingId: string | null = null;
 
       if (graphRunId) {
-        for (let i = 0; i < 120 && status === "running"; i++) {
+        for (let i = 0; i < 120; i++) {
           await new Promise((r) => setTimeout(r, 2000));
           if (stopRef.current) break;
 
@@ -208,7 +258,9 @@ export default function AutonomousPage() {
             const ao = pollData.associated_outputs as { staging_snapshot_id?: string } | undefined;
             stagingId = ao?.staging_snapshot_id ?? (pollData.staging_snapshot_id as string | undefined) ?? null;
 
-            if (status === "completed" || status === "failed") break;
+            if (GRAPH_RUN_TERMINAL_STATUSES.has(status)) {
+              break;
+            }
           } catch {
             // Keep polling
           }
@@ -249,6 +301,7 @@ export default function AutonomousPage() {
       setRuns((prev) => [...prev.slice(-49), result]);
       setRunCount((c) => c + 1);
       setCurrentRun(null);
+      currentRunRef.current = null;
 
       if (stopRef.current) break;
 
@@ -260,7 +313,14 @@ export default function AutonomousPage() {
 
   const stopLoop = () => {
     stopRef.current = true;
-    setRunning(false);
+    const gid =
+      currentRunRef.current ?? serverActiveRun?.graph_run_id ?? null;
+    if (gid) {
+      void fetch(`/api/runs/${encodeURIComponent(gid)}/interrupt`, {
+        method: "POST",
+      }).catch(() => {});
+    }
+    /* Keep running=true until startLoop's while exits so the badge matches in-flight work. */
   };
 
   const sendMessage = () => {
@@ -273,6 +333,7 @@ export default function AutonomousPage() {
 
   const tid = threadId;
   const previewGraphRunId = sessionStaging?.graph_run_id ?? currentRun;
+  const uiShowsActive = running || serverActiveRun !== null;
 
   return (
     <div className="autonomous-page" style={{ maxWidth: 920, margin: "0 auto", padding: "1.25rem 1.5rem 2rem" }}>
@@ -293,6 +354,22 @@ export default function AutonomousPage() {
         </div>
       )}
 
+      {serverActiveRun && !running ? (
+        <div
+          className="op-banner op-banner--neutral"
+          role="status"
+          style={{ marginBottom: "1rem", borderColor: "#2a6a8f" }}
+        >
+          <strong>Server run still active</strong> — status{" "}
+          <span className="mono">{serverActiveRun.status}</span> for{" "}
+          <Link href={`/runs/${encodeURIComponent(serverActiveRun.graph_run_id)}`} className="mono">
+            {shortId(serverActiveRun.graph_run_id)}
+          </Link>
+          . The loop on this page was reset (e.g. refresh), but the orchestrator may still be executing.
+          Use <strong>Stop</strong> to request a cooperative interrupt, or open run detail for the timeline.
+        </div>
+      ) : null}
+
       {/* Live session — primary navigation for ongoing work */}
       {tid ? (
         <div className="op-banner op-banner--staging" style={{ marginBottom: "1.25rem" }}>
@@ -304,7 +381,11 @@ export default function AutonomousPage() {
               <Link href={liveHabitatHref(tid)} style={{ fontWeight: 600 }}>
                 Open live habitat
               </Link>
-              <span className="muted small"> — iframe of <strong>current working staging</strong>; refreshes as generator iterations land.</span>
+              <span className="muted small">
+                {" "}
+                — iframe of <strong>current working staging</strong>; the live habitat page reloads the
+                preview on a fixed interval and on manual refresh (not event-by-event from the graph).
+              </span>
             </li>
             {previewGraphRunId ? (
               <li>
@@ -414,10 +495,10 @@ export default function AutonomousPage() {
         <button
           type="button"
           onClick={stopLoop}
-          disabled={!running}
+          disabled={!running && !serverActiveRun}
           className="op-btn op-btn--primary"
           style={{
-            background: running ? "#c0392b" : "#4a2c2c",
+            background: running || serverActiveRun ? "#c0392b" : "#4a2c2c",
             color: "#fff",
             fontWeight: 600,
             padding: "0.65rem 1.25rem",
@@ -425,11 +506,15 @@ export default function AutonomousPage() {
         >
           Stop
         </button>
-        <span className={`op-badge ${running ? "op-badge--gallery" : "op-badge--neutral"}`}>
-          {running ? "active" : "idle"}
+        <span className={`op-badge ${uiShowsActive ? "op-badge--gallery" : "op-badge--neutral"}`}>
+          {uiShowsActive ? "active (local or server)" : "idle"}
         </span>
         <span className="muted small" style={{ marginLeft: "auto" }}>Iterations: {runCount}</span>
       </div>
+      <p className="muted small" style={{ margin: "-0.5rem 0 1rem" }}>
+        Stop ends this page&apos;s loop and requests a <strong>cooperative server interrupt</strong> for the
+        in-flight graph run when one is known (not an instant kill).
+      </p>
 
       {/* Instructions */}
       <div className="op-card" style={{ marginBottom: "1rem" }}>

@@ -68,6 +68,7 @@ def test_build_staging_snapshot_payload_sets_prior_and_reuse_note() -> None:
     meta = p.get("metadata") or {}
     assert isinstance(meta.get("content_reuse_note"), str)
     assert "generated images" in (meta.get("content_reuse_note") or "")
+    assert meta.get("preview_kind") == "static"
 
 
 def test_staging_lineage_includes_prior_from_row() -> None:

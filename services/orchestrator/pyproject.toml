@@ -23,7 +23,17 @@ dependencies = [
 dev = [
   "pytest==8.3.4",
   "ruff==0.8.4",
+  "pyright>=1.1.350",
 ]
+
+# Opt-in static analysis: run ``python -m pyright`` from services/orchestrator after ``pip install -e '.[dev]'``.
+# Tighten ``typeCheckingMode`` to "basic" / "standard" as annotations improve (GraphState TypedDict, etc.).
+[tool.pyright]
+include = ["src/kmbl_orchestrator"]
+pythonVersion = "3.10"
+typeCheckingMode = "off"
+reportMissingImports = true
+reportMissingTypeStubs = false
 
 [tool.setuptools.packages.find]
 where = ["src"]

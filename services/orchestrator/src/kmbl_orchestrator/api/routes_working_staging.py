@@ -18,6 +18,9 @@ from kmbl_orchestrator.staging.static_preview_assembly import (
     resolve_static_preview_entry_path,
 )
 from kmbl_orchestrator.staging.static_preview_assembly_live import live_habitat_preview_surface
+from kmbl_orchestrator.staging.materialize_review_snapshot import (
+    materialize_review_snapshot_from_live,
+)
 from kmbl_orchestrator.staging.working_staging_ops import (
     approve_working_staging,
     fresh_rebuild as ws_fresh_rebuild,
@@ -73,6 +76,14 @@ class ApproveWorkingStagingBody(BaseModel):
     approved_by: str | None = Field(
         default=None, description="Operator identifier."
     )
+
+
+class MaterializeReviewSnapshotResponse(BaseModel):
+    """Response after persisting a review snapshot from live working staging."""
+
+    staging_snapshot_id: str
+    thread_id: str
+    status: str = "review_ready"
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
@@ -263,6 +274,55 @@ def rollback_working_staging(
 
 
 @router.post(
+    "/orchestrator/working-staging/{thread_id}/review-snapshot",
+    response_model=MaterializeReviewSnapshotResponse,
+)
+def materialize_review_snapshot_endpoint(
+    thread_id: str,
+    repo: Repository = Depends(get_repo),
+) -> MaterializeReviewSnapshotResponse:
+    """Persist a frozen staging_snapshot row from current live working staging + last eval/bc.
+
+    Each successful call creates a new immutable row. Repeated calls are allowed (e.g. after
+    further graph activity); approve/publish flows that resolve "latest" use newest created_at.
+    """
+    try:
+        tid = UUID(thread_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="invalid thread_id") from e
+    try:
+        snap = materialize_review_snapshot_from_live(repo, tid)
+    except ValueError as e:
+        code = str(e)
+        if code == "no_working_staging":
+            raise HTTPException(status_code=404, detail="no working staging for this thread") from e
+        if code == "empty_working_staging":
+            raise HTTPException(
+                status_code=409,
+                detail={"error_kind": "empty_staging", "message": "cannot materialize empty working staging"},
+            ) from e
+        if code in ("missing_provenance", "build_candidate_not_found", "evaluation_report_not_found"):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error_kind": "materialize_incomplete",
+                    "message": "last graph run is missing build_candidate or evaluation_report rows",
+                    "reason": code,
+                },
+            ) from e
+        if code == "thread_not_found":
+            raise HTTPException(status_code=404, detail="thread not found") from e
+        raise HTTPException(status_code=400, detail={"error_kind": "materialize_failed", "message": code}) from e
+
+    repo.save_staging_snapshot(snap)
+    return MaterializeReviewSnapshotResponse(
+        staging_snapshot_id=str(snap.staging_snapshot_id),
+        thread_id=str(tid),
+        status=snap.status,
+    )
+
+
+@router.post(
     "/orchestrator/working-staging/{thread_id}/approve",
     response_model=WorkingStagingResponse,
 )
@@ -290,7 +350,22 @@ def approve_working_staging_endpoint(
             detail={"error_kind": "empty_staging", "message": "cannot approve empty working staging"},
         )
 
-    ws, pub, cp = approve_working_staging(ws, approved_by=body.approved_by or "operator")
+    latest_snaps = repo.list_staging_snapshots_for_thread(tid, limit=1)
+    if not latest_snaps:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_kind": "no_review_snapshot",
+                "message": "no staging_snapshot row for this thread — POST /orchestrator/working-staging/{thread_id}/review-snapshot first",
+            },
+        )
+    source_sid = latest_snaps[0].staging_snapshot_id
+
+    ws, pub, cp = approve_working_staging(
+        ws,
+        approved_by=body.approved_by or "operator",
+        source_staging_snapshot_id=source_sid,
+    )
     repo.save_staging_checkpoint(cp)
     repo.save_publication_snapshot(pub)
     repo.save_working_staging(ws)

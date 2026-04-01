@@ -8,6 +8,7 @@ import { scenarioBadgeLabel } from "@/lib/gallery-strip-visibility";
 import { buildGeneratorRoutingView } from "@/lib/operator-routing-hints";
 import { graphRunAttentionBannerClass } from "@/lib/operator-attention";
 import { serverOriginFromHeaders } from "@/lib/server-origin";
+import { MaterializeReviewSnapshotButton } from "@/app/components/MaterializeReviewSnapshotButton";
 import { RunResumeActions } from "./RunResumeActions";
 
 export const dynamic = "force-dynamic";
@@ -114,15 +115,24 @@ export default async function GraphRunDetailPage({
 
   const s = data.summary;
   const out = data.associated_outputs ?? {};
+  const sid = out.staging_snapshot_id;
   const timeline = data.timeline ?? [];
   const invocations = data.role_invocations ?? [];
   const operatorActions = data.operator_actions ?? [];
   const scen = scenarioBadgeLabel(data.scenario_badge);
   const routingView = buildGeneratorRoutingView(data.scenario_tag, invocations);
 
+  const hasStagingSkippedTimeline = timeline.some(
+    (t) =>
+      t.kind === "staging_skipped" || t.event_type === "staging_snapshot_skipped",
+  );
+  const policyAwareNoSnapshot =
+    !sid &&
+    (s.attention_state === "completed_snapshot_skipped_by_policy" ||
+      hasStagingSkippedTimeline);
+
   let stagingDetail: StagingDetail | null = null;
   let stagingFetchErr: string | null = null;
-  const sid = out.staging_snapshot_id;
   if (sid) {
     const stUrl = `${origin}/api/staging/${encodeURIComponent(sid)}`;
     const stRes = await fetch(stUrl, { cache: "no-store" });
@@ -203,6 +213,12 @@ export default async function GraphRunDetailPage({
               </code>
             </span>
           </p>
+          <p className="small" style={{ marginTop: "0.65rem", marginBottom: 0 }}>
+            <MaterializeReviewSnapshotButton threadId={s.thread_id} />
+            <span className="muted small" style={{ marginLeft: "0.35rem" }}>
+              Freeze current live working staging into an immutable review row (when policy skipped auto-snapshots).
+            </span>
+          </p>
         </div>
       ) : null}
 
@@ -273,10 +289,31 @@ export default async function GraphRunDetailPage({
           error={stagingFetchErr}
           publicationSnapshotId={out.publication_snapshot_id ?? null}
         />
+      ) : policyAwareNoSnapshot ? (
+        <div className="op-banner op-banner--neutral" style={{ marginBottom: "0.85rem" }}>
+          <p style={{ margin: "0 0 0.5rem" }}>
+            <strong>No frozen review snapshot for this graph run id.</strong> The orchestrator recorded{" "}
+            <code className="mono small">staging_snapshot_skipped</code> (automatic review rows follow{" "}
+            <code className="mono small">staging_snapshot_policy</code>
+            ). <strong>Live working staging</strong> may still contain the latest build — open{" "}
+            <Link href={`/habitat/live/${encodeURIComponent(s.thread_id)}`}>live habitat</Link> to verify.
+          </p>
+          <p style={{ margin: 0 }} className="small">
+            <MaterializeReviewSnapshotButton threadId={s.thread_id} />{" "}
+            <span className="muted small">to create a review snapshot from the current live state.</span>
+          </p>
+        </div>
       ) : (
-        <p className="muted small" style={{ marginBottom: "0.85rem" }}>
-          No staging snapshot linked yet — continue when the graph produces one.
-        </p>
+        <div className="op-banner op-banner--warn" style={{ marginBottom: "0.85rem" }}>
+          <p style={{ margin: "0 0 0.5rem" }}>
+            <strong>No staging snapshot linked to this run id.</strong> If the run should have produced one
+            (policy <code className="mono small">always</code>), check the event timeline for{" "}
+            <code className="mono small">staging_snapshot_blocked</code> or errors. Otherwise use{" "}
+            <Link href={`/habitat/live/${encodeURIComponent(s.thread_id)}`}>live habitat</Link> and{" "}
+            <MaterializeReviewSnapshotButton threadId={s.thread_id} label="materialize" /> if the live build is
+            what you want to review.
+          </p>
+        </div>
       )}
 
       <div className="op-card op-card--compact" style={{ marginBottom: "1rem" }}>
@@ -330,6 +367,8 @@ export default async function GraphRunDetailPage({
         resumeEligible={data.resume_eligible === true}
         resumeExplanation={data.resume_operator_explanation ?? null}
         retryDeferredNote={data.retry_deferred_note ?? null}
+        runStatus={s.status}
+        interruptRequestedAt={s.interrupt_requested_at}
       />
 
       <div className="op-card">

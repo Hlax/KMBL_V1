@@ -3,11 +3,15 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { RunInterruptActions } from "./RunInterruptActions";
+
 type Props = {
   graphRunId: string;
   resumeEligible: boolean;
   resumeExplanation: string | null;
   retryDeferredNote: string | null;
+  runStatus: string;
+  interruptRequestedAt?: string | null;
 };
 
 export function RunResumeActions({
@@ -15,6 +19,8 @@ export function RunResumeActions({
   resumeEligible,
   resumeExplanation,
   retryDeferredNote,
+  runStatus,
+  interruptRequestedAt,
 }: Props) {
   const router = useRouter();
   const [msg, setMsg] = useState<string | null>(null);
@@ -89,6 +95,11 @@ export function RunResumeActions({
           <p className="muted small">{retryDeferredNote}</p>
         ) : null}
       </div>
+      <RunInterruptActions
+        graphRunId={graphRunId}
+        status={runStatus}
+        interruptRequestedAt={interruptRequestedAt}
+      />
       {msg ? <p className="op-ok">{msg}</p> : null}
       {err ? (
         <p className="op-err" role="alert">

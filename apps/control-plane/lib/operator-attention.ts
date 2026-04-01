@@ -3,7 +3,7 @@
  */
 
 export function graphRunAttentionIsHealthy(state: string | undefined): boolean {
-  return state === "healthy";
+  return state === "healthy" || state === "completed_snapshot_skipped_by_policy";
 }
 
 export function graphRunAttentionBannerClass(state: string | undefined): string {

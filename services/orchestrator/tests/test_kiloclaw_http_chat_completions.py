@@ -8,11 +8,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from kmbl_orchestrator.config import Settings
-from kmbl_orchestrator.providers.kiloclaw import (
-    KiloClawHttpClient,
-    KiloClawInvocationError,
-    _parse_chat_completion_json_content,
-)
+from kmbl_orchestrator.providers.kiloclaw import KiloClawHttpClient, KiloClawInvocationError
+from kmbl_orchestrator.providers.kiloclaw_parsing import _parse_chat_completion_json_content
 
 
 def _settings() -> Settings:

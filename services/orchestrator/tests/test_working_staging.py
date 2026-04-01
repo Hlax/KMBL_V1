@@ -460,9 +460,13 @@ class TestApproval:
             status="review_ready",
             payload={"version": 1, "artifacts": {"artifact_refs": [_html_artifact()]}},
         )
-        ws_updated, pub, cp = approve_working_staging(ws, approved_by="tester")
+        src = uuid4()
+        ws_updated, pub, cp = approve_working_staging(
+            ws, approved_by="tester", source_staging_snapshot_id=src
+        )
 
         assert ws_updated.status == "frozen"
+        assert pub.source_staging_snapshot_id == src
         assert pub.source_working_staging_id == ws.working_staging_id
         assert pub.source_staging_checkpoint_id == cp.staging_checkpoint_id
         assert pub.payload_json["version"] == 1
@@ -470,7 +474,7 @@ class TestApproval:
 
     def test_approve_creates_pre_approval_checkpoint(self):
         ws = _make_working_staging(revision=2, status="review_ready", payload={"version": 1})
-        _, _, cp = approve_working_staging(ws)
+        _, _, cp = approve_working_staging(ws, source_staging_snapshot_id=uuid4())
         assert cp.trigger == "pre_approval"
         assert cp.revision_at_checkpoint == 2
 

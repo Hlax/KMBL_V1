@@ -156,6 +156,50 @@ def test_graph_run_detail_generator_routing_hints_persisted(clear_singleton: Non
         app.dependency_overrides.clear()
 
 
+def test_graph_run_detail_snapshot_skipped_attention_ok(clear_singleton: None) -> None:
+    """Completed run with no staging row but staging_snapshot_skipped event → neutral attention."""
+    tid = uuid4()
+    gid = uuid4()
+    iden = uuid4()
+    repo = InMemoryRepository()
+    repo.ensure_thread(
+        ThreadRecord(thread_id=tid, identity_id=iden, thread_kind="build", status="active")
+    )
+    repo.save_graph_run(
+        GraphRunRecord(
+            graph_run_id=gid,
+            thread_id=tid,
+            trigger_type="prompt",
+            status="completed",
+            started_at="2026-03-29T10:00:00+00:00",
+            ended_at="2026-03-29T10:05:00+00:00",
+        )
+    )
+    append_graph_run_event(repo, gid, RunEventType.GRAPH_RUN_STARTED, {})
+    append_graph_run_event(
+        repo,
+        gid,
+        RunEventType.STAGING_SNAPSHOT_SKIPPED,
+        {"staging_snapshot_policy": "on_nomination", "marked_for_review": False},
+    )
+    append_graph_run_event(repo, gid, RunEventType.GRAPH_RUN_COMPLETED, {})
+
+    def _ov() -> InMemoryRepository:
+        return repo
+
+    app.dependency_overrides[get_repo] = _ov
+    try:
+        client = TestClient(app)
+        r = client.get(f"/orchestrator/runs/{gid}/detail")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["summary"]["attention_state"] == "completed_snapshot_skipped_by_policy"
+        kinds = [t["kind"] for t in body["timeline"]]
+        assert "staging_skipped" in kinds
+    finally:
+        app.dependency_overrides.clear()
+
+
 def test_graph_run_detail_invalid_uuid(clear_singleton: None) -> None:
     repo = InMemoryRepository()
 

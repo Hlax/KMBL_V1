@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from kmbl_orchestrator.graph.state import GraphState
+from kmbl_orchestrator.runtime.interrupt_checks import raise_if_interrupt_requested
 from kmbl_orchestrator.identity.brief import build_identity_brief_from_repo
 from kmbl_orchestrator.identity.hydrate import build_planner_identity_context
 from kmbl_orchestrator.runtime.session_staging_links import (
@@ -21,6 +22,11 @@ _log = logging.getLogger(__name__)
 
 def context_hydrator(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     """Hydrate identity context, identity brief, and event input for the run."""
+    raise_if_interrupt_requested(
+        ctx.repo,
+        UUID(str(state["graph_run_id"])),
+        UUID(str(state["thread_id"])),
+    )
     iid_raw = state.get("identity_id")
     identity_brief_payload: dict[str, Any] | None = None
     if iid_raw:

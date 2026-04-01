@@ -44,13 +44,13 @@ def client(clear_singleton_and_settings: None) -> TestClient:
     return TestClient(app)
 
 
-def test_start_returns_running_quickly(client: TestClient) -> None:
+def test_start_returns_starting_quickly(client: TestClient) -> None:
     t0 = time.perf_counter()
     r = client.post("/orchestrator/runs/start", json={})
     elapsed = time.perf_counter() - t0
     assert r.status_code == 200
     body = r.json()
-    assert body.get("status") == "running"
+    assert body.get("status") == "starting"
     assert body.get("graph_run_id")
     assert elapsed < 5.0, "start should return without waiting for graph completion"
 
@@ -216,7 +216,7 @@ def test_graph_error_visible_from_background_interrupt(monkeypatch: pytest.Monke
         raise RuntimeError("simulated graph fault")
 
     with patch(
-        "kmbl_orchestrator.api.main.run_graph",
+        "kmbl_orchestrator.application.run_lifecycle.run_graph",
         side_effect=boom_graph,
     ):
         client = TestClient(app)

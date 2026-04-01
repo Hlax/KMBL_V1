@@ -25,6 +25,7 @@ from kmbl_orchestrator.graph.helpers import (
 )
 from kmbl_orchestrator.graph.state import GraphState
 from kmbl_orchestrator.normalize import normalize_planner_output
+from kmbl_orchestrator.runtime.interrupt_checks import raise_if_interrupt_requested
 from kmbl_orchestrator.runtime.run_events import RunEventType, append_graph_run_event
 from kmbl_orchestrator.staging.facts import (
     build_working_staging_facts,
@@ -41,6 +42,7 @@ def planner_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     """Invoke the planner role and persist the resulting build spec."""
     gid = UUID(state["graph_run_id"])
     tid = UUID(state["thread_id"])
+    raise_if_interrupt_requested(ctx.repo, gid, tid)
     cp0 = CheckpointRecord(
         checkpoint_id=uuid4(),
         thread_id=tid,

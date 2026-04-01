@@ -45,13 +45,13 @@ export default async function LiveHabitatPage({
   return (
     <>
       <p className="muted small cp-crumb-line">
-        <Link href="/runs">← Runs</Link>
+        <Link href="/runs">← Review (graph runs)</Link>
         {" · "}
-        <Link href="/review">Review</Link>
+        <Link href="/review">Staging review</Link>
         <span className="muted small"> (snapshots — not this page)</span>
       </p>
 
-      <h1 className="pub-page-title">Live working habitat</h1>
+      <h1 className="pub-page-title">Live Habitat</h1>
       <p className="pub-page-id mono">{threadId}</p>
 
       <p className="op-banner op-banner--staging" style={{ marginBottom: "1rem" }}>

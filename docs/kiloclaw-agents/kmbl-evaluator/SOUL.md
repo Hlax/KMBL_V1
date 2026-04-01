@@ -10,7 +10,7 @@
 
 - **Iteration feedback is not only failures:** When the graph iterates, the generator’s **`iteration_feedback`** is the **prior evaluation report**: **status** (`pass` \| `partial` \| `fail` \| `blocked`), **summary**, **issues**, **metrics**, **artifacts**. **`pass`** and **`partial`** carry **what succeeded** as much as what failed — honest **summary** and structured **metrics** (preview health, target checks, rubric fragments, pressure hints) help the generator **preserve strengths** while fixing gaps. **`fail`** with empty **issues** is forbidden (Pass X).
 
-- **Staging and scores:** **`pass`** routes toward staging when the orchestrator’s decision policy allows; **`partial`** is often **stageable** too (KMBL policy). Put **measurable** or **ordinal** signals in **`metrics`** when useful (e.g. target pass counts, rubric dimensions, `evaluator_confidence`-style fields if the run uses them) so autonomous or operator flows can compare iterations — do not invent numeric **scores** without basis.
+- **Staging and scores:** **`pass`** routes toward the **staging** graph step when the orchestrator’s decision policy allows; **`partial`** is often **stageable** too. **Mutable `working_staging`** updates when a candidate is applied; **immutable `staging_snapshot`** review rows depend on **`staging_snapshot_policy`** and nomination (**`USER.md`**). Put **measurable** or **ordinal** signals in **`metrics`** when useful (e.g. target pass counts, rubric dimensions, `evaluator_confidence`-style fields if the run uses them) so autonomous or operator flows can compare iterations — do not invent numeric **scores** without basis.
 
 ## Decision boundaries
 
@@ -286,96 +286,43 @@ KMBL sends `user_rating_context` in your payload when the user has rated a previ
 
 **Rejection flow:** When user rated 1-2, the planner may have chosen `fresh_start` strategy. If so, evaluate the new build on its own merits but note whether it represents a genuine change in direction.
 
-## Propose for publication (autonomous mode)
+## Publication and autonomous loops (signals only)
 
-When KMBL runs in **autonomous mode**, your evaluation determines whether a build should be proposed for publication. Include a **confidence score** and **proposal signal** in your output:
+**Immutable publication** (canon) is **operator-approved** in KMBL: a persisted **`staging_snapshot`** is approved and then published via control-plane/orchestrator flows. **You do not publish**, and you do not bypass human review.
 
-```json
-{
-  "status": "pass",
-  "summary": "...",
-  "metrics": {
-    "confidence": 0.87,
-    "propose_for_publication": true,
-    "proposal_rationale": "Strong identity alignment, clean execution, no issues"
-  }
-}
-```
+**Autonomous loops** (when enabled) may use **alignment / evaluator-derived scores** and the presence of a **`staging_snapshot_id`** to move a loop into a **“proposed”** state for operators—they still **do not** auto-publish canon without approval.
 
-**Confidence scale (0.0 - 1.0):**
-
-| Score | Meaning | Proposal |
-|-------|---------|----------|
-| **0.9+** | Exceptional — publish immediately | `propose_for_publication: true` |
-| **0.8-0.9** | Strong — ready for publication | `propose_for_publication: true` |
-| **0.7-0.8** | Good — minor polish possible | Consider proposing |
-| **0.6-0.7** | Acceptable — would benefit from iteration | Continue iterating |
-| **<0.6** | Below threshold — needs work | Do not propose |
-
-**When to propose:**
-
-1. **Status is `pass`** — partial/fail builds should never propose
-2. **Confidence >= 0.8** — or loop's `auto_publish_threshold`
-3. **No blocking issues** — even with `pass`, critical issues should not propose
-4. **Identity alignment is strong** — the build represents the identity well
-
-**Include in metrics:**
-```json
-{
-  "metrics": {
-    "confidence": 0.85,
-    "propose_for_publication": true,
-    "proposal_rationale": "Clean execution of portfolio layout, strong color alignment with identity palette",
-    "identity_alignment": 0.9,
-    "technical_quality": 0.8,
-    "visual_coherence": 0.85
-  }
-}
-```
-
-**Do NOT propose when:**
-- Status is not `pass`
-- Previous user ratings were low (1-2) on similar builds
-- Technical issues exist (JS errors, broken links, missing assets)
-- Identity signals were not reflected in the output
+You may still emit optional **ordinal signals** in **`metrics`** (e.g. **`confidence`**, **`propose_for_publication`**, rationale text) as **hints** for future automation or UI. Treat them as **non-authoritative**: they must **not** imply that KMBL will ship to production without a human approval step.
 
 ## Duplicate output (orchestrator enforcement)
 
 The orchestrator fingerprints `static_frontend_file_v1` paths + normalized content (and preview entry) and compares against **prior staging snapshots on the same thread**. If it matches, a `pass` or `partial` is **forced to `fail`** with `metrics.duplicate_rejection` and `duplicate_of_staging_snapshot_id` so the run **iterates** instead of recording another identical staging row. Call out near-duplicates in your summary when you notice them; the server check catches exact static duplicates even when the model misses them.
 
-## Marking builds for review
+## Marking builds for review (nomination)
 
-When you evaluate a build, you can **mark it for later review** even if it's not perfect. This creates a shortlist of interesting builds the user can review separately.
+You can **nominate** a build for human review using the same fields as **`USER.md`** — top level or under **`metrics`**:
 
-**Add to metrics:**
+- **`nominate_for_review`** or **`marked_for_review`** (boolean)
+- **`mark_reason`** (short string)
+- **`review_tags`** (string array)
+
+**Example (top-level or under `metrics`):**
 ```json
 {
-  "metrics": {
-    "mark_for_review": true,
-    "mark_reason": "Interesting experimental layout worth reviewing",
-    "review_tags": ["experimental", "strong_typography", "needs_polish"]
-  }
+  "marked_for_review": true,
+  "mark_reason": "Interesting experimental layout worth human review",
+  "review_tags": ["experimental", "strong_typography", "needs_polish"]
 }
 ```
 
-**When to mark for review:**
+Nomination is **advisory**: it feeds **`marked_for_review`** on persisted rows when **`staging_snapshot_policy`** creates a snapshot (**`USER.md`**). It does **not** approve, publish, or replace operator judgment.
 
-| Scenario | Mark? | Reason |
-|----------|-------|--------|
-| Strong creative direction, minor issues | Yes | "Creative direction is strong, technical polish needed" |
-| Experimental layout that's different | Yes | "Unusual approach worth human evaluation" |
-| First successful abstract design | Yes | "First iteration that captured abstract aesthetic" |
-| Technically perfect but generic | No | Not interesting enough |
-| Failed or broken | No | Not useful for review |
+**When to nominate:**
 
-**Review tags to use:**
-- `experimental` — unusual/bold approach
-- `strong_typography` — typography stands out
-- `strong_layout` — layout is interesting
-- `strong_color` — color use is notable
-- `needs_polish` — good direction, rough edges
-- `abstract_success` — achieved abstract aesthetic
-- `identity_aligned` — strongly matches identity
-- `unique_interaction` — interesting JS/animation
+| Scenario | Nominate? | Notes |
+|----------|-----------|-------|
+| Strong creative direction, minor issues | Often yes | Helps operators find promising **`partial`** builds |
+| Experimental layout | Often yes | Worth staging-review attention |
+| Failed or broken | No | Not useful as a review candidate |
 
-KMBL persists these marks so the user can filter for `mark_for_review: true` builds later, even across many iterations.
+**Review tags:** e.g. `experimental`, `strong_typography`, `needs_polish`, `identity_aligned` — short, filterable strings.

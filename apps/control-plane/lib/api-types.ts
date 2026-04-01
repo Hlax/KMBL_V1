@@ -130,6 +130,8 @@ export type StagingDetail = {
   static_frontend_file_count?: number;
   static_frontend_bundle_count?: number;
   has_previewable_html?: boolean;
+  /** Assembled static preview vs hosted URL primary surface (from snapshot payload metadata). */
+  preview_kind?: "static" | "external_url" | null;
   preview_url?: string | null;
   status: string;
   created_at?: string;
@@ -213,6 +215,8 @@ export type GraphRunSummaryBlock = {
   identity_id?: string | null;
   trigger_type: string;
   status: string;
+  /** Set when operator requested cooperative interrupt (persisted). */
+  interrupt_requested_at?: string | null;
   started_at: string;
   ended_at?: string | null;
   max_iteration_index?: number | null;

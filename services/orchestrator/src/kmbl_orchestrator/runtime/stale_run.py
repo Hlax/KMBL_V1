@@ -20,7 +20,11 @@ def _started_at_utc(gr: GraphRunRecord) -> datetime | None:
 
 
 def graph_run_is_stale_running(gr: GraphRunRecord, threshold_seconds: int) -> bool:
-    if threshold_seconds <= 0 or gr.status != "running":
+    if threshold_seconds <= 0 or gr.status not in (
+        "running",
+        "starting",
+        "interrupt_requested",
+    ):
         return False
     started = _started_at_utc(gr)
     if started is None:

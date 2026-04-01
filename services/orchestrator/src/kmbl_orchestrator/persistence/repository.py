@@ -12,6 +12,7 @@ from typing import Any, Literal, Protocol
 from uuid import UUID
 
 from kmbl_orchestrator.domain import (
+    ACTIVE_GRAPH_RUN_STATUSES,
     AutonomousLoopRecord,
     BuildCandidateRecord,
     BuildSpecRecord,
@@ -19,6 +20,7 @@ from kmbl_orchestrator.domain import (
     EvaluationReportRecord,
     GraphRunEventRecord,
     GraphRunRecord,
+    GraphRunStatus,
     IdentityProfileRecord,
     IdentitySourceRecord,
     PublicationSnapshotRecord,
@@ -66,6 +68,12 @@ class Repository(Protocol):
     ) -> list[GraphRunRecord]:
         """Newest ``started_at`` first. Optional filters; ``identity_id`` via ``thread`` rows."""
 
+    def get_active_graph_run_for_thread(self, thread_id: UUID) -> GraphRunRecord | None:
+        """Most recent graph_run for ``thread_id`` whose status is starting/running/interrupt_requested, else None."""
+
+    def request_graph_run_interrupt(self, graph_run_id: UUID) -> GraphRunRecord:
+        """Persist cooperative interrupt request (idempotent). Raises ``KeyError`` if missing, ``ValueError`` if not interruptible."""
+
     def aggregate_role_invocation_stats_for_graph_runs(
         self, graph_run_ids: list[UUID]
     ) -> dict[UUID, tuple[int, int | None]]:
@@ -84,10 +92,12 @@ class Repository(Protocol):
     def update_graph_run_status(
         self,
         graph_run_id: UUID,
-        status: Literal["running", "paused", "completed", "failed"],
+        status: GraphRunStatus,
         ended_at: str | None,
+        *,
+        clear_interrupt_requested: bool | None = None,
     ) -> None:
-        """Set ``status`` (and optional ``ended_at`` ISO timestamp) on a graph run."""
+        """Set ``status`` (and optional ``ended_at``). Clears ``interrupt_requested_at`` on terminal statuses by default."""
         ...
 
     def mark_graph_run_resuming(self, graph_run_id: UUID) -> None:
@@ -166,6 +176,11 @@ class Repository(Protocol):
     def get_run_snapshot(self, graph_run_id: UUID) -> dict[str, Any] | None:
         """Return the run snapshot attached via ``attach_run_snapshot``, or ``None``."""
         ...
+
+    def get_run_snapshots_for_graph_runs(
+        self, graph_run_ids: list[UUID]
+    ) -> dict[UUID, dict[str, Any] | None]:
+        """Latest ``post_role`` checkpoint ``state_json`` per id (same semantics as ``get_run_snapshot``)."""
 
     def save_graph_run_event(self, record: GraphRunEventRecord) -> None:
         """Append a timeline event for a graph run (append-only)."""
@@ -484,6 +499,33 @@ class InMemoryRepository:
         rows.sort(key=lambda r: r.started_at, reverse=True)
         return rows[: max(0, limit)]
 
+    def get_active_graph_run_for_thread(self, thread_id: UUID) -> GraphRunRecord | None:
+        cands = [
+            r
+            for r in self._graph_runs.values()
+            if r.thread_id == thread_id and r.status in ACTIVE_GRAPH_RUN_STATUSES
+        ]
+        if not cands:
+            return None
+        return max(cands, key=lambda r: r.started_at)
+
+    def request_graph_run_interrupt(self, graph_run_id: UUID) -> GraphRunRecord:
+        r = self._graph_runs.get(str(graph_run_id))
+        if r is None:
+            raise KeyError(str(graph_run_id))
+        if r.status in ("completed", "failed", "interrupted"):
+            raise ValueError(f"terminal_status:{r.status}")
+        if r.status == "paused":
+            raise ValueError("paused")
+        if r.status == "interrupt_requested" and r.interrupt_requested_at is not None:
+            return r
+        now = datetime.now(timezone.utc).isoformat()
+        updated = r.model_copy(
+            update={"status": "interrupt_requested", "interrupt_requested_at": now}
+        )
+        self._graph_runs[str(graph_run_id)] = updated
+        return updated
+
     def aggregate_role_invocation_stats_for_graph_runs(
         self, graph_run_ids: list[UUID]
     ) -> dict[UUID, tuple[int, int | None]]:
@@ -555,22 +597,34 @@ class InMemoryRepository:
     def update_graph_run_status(
         self,
         graph_run_id: UUID,
-        status: Literal["running", "paused", "completed", "failed"],
+        status: GraphRunStatus,
         ended_at: str | None,
+        *,
+        clear_interrupt_requested: bool | None = None,
     ) -> None:
         r = self._graph_runs.get(str(graph_run_id))
         if r is None:
             return
-        self._graph_runs[str(graph_run_id)] = r.model_copy(
-            update={"status": status, "ended_at": ended_at}
+        clear = (
+            clear_interrupt_requested
+            if clear_interrupt_requested is not None
+            else status in ("completed", "failed", "interrupted")
         )
+        patch: dict[str, Any] = {"status": status, "ended_at": ended_at}
+        if clear:
+            patch["interrupt_requested_at"] = None
+        self._graph_runs[str(graph_run_id)] = r.model_copy(update=patch)
 
     def mark_graph_run_resuming(self, graph_run_id: UUID) -> None:
         r = self._graph_runs.get(str(graph_run_id))
         if r is None:
             return
         self._graph_runs[str(graph_run_id)] = r.model_copy(
-            update={"status": "running", "ended_at": None}
+            update={
+                "status": "running",
+                "ended_at": None,
+                "interrupt_requested_at": None,
+            }
         )
 
     def save_checkpoint(self, record: CheckpointRecord) -> None:
@@ -682,6 +736,16 @@ class InMemoryRepository:
         post.sort(key=lambda c: c.created_at)
         return post[-1].state_json
 
+    def get_run_snapshots_for_graph_runs(
+        self, graph_run_ids: list[UUID]
+    ) -> dict[UUID, dict[str, Any] | None]:
+        if not graph_run_ids:
+            return {}
+        out: dict[UUID, dict[str, Any] | None] = {}
+        for g in graph_run_ids:
+            out[g] = self.get_run_snapshot(g)
+        return out
+
     def save_graph_run_event(self, record: GraphRunEventRecord) -> None:
         self._graph_run_events.append(record)
 
@@ -741,7 +805,7 @@ class InMemoryRepository:
         cutoff = datetime.now(timezone.utc) - timedelta(seconds=older_than_seconds)
         out: list[UUID] = []
         for gr in self._graph_runs.values():
-            if gr.status != "running":
+            if gr.status not in ("running", "starting", "interrupt_requested"):
                 continue
             try:
                 started = datetime.fromisoformat(

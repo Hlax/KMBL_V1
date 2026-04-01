@@ -133,7 +133,7 @@ export default async function RunsIndexPage({
   } catch (e) {
     return (
       <>
-        <h1 className="pub-page-title">Runs</h1>
+        <h1 className="pub-page-title">Review</h1>
         <div className="pub-empty" role="alert">
           <p className="pub-empty__title">Could not reach the server</p>
           <p className="pub-empty__body">
@@ -159,7 +159,7 @@ export default async function RunsIndexPage({
         : text.slice(0, 400);
     return (
       <>
-        <h1 className="pub-page-title">Runs</h1>
+        <h1 className="pub-page-title">Review</h1>
         <div className="pub-empty" role="alert">
           <p className="pub-empty__title">Could not load runs</p>
           <p className="pub-empty__body mono small">
@@ -173,7 +173,7 @@ export default async function RunsIndexPage({
   if (!data) {
     return (
       <>
-        <h1 className="pub-page-title">Runs</h1>
+        <h1 className="pub-page-title">Review</h1>
         <div className="pub-empty" role="alert">
           <p className="pub-empty__title">Invalid response</p>
           <p className="pub-empty__body mono small">{text.slice(0, 400)}</p>
@@ -193,10 +193,11 @@ export default async function RunsIndexPage({
 
   return (
     <>
-      <h1 className="pub-page-title">Runs</h1>
+      <h1 className="pub-page-title">Review</h1>
       <p className="muted" style={{ marginTop: "-0.25rem", marginBottom: "1rem" }}>
-        Persisted graph executions — what the orchestrator stored for each run (not a live
-        stream).
+        Graph runs and outputs — persisted <code className="mono">graph_run</code> rows, role
+        activity, and staging links. This is the broad review surface (not immutable snapshot
+        publication review — use <Link href="/review">Staging review</Link> for that).
       </p>
 
       {backendUnimplemented ? (
@@ -210,8 +211,8 @@ export default async function RunsIndexPage({
       <p className="op-banner op-banner--neutral">
         <strong>Index</strong> — newest start time first. Status and outputs come from stored
         rows only; refresh to update. Use{" "}
-        <Link href="/review">Review</Link> for staging and <Link href="/publication">Publication</Link>{" "}
-        for canon.
+        <Link href="/review">Staging review</Link> for snapshot candidates and{" "}
+        <Link href="/publication">Public releases</Link> for canon.
       </p>
 
       <div className="op-banner op-banner--neutral review-filter-context">
@@ -275,9 +276,9 @@ export default async function RunsIndexPage({
         <p className="muted small">
           <Link href="/runs">Clear filters</Link>
           {" · "}
-          <Link href="/review">Review</Link>
+          <Link href="/review">Staging review</Link>
           {" · "}
-          <Link href="/publication">Publication</Link>
+          <Link href="/publication">Public releases</Link>
         </p>
       </form>
 

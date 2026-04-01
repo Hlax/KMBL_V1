@@ -8,10 +8,9 @@ import os
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 from urllib.parse import urlencode
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from fastapi import BackgroundTasks, Body, Depends, FastAPI, HTTPException, Query
 from fastapi.responses import RedirectResponse
@@ -19,17 +18,18 @@ from pydantic import BaseModel  # noqa: F401 — kept for backward compat (tests
 
 from kmbl_orchestrator.api.middleware_api_key import optional_api_key_middleware
 from kmbl_orchestrator.config import Settings, get_settings
-from kmbl_orchestrator.errors import RoleInvocationFailed, StagingIntegrityFailed
-from kmbl_orchestrator.graph.app import persist_graph_run_start, run_graph
+from kmbl_orchestrator.application.run_lifecycle import (
+    resolve_start_event_input,
+    run_graph_background,
+)
+from kmbl_orchestrator.graph.app import persist_graph_run_start
 from kmbl_orchestrator.domain import (
     BuildCandidateRecord,
     BuildSpecRecord,
-    CheckpointRecord,
     EvaluationReportRecord,
     GraphRunRecord,
 )
 from kmbl_orchestrator.persistence.factory import (
-    get_repository,
     persisted_graph_runs_available,
     repository_backend,
 )
@@ -58,7 +58,6 @@ from kmbl_orchestrator.runtime.run_resume import (
     event_input_for_resume,
 )
 from kmbl_orchestrator.runtime.run_events import RunEventType, append_graph_run_event
-from kmbl_orchestrator.runtime.smoke_planner import run_smoke_planner_only
 from kmbl_orchestrator.runtime.run_failure_view import build_run_failure_view
 from kmbl_orchestrator.runtime.run_snapshot_sanitize import (
     sanitize_checkpoint_state_for_api,
@@ -73,20 +72,10 @@ from kmbl_orchestrator.identity import (
     persist_identity_from_seed,
 )
 from kmbl_orchestrator.seeds import (
-    IDENTITY_URL_STATIC_FRONTEND_PRESET,
-    KILOCLAW_IMAGE_ONLY_TEST_EVENT_INPUT,
-    KILOCLAW_IMAGE_ONLY_TEST_SCENARIO_PRESET,
     KILOCLAW_IMAGE_ONLY_TEST_SCENARIO_TAG,
-    SEEDED_GALLERY_STRIP_EVENT_INPUT,
-    SEEDED_GALLERY_STRIP_SCENARIO_PRESET,
     SEEDED_GALLERY_STRIP_SCENARIO_TAG,
-    SEEDED_GALLERY_STRIP_VARIED_SCENARIO_PRESET,
     SEEDED_GALLERY_STRIP_VARIED_SCENARIO_TAG,
-    SEEDED_LOCAL_EVENT_INPUT,
-    SEEDED_LOCAL_SCENARIO_PRESET,
     SEEDED_SCENARIO_TAG,
-    build_identity_url_static_frontend_event_input,
-    build_seeded_gallery_strip_varied_v1_event_input,
 )
 
 _log = logging.getLogger(__name__)
@@ -156,6 +145,7 @@ from kmbl_orchestrator.api.models import (  # noqa: F401, E402
     RunTimelineItem,
     SessionStagingLinks,
     StartRunResponse,
+    InterruptRunResponse,
 )
 # Override the shim with the real model
 from kmbl_orchestrator.api.models import StartRunBody  # noqa: F811, F401, E402
@@ -209,36 +199,9 @@ from kmbl_orchestrator.api.routes_working_staging import (  # noqa: F401, E402
     WorkingStagingResponse,
 )
 
-
-def _resolve_start_event_input(
-    body: StartRunBody,
-    *,
-    identity_seed_summary: str | None = None,
-) -> tuple[dict[str, Any], str | None]:
-    if body.identity_url or body.scenario_preset == IDENTITY_URL_STATIC_FRONTEND_PRESET:
-        url = body.identity_url or ""
-        return (
-            build_identity_url_static_frontend_event_input(
-                identity_url=url,
-                seed_summary=identity_seed_summary,
-            ),
-            IDENTITY_URL_STATIC_FRONTEND_PRESET,
-        )
-    if body.scenario_preset == SEEDED_LOCAL_SCENARIO_PRESET:
-        return dict(SEEDED_LOCAL_EVENT_INPUT), SEEDED_LOCAL_SCENARIO_PRESET
-    if body.scenario_preset == SEEDED_GALLERY_STRIP_SCENARIO_PRESET:
-        return dict(SEEDED_GALLERY_STRIP_EVENT_INPUT), SEEDED_GALLERY_STRIP_SCENARIO_PRESET
-    if body.scenario_preset == SEEDED_GALLERY_STRIP_VARIED_SCENARIO_PRESET:
-        return (
-            build_seeded_gallery_strip_varied_v1_event_input(),
-            SEEDED_GALLERY_STRIP_VARIED_SCENARIO_PRESET,
-        )
-    if body.scenario_preset == KILOCLAW_IMAGE_ONLY_TEST_SCENARIO_PRESET:
-        return (
-            dict(KILOCLAW_IMAGE_ONLY_TEST_EVENT_INPUT),
-            KILOCLAW_IMAGE_ONLY_TEST_SCENARIO_PRESET,
-        )
-    return dict(body.event_input), None
+# Backward-compatible names for tests and archive imports
+_resolve_start_event_input = resolve_start_event_input
+_run_graph_background = run_graph_background
 
 
 def _scenario_tag_from_snapshot(snap: dict[str, Any] | None) -> str | None:
@@ -348,130 +311,6 @@ def _kiloclaw_configured(settings: Settings, eff: str) -> bool:
     if eff == "openclaw_cli":
         return bool((settings.kiloclaw_openclaw_executable or "").strip())
     return False
-
-
-def _run_graph_background(
-    *,
-    thread_id: str,
-    graph_run_id: str,
-    identity_id: str | None,
-    trigger_type: str,
-    event_input: dict[str, Any],
-    max_iterations: int | None = None,
-) -> None:
-    """Runs LangGraph after HTTP response; same-process thread pool (local dev)."""
-    settings = get_settings()
-    repo = get_repository(settings)
-    invoker = DefaultRoleInvoker(settings=settings)
-    gid_u = UUID(graph_run_id)
-    tid_u = UUID(thread_id)
-    t_bg = time.perf_counter()
-    _log.info(
-        "run_start_background graph_run_id=%s stage=background_graph_enter elapsed_ms=0.0",
-        graph_run_id,
-    )
-    if settings.orchestrator_smoke_planner_only:
-        _log.warning(
-            "run_start_background graph_run_id=%s mode=ORCHESTRATOR_SMOKE_PLANNER_ONLY (single planner HTTP only)",
-            graph_run_id,
-        )
-        try:
-            run_smoke_planner_only(
-                repo=repo,
-                invoker=invoker,
-                settings=settings,
-                thread_id=thread_id,
-                graph_run_id=graph_run_id,
-                event_input=event_input,
-            )
-        except Exception:
-            _log.exception(
-                "smoke_planner_only failed graph_run_id=%s",
-                graph_run_id,
-            )
-            try:
-                repo.update_graph_run_status(
-                    gid_u,
-                    "failed",
-                    datetime.now(timezone.utc).isoformat(),
-                )
-            except Exception:
-                _log.exception(
-                    "Could not mark graph_run failed after smoke error (graph_run_id=%s)",
-                    graph_run_id,
-                )
-        else:
-            _log.info(
-                "run_start_background graph_run_id=%s stage=background_graph_exit_ok elapsed_ms=%.1f",
-                graph_run_id,
-                (time.perf_counter() - t_bg) * 1000,
-            )
-        return
-    try:
-        mi = max_iterations if max_iterations is not None else settings.graph_max_iterations_default
-        run_graph(
-            repo=repo,
-            invoker=invoker,
-            settings=settings,
-            initial={
-                "thread_id": thread_id,
-                "graph_run_id": graph_run_id,
-                "identity_id": identity_id,
-                "trigger_type": trigger_type,
-                "event_input": event_input,
-                "max_iterations": mi,
-            },
-        )
-    except RoleInvocationFailed as e:
-        _log.exception(
-            "Background graph run RoleInvocationFailed stage=%s graph_run_id=%s",
-            e.phase,
-            graph_run_id,
-        )
-    except StagingIntegrityFailed as e:
-        _log.exception(
-            "Background graph run StagingIntegrityFailed stage=staging_reason=%s graph_run_id=%s",
-            e.reason,
-            graph_run_id,
-        )
-    except Exception as e:
-        _log.exception(
-            "Background graph run failed stage=unhandled graph_run_id=%s exc=%s",
-            graph_run_id,
-            type(e).__name__,
-        )
-        try:
-            repo.update_graph_run_status(
-                gid_u,
-                "failed",
-                datetime.now(timezone.utc).isoformat(),
-            )
-            repo.save_checkpoint(
-                CheckpointRecord(
-                    checkpoint_id=uuid4(),
-                    thread_id=tid_u,
-                    graph_run_id=gid_u,
-                    checkpoint_kind="interrupt",
-                    state_json={
-                        "orchestrator_error": {
-                            "error_kind": "graph_error",
-                            "error_message": f"{type(e).__name__}: {e}",
-                        }
-                    },
-                    context_compaction_json=None,
-                )
-            )
-        except Exception:
-            _log.exception(
-                "Could not persist failed status / interrupt checkpoint (graph_run_id=%s)",
-                graph_run_id,
-            )
-    else:
-        _log.info(
-            "run_start_background graph_run_id=%s stage=background_graph_exit_ok elapsed_ms=%.1f",
-            graph_run_id,
-            (time.perf_counter() - t_bg) * 1000,
-        )
 
 
 @app.get("/health")
@@ -655,6 +494,37 @@ async def start_run(
         "run_start stage=event_input_resolved elapsed_ms=%.1f",
         (time.perf_counter() - t_req) * 1000,
     )
+    if body.thread_id is not None:
+        tid_u = UUID(str(body.thread_id))
+        try:
+            active = await asyncio.to_thread(
+                repo.get_active_graph_run_for_thread, tid_u
+            )
+        except Exception as e:
+            _log.exception("get_active_graph_run_for_thread failed")
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error_kind": "persistence_error",
+                    "step": "get_active_graph_run_for_thread",
+                    "exception": type(e).__name__,
+                    "message": str(e),
+                },
+            ) from e
+        if active is not None:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error_kind": "active_graph_run",
+                    "message": (
+                        "This thread already has an active graph run. "
+                        "Wait for it to finish, interrupt it, or use a different thread."
+                    ),
+                    "active_graph_run_id": str(active.graph_run_id),
+                    "active_status": active.status,
+                },
+            )
+
     timeout_sec = float(settings.orchestrator_run_start_sync_timeout_sec or 0.0)
     persist_kw: dict[str, Any] = {
         "repo": repo,
@@ -739,6 +609,7 @@ async def start_run(
     return StartRunResponse(
         graph_run_id=gid,
         thread_id=tid,
+        status="starting",
         scenario_preset=preset_applied,
         effective_event_input=effective_event_input,
         identity_id=identity_id_str,
@@ -746,6 +617,65 @@ async def start_run(
     )
 
 
+@app.post(
+    "/orchestrator/runs/{graph_run_id}/interrupt",
+    response_model=InterruptRunResponse,
+    summary="Request cooperative interrupt for a graph run",
+)
+def interrupt_graph_run(
+    graph_run_id: str,
+    repo: Repository = Depends(get_repo),
+) -> InterruptRunResponse:
+    try:
+        gid = UUID(graph_run_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="invalid graph_run_id") from e
+    gr_before = repo.get_graph_run(gid)
+    if gr_before is None:
+        raise HTTPException(status_code=404, detail="graph_run not found")
+    try:
+        gr = repo.request_graph_run_interrupt(gid)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="graph_run not found") from None
+    except ValueError as e:
+        msg = str(e)
+        if msg.startswith("terminal_status:"):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error_kind": "run_terminal",
+                    "message": "Run is already in a terminal state.",
+                    "detail": msg,
+                },
+            ) from e
+        if msg == "paused":
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error_kind": "run_paused",
+                    "message": "Cannot interrupt a paused run — use resume instead.",
+                },
+            ) from e
+        raise HTTPException(status_code=400, detail=msg) from e
+
+    need_event = (
+        gr_before.status != "interrupt_requested"
+        or gr_before.interrupt_requested_at is None
+    )
+    if need_event:
+        append_graph_run_event(
+            repo,
+            gid,
+            RunEventType.INTERRUPT_REQUESTED,
+            {},
+            thread_id=gr.thread_id,
+        )
+    return InterruptRunResponse(
+        graph_run_id=str(gr.graph_run_id),
+        thread_id=str(gr.thread_id),
+        status=gr.status,
+        interrupt_requested_at=gr.interrupt_requested_at,
+    )
 
 
 def _optional_query_str(value: str | None) -> str | None:

@@ -10,6 +10,7 @@ from uuid import UUID, uuid4
 from pydantic import ValidationError
 
 from kmbl_orchestrator.contracts.normalized_errors import contract_validation_failure
+from kmbl_orchestrator.contracts.evaluator_nomination import extract_evaluator_nomination
 from kmbl_orchestrator.contracts.persistence_validate import (
     validate_role_output_for_persistence,
 )
@@ -26,6 +27,7 @@ from kmbl_orchestrator.normalize.gallery_strip_harness import (
     merge_gallery_strip_harness_checks,
 )
 from kmbl_orchestrator.runtime.evaluation_surface_gate import apply_preview_surface_gate
+from kmbl_orchestrator.runtime.interrupt_checks import raise_if_interrupt_requested
 from kmbl_orchestrator.runtime.run_events import RunEventType, append_graph_run_event
 from kmbl_orchestrator.runtime.session_staging_links import resolve_evaluator_preview_url
 from kmbl_orchestrator.staging.duplicate_rejection import apply_duplicate_staging_rejection
@@ -44,6 +46,7 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     """Invoke the evaluator role and persist the evaluation report."""
     gid = UUID(state["graph_run_id"])
     tid = UUID(state["thread_id"])
+    raise_if_interrupt_requested(ctx.repo, gid, tid)
     bcid = state.get("build_candidate_id")
     bsid = state.get("build_spec_id")
     if not bcid or not bsid:
@@ -248,6 +251,10 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         "alignment_signals_json": alignment_signals,
     })
 
+    evaluator_nomination = extract_evaluator_nomination(
+        raw if isinstance(raw, dict) else None
+    )
+
     # Update alignment score history in state
     alignment_history: list[dict[str, Any]] = list(
         state.get("alignment_score_history") or []
@@ -298,4 +305,5 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         "evaluation_report_id": str(report.evaluation_report_id),
         "alignment_score_history": step_state["alignment_score_history"],
         "last_alignment_score": step_state["last_alignment_score"],
+        "evaluator_nomination": evaluator_nomination,
     }

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Literal
+from typing import Any, Literal, TypeAlias
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -64,14 +64,35 @@ class RoleInvocationRecord(BaseModel):
     ended_at: str | None = None
 
 
+GraphRunStatus: TypeAlias = Literal[
+    "starting",
+    "running",
+    "paused",
+    "interrupt_requested",
+    "interrupted",
+    "completed",
+    "failed",
+]
+
+# Blocks POST /runs/start for the same thread_id (cooperative lifecycle).
+ACTIVE_GRAPH_RUN_STATUSES: frozenset[GraphRunStatus] = frozenset(
+    {
+        "starting",
+        "running",
+        "interrupt_requested",
+    }
+)
+
+
 class GraphRunRecord(BaseModel):
     graph_run_id: UUID
     thread_id: UUID
     identity_id: UUID | None = None
     trigger_type: Literal["prompt", "resume", "schedule", "system", "autonomous_loop"]
-    status: Literal["running", "paused", "completed", "failed"]
+    status: GraphRunStatus
     started_at: str = Field(default_factory=_utc_now_iso)
     ended_at: str | None = None
+    interrupt_requested_at: str | None = None
 
 
 class CheckpointRecord(BaseModel):

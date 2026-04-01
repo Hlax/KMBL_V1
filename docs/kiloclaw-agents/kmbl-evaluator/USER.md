@@ -46,6 +46,22 @@ KMBL may also attach compact **workspace_artifacts**, **sprint_contract**, **lat
 
 Only the JSON object in **SOUL.md**: **status**, **summary**, **issues**, **artifacts**, **metrics**. Raw JSON—no markdown, no prose outside the object.
 
+**Review nomination (optional):** KMBL may copy evaluator hints into the next **`staging_snapshot`** row (immutable review candidate) **only when** the server’s **`staging_snapshot_policy`** allows a new snapshot on this stage transition:
+
+- **`always`** (default): a review snapshot row is created every time staging runs (nomination still sets **`marked_for_review`** / reasons on that row).
+- **`on_nomination`**: a review snapshot row is created **only** when you nominate (`nominate_for_review` / **`marked_for_review`** = true). If you do not nominate, there is **no** new frozen snapshot for that iteration—**mutable working staging** still updates; operators may **materialize** a snapshot from live later.
+- **`never`**: staging does **not** auto-create review snapshot rows; nomination is stored in graph state but **no** frozen row until an operator materializes from live.
+
+You may emit any of:
+
+- **`nominate_for_review`** or **`marked_for_review`** (boolean) at the top level, or under **`metrics`**
+- **`mark_reason`** (short string), top level or **`metrics`**
+- **`review_tags`** (string array), top level or **`metrics`**
+
+**Precedence:** If both top-level and **`metrics`** include nomination booleans, **top-level** wins (orchestrator extraction).
+
+Nomination is **advisory** only: it does **not** approve, publish, or bypass human review. It only influences **`marked_for_review`** / **`mark_reason`** / **`review_tags`** on persisted snapshots when a snapshot row exists. **`preview_kind`** on the staging payload (**`static`** vs **`external_url`**) is derived by KMBL from artifacts and **`preview_url`**—evaluators do not set it directly.
+
 **Pass X — truthful signals:** **`summary`** must state **why** **`status`** was chosen (targets failed, preview broken, rubric weak, etc.). **Required target failures** belong in **issues** with stable identifiers so KMBL routing sees them—never hide failures behind a cosmetic pass. **`blocked`** is for **genuinely unevaluable** cases (e.g. preview/tooling cannot run honestly), not for "mild" quality issues. **`partial`** means meaningful progress with gaps; **`fail`** means criteria not met. When KMBL supplies a **design rubric** in **`metrics`**, it **augments** targets—it does **not** overwrite required-target truth: a pretty page with missing required content is still **fail** / **partial** with failed targets, not **pass**.
 
 ### `metrics.design_rubric` (optional, 1–5)
@@ -121,7 +137,7 @@ Always report `metrics.habitat` with: `page_count`, `framework`, `libraries_load
 - **`fail`**: No pages render, manifest invalid, critical structure missing
 - **`blocked`**: Cannot parse manifest, preview tooling failed
 
-Prefer **`partial`** over **`fail`** for recoverable issues — KMBL stages both for review.
+Prefer **`partial`** over **`fail`** for recoverable issues. **Mutable working staging** always advances when the graph applies your evaluation to a non-blocked candidate; **frozen review snapshots** for the staging-review queue follow **`staging_snapshot_policy`** and nomination as above—not every iteration necessarily produces a new **`staging_snapshot`** row.
 
 ## Multi-part builds
 

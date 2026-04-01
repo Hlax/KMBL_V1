@@ -23,6 +23,7 @@ class RunEventType:
     GRAPH_RUN_COMPLETED = "graph_run_completed"
     GRAPH_RUN_FAILED = "graph_run_failed"
     STAGING_SNAPSHOT_CREATED = "staging_snapshot_created"
+    STAGING_SNAPSHOT_SKIPPED = "staging_snapshot_skipped"
     STAGING_SNAPSHOT_BLOCKED = "staging_snapshot_blocked"
     STAGING_SNAPSHOT_APPROVED = "staging_snapshot_approved"
     STAGING_SNAPSHOT_UNAPPROVED = "staging_snapshot_unapproved"
@@ -49,6 +50,12 @@ class RunEventType:
 
     # Identity feedback loop
     IDENTITY_FEEDBACK_UPSERT = "identity_feedback_upsert"
+
+    # Cooperative operator interrupt (persisted lifecycle)
+    INTERRUPT_REQUESTED = "interrupt_requested"
+    INTERRUPT_ACKNOWLEDGED = "interrupt_acknowledged"
+    GRAPH_RUN_INTERRUPTED = "graph_run_interrupted"
+    DUPLICATE_START_BLOCKED = "duplicate_start_blocked"
 
 
 def append_graph_run_event(

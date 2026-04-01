@@ -8,20 +8,21 @@ import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Any, Literal, cast
+from typing import Any, Literal
 from uuid import UUID
 
 from supabase import Client, create_client
 
 from kmbl_orchestrator.config import Settings
 from kmbl_orchestrator.domain import (
-    AutonomousLoopRecord,
+    ACTIVE_GRAPH_RUN_STATUSES,
     BuildCandidateRecord,
     BuildSpecRecord,
     CheckpointRecord,
     EvaluationReportRecord,
     GraphRunEventRecord,
     GraphRunRecord,
+    GraphRunStatus,
     IdentityProfileRecord,
     IdentitySourceRecord,
     PublicationSnapshotRecord,
@@ -33,7 +34,6 @@ from kmbl_orchestrator.domain import (
 )
 from kmbl_orchestrator.persistence.supabase_deserializers import (
     _is_retryable_supabase_transport,
-    _row_to_autonomous_loop,
     _row_to_build_candidate,
     _row_to_build_spec,
     _row_to_checkpoint,
@@ -48,13 +48,43 @@ from kmbl_orchestrator.persistence.supabase_deserializers import (
     _row_to_staging_snapshot,
     _row_to_thread,
     _row_to_working_staging,
-    _ts_to_iso,
+)
+from kmbl_orchestrator.persistence.supabase_repository_loops import (
+    SupabaseRepositoryAutonomousLoopMixin,
 )
 
 _log = logging.getLogger(__name__)
 
 
-class SupabaseRepository:
+def _exception_chain_str(exc: BaseException) -> str:
+    """Concatenate str() for exc and its __cause__ chain (PostgREST nests APIError)."""
+    parts: list[str] = []
+    cur: BaseException | None = exc
+    seen: set[int] = set()
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        parts.append(str(cur))
+        cur = cur.__cause__
+    return "\n".join(parts)
+
+
+def _is_duplicate_graph_run_event_pkey(exc: BaseException) -> bool:
+    """
+    True when Postgres reports duplicate key on graph_run_event primary key.
+
+    Append-only events use a client-generated UUID; if the HTTP client got a transport
+    error after PostgREST committed, a retry must not loop on sequence_index — the PK
+    conflict means the row is already present (idempotent success).
+    """
+    s = _exception_chain_str(exc)
+    if "23505" not in s:
+        return False
+    return "graph_run_event_pkey" in s or (
+        "graph_run_event_id" in s and "already exists" in s
+    )
+
+
+class SupabaseRepository(SupabaseRepositoryAutonomousLoopMixin):
     """Postgres via Supabase REST — service role only (server-side orchestrator)."""
 
     def __init__(self, settings: Settings) -> None:
@@ -168,6 +198,8 @@ class SupabaseRepository:
         }
         if record.ended_at is not None:
             row["ended_at"] = record.ended_at
+        if record.interrupt_requested_at is not None:
+            row["interrupt_requested_at"] = record.interrupt_requested_at
         self._run(
             "save_graph_run",
             "graph_run",
@@ -191,6 +223,54 @@ class SupabaseRepository:
         if not res.data:
             return None
         return _row_to_graph_run(res.data[0])
+
+    def get_active_graph_run_for_thread(self, thread_id: UUID) -> GraphRunRecord | None:
+        st_list = list(ACTIVE_GRAPH_RUN_STATUSES)
+        res = self._run(
+            "get_active_graph_run_for_thread",
+            "graph_run",
+            lambda: self._client.table("graph_run")
+            .select("*")
+            .eq("thread_id", str(thread_id))
+            .in_("status", st_list)
+            .order("started_at", desc=True)
+            .limit(1)
+            .execute(),
+            thread_id=str(thread_id),
+        )
+        if not res.data:
+            return None
+        return _row_to_graph_run(res.data[0])
+
+    def request_graph_run_interrupt(self, graph_run_id: UUID) -> GraphRunRecord:
+        gr = self.get_graph_run(graph_run_id)
+        if gr is None:
+            raise KeyError(str(graph_run_id))
+        if gr.status in ("completed", "failed", "interrupted"):
+            raise ValueError(f"terminal_status:{gr.status}")
+        if gr.status == "paused":
+            raise ValueError("paused")
+        if gr.status == "interrupt_requested" and gr.interrupt_requested_at is not None:
+            return gr
+        now = datetime.now(timezone.utc).isoformat()
+        patch: dict[str, Any] = {
+            "status": "interrupt_requested",
+            "interrupt_requested_at": now,
+            "updated_at": now,
+        }
+        self._run(
+            "request_graph_run_interrupt",
+            "graph_run",
+            lambda: self._client.table("graph_run")
+            .update(patch)
+            .eq("graph_run_id", str(graph_run_id))
+            .execute(),
+            graph_run_id=str(graph_run_id),
+        )
+        out = self.get_graph_run(graph_run_id)
+        if out is None:
+            raise KeyError(str(graph_run_id))
+        return out
 
     def list_graph_runs(
         self,
@@ -389,15 +469,24 @@ class SupabaseRepository:
     def update_graph_run_status(
         self,
         graph_run_id: UUID,
-        status: Literal["running", "paused", "completed", "failed"],
+        status: GraphRunStatus,
         ended_at: str | None,
+        *,
+        clear_interrupt_requested: bool | None = None,
     ) -> None:
+        clear = (
+            clear_interrupt_requested
+            if clear_interrupt_requested is not None
+            else status in ("completed", "failed", "interrupted")
+        )
         patch: dict[str, Any] = {
             "status": status,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
         if ended_at is not None:
             patch["ended_at"] = ended_at
+        if clear:
+            patch["interrupt_requested_at"] = None
         self._run(
             "update_graph_run_status",
             "graph_run",
@@ -413,6 +502,7 @@ class SupabaseRepository:
         patch: dict[str, Any] = {
             "status": "running",
             "ended_at": None,
+            "interrupt_requested_at": None,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
         self._run(
@@ -682,6 +772,44 @@ class SupabaseRepository:
             return None
         return res.data[0].get("state_json")
 
+    def get_run_snapshots_for_graph_runs(
+        self, graph_run_ids: list[UUID]
+    ) -> dict[UUID, dict[str, Any] | None]:
+        """One round-trip: latest ``post_role`` ``state_json`` per graph_run (list read model)."""
+        if not graph_run_ids:
+            return {}
+        id_strs = [str(g) for g in graph_run_ids]
+        res = self._run(
+            "get_run_snapshots_for_graph_runs",
+            "checkpoint",
+            lambda: self._client.table("checkpoint")
+            .select("graph_run_id, state_json, created_at")
+            .in_("graph_run_id", id_strs)
+            .eq("checkpoint_kind", "post_role")
+            .execute(),
+            count=len(id_strs),
+        )
+        out: dict[UUID, dict[str, Any] | None] = {g: None for g in graph_run_ids}
+        if not res.data:
+            return out
+        by_gid: dict[str, list[tuple[str, dict[str, Any]]]] = {}
+        for row in res.data:
+            gid = row.get("graph_run_id")
+            sj = row.get("state_json")
+            cat = row.get("created_at")
+            if not gid:
+                continue
+            if not isinstance(sj, dict):
+                sj = {}
+            by_gid.setdefault(str(gid), []).append((str(cat or ""), sj))
+        for g in graph_run_ids:
+            rows = by_gid.get(str(g), [])
+            if not rows:
+                continue
+            rows.sort(key=lambda x: x[0])
+            out[g] = rows[-1][1]
+        return out
+
     def get_latest_failed_role_invocation_for_graph_run(
         self, graph_run_id: UUID
     ) -> RoleInvocationRecord | None:
@@ -859,8 +987,16 @@ class SupabaseRepository:
                 )
                 return
             except RuntimeError as e:
-                if "23505" not in str(e):
+                if "23505" not in _exception_chain_str(e):
                     raise
+                if _is_duplicate_graph_run_event_pkey(e):
+                    _log.info(
+                        "save_graph_run_event duplicate PK — treating as success "
+                        "(likely prior insert committed after transport error) "
+                        "graph_run_event_id=%s",
+                        record.graph_run_event_id,
+                    )
+                    return
                 if seq is None:
                     _log.warning(
                         "save_graph_run_event duplicate key ignored graph_run_event_id=%s",
@@ -976,7 +1112,7 @@ class SupabaseRepository:
             "graph_run",
             lambda: self._client.table("graph_run")
             .select("graph_run_id")
-            .eq("status", "running")
+            .in_("status", ["running", "starting", "interrupt_requested"])
             .lt("started_at", cutoff)
             .execute(),
             cutoff=cutoff,
@@ -1019,6 +1155,10 @@ class SupabaseRepository:
             row["rejected_at"] = record.rejected_at
         if record.rejection_reason is not None:
             row["rejection_reason"] = record.rejection_reason
+        row["marked_for_review"] = record.marked_for_review
+        if record.mark_reason is not None:
+            row["mark_reason"] = record.mark_reason
+        row["review_tags"] = list(record.review_tags)
         self._run(
             "save_staging_snapshot",
             "staging_snapshot",
@@ -1180,224 +1320,6 @@ class SupabaseRepository:
         if not res.data:
             return None
         return _row_to_staging_snapshot(res.data[0])
-
-    # --- Autonomous Loop ---
-
-    def save_autonomous_loop(self, record: "AutonomousLoopRecord") -> None:
-
-        row = {
-            "loop_id": str(record.loop_id),
-            "identity_id": str(record.identity_id),
-            "identity_url": record.identity_url,
-            "status": record.status,
-            "phase": record.phase,
-            "iteration_count": record.iteration_count,
-            "max_iterations": record.max_iterations,
-            "current_thread_id": str(record.current_thread_id) if record.current_thread_id else None,
-            "current_graph_run_id": str(record.current_graph_run_id) if record.current_graph_run_id else None,
-            "last_staging_snapshot_id": str(record.last_staging_snapshot_id) if record.last_staging_snapshot_id else None,
-            "last_evaluator_status": record.last_evaluator_status,
-            "last_evaluator_score": record.last_evaluator_score,
-            "exploration_directions": record.exploration_directions,
-            "completed_directions": record.completed_directions,
-            "auto_publish_threshold": record.auto_publish_threshold,
-            "proposed_staging_id": str(record.proposed_staging_id) if record.proposed_staging_id else None,
-            "proposed_at": record.proposed_at,
-            "locked_at": record.locked_at,
-            "locked_by": record.locked_by,
-            "created_at": record.created_at,
-            "updated_at": record.updated_at,
-            "completed_at": record.completed_at,
-            "total_staging_count": record.total_staging_count,
-            "total_publication_count": record.total_publication_count,
-            "best_rating": record.best_rating,
-            "last_error": record.last_error,
-            "consecutive_graph_failures": record.consecutive_graph_failures,
-        }
-
-        def _query() -> Any:
-            return self._client.table("autonomous_loop").upsert(row, on_conflict="loop_id").execute()
-
-        self._run("save_autonomous_loop", "autonomous_loop", _query, loop_id=str(record.loop_id))
-
-    def get_autonomous_loop(self, loop_id: UUID) -> "AutonomousLoopRecord | None":
-        def _query() -> Any:
-            return self._client.table("autonomous_loop").select("*").eq("loop_id", str(loop_id)).limit(1).execute()
-
-        res = self._run("get_autonomous_loop", "autonomous_loop", _query, loop_id=str(loop_id))
-        if not res.data:
-            return None
-        return _row_to_autonomous_loop(res.data[0])
-
-    def get_autonomous_loop_for_identity(self, identity_id: UUID) -> "AutonomousLoopRecord | None":
-        def _query() -> Any:
-            return (
-                self._client.table("autonomous_loop")
-                .select("*")
-                .eq("identity_id", str(identity_id))
-                .not_.in_("status", ["completed", "failed"])
-                .order("created_at", desc=True)
-                .limit(1)
-                .execute()
-            )
-
-        res = self._run("get_autonomous_loop_for_identity", "autonomous_loop", _query, identity_id=str(identity_id))
-        if not res.data:
-            return None
-        return _row_to_autonomous_loop(res.data[0])
-
-    def list_autonomous_loops(
-        self,
-        *,
-        status: str | None = None,
-        limit: int = 20,
-    ) -> list["AutonomousLoopRecord"]:
-        lim = max(1, min(limit, 100))
-
-        def _query() -> Any:
-            q = self._client.table("autonomous_loop").select("*")
-            if status is not None:
-                q = q.eq("status", status)
-            return q.order("created_at", desc=True).limit(lim).execute()
-
-        res = self._run("list_autonomous_loops", "autonomous_loop", _query, status=status, limit=lim)
-        if not res.data:
-            return []
-        return [_row_to_autonomous_loop(r) for r in res.data]
-
-    def get_next_pending_loop(self) -> "AutonomousLoopRecord | None":
-        from datetime import datetime, timezone, timedelta
-
-        lock_timeout = timedelta(seconds=300)
-        cutoff = (datetime.now(timezone.utc) - lock_timeout).isoformat()
-
-        def _query() -> Any:
-            return (
-                self._client.table("autonomous_loop")
-                .select("*")
-                .in_("status", ["pending", "running"])
-                .or_(f"locked_at.is.null,locked_at.lt.{cutoff}")
-                .order("created_at")
-                .limit(1)
-                .execute()
-            )
-
-        res = self._run("get_next_pending_loop", "autonomous_loop", _query)
-        if not res.data:
-            return None
-        return _row_to_autonomous_loop(res.data[0])
-
-    def try_acquire_loop_lock(
-        self,
-        loop_id: UUID,
-        locked_by: str,
-        lock_timeout_seconds: int = 300,
-    ) -> bool:
-        from datetime import datetime, timezone, timedelta
-
-        now = datetime.now(timezone.utc)
-        cutoff = (now - timedelta(seconds=lock_timeout_seconds)).isoformat()
-
-        def _query() -> Any:
-            return (
-                self._client.table("autonomous_loop")
-                .update({"locked_at": now.isoformat(), "locked_by": locked_by, "updated_at": now.isoformat()})
-                .eq("loop_id", str(loop_id))
-                .or_(f"locked_at.is.null,locked_at.lt.{cutoff}")
-                .execute()
-            )
-
-        res = self._run("try_acquire_loop_lock", "autonomous_loop", _query, loop_id=str(loop_id))
-        return bool(res.data)
-
-    def release_loop_lock(self, loop_id: UUID) -> None:
-        from datetime import datetime, timezone
-
-        now = datetime.now(timezone.utc).isoformat()
-
-        def _query() -> Any:
-            return (
-                self._client.table("autonomous_loop")
-                .update({"locked_at": None, "locked_by": None, "updated_at": now})
-                .eq("loop_id", str(loop_id))
-                .execute()
-            )
-
-        self._run("release_loop_lock", "autonomous_loop", _query, loop_id=str(loop_id))
-
-    def update_loop_state(
-        self,
-        loop_id: UUID,
-        *,
-        status: str | None = None,
-        phase: str | None = None,
-        iteration_count: int | None = None,
-        current_thread_id: UUID | None = None,
-        current_graph_run_id: UUID | None = None,
-        last_staging_snapshot_id: UUID | None = None,
-        last_evaluator_status: str | None = None,
-        last_evaluator_score: float | None = None,
-        last_alignment_score: float | None = None,
-        exploration_directions: list | None = None,
-        completed_directions: list | None = None,
-        proposed_staging_id: UUID | None = None,
-        total_staging_count: int | None = None,
-        best_rating: int | None = None,
-        last_error: str | None = None,
-        consecutive_graph_failures: int | None = None,
-        reset_loop_error: bool = False,
-    ) -> "AutonomousLoopRecord | None":
-        from datetime import datetime, timezone
-
-        now = datetime.now(timezone.utc).isoformat()
-        patch: dict[str, Any] = {"updated_at": now}
-
-        if status is not None:
-            patch["status"] = status
-            if status == "completed":
-                patch["completed_at"] = now
-        if phase is not None:
-            patch["phase"] = phase
-        if iteration_count is not None:
-            patch["iteration_count"] = iteration_count
-        if current_thread_id is not None:
-            patch["current_thread_id"] = str(current_thread_id)
-        if current_graph_run_id is not None:
-            patch["current_graph_run_id"] = str(current_graph_run_id)
-        if last_staging_snapshot_id is not None:
-            patch["last_staging_snapshot_id"] = str(last_staging_snapshot_id)
-        if last_evaluator_status is not None:
-            patch["last_evaluator_status"] = last_evaluator_status
-        if last_evaluator_score is not None:
-            patch["last_evaluator_score"] = last_evaluator_score
-        if last_alignment_score is not None:
-            patch["last_alignment_score"] = last_alignment_score
-        if exploration_directions is not None:
-            patch["exploration_directions"] = exploration_directions
-        if completed_directions is not None:
-            patch["completed_directions"] = completed_directions
-        if proposed_staging_id is not None:
-            patch["proposed_staging_id"] = str(proposed_staging_id)
-            patch["proposed_at"] = now
-        if total_staging_count is not None:
-            patch["total_staging_count"] = total_staging_count
-        if best_rating is not None:
-            patch["best_rating"] = best_rating
-        if reset_loop_error:
-            patch["last_error"] = None
-            patch["consecutive_graph_failures"] = 0
-        if last_error is not None:
-            patch["last_error"] = last_error
-        if consecutive_graph_failures is not None:
-            patch["consecutive_graph_failures"] = consecutive_graph_failures
-
-        def _query() -> Any:
-            return self._client.table("autonomous_loop").update(patch).eq("loop_id", str(loop_id)).execute()
-
-        res = self._run("update_loop_state", "autonomous_loop", _query, loop_id=str(loop_id))
-        if not res.data:
-            return None
-        return _row_to_autonomous_loop(res.data[0])
 
     def save_publication_snapshot(self, record: PublicationSnapshotRecord) -> None:
         """

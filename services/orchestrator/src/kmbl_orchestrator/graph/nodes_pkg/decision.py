@@ -15,6 +15,7 @@ from kmbl_orchestrator.identity.alignment import (
     compute_alignment_trend,
     select_retry_direction,
 )
+from kmbl_orchestrator.runtime.interrupt_checks import raise_if_interrupt_requested
 from kmbl_orchestrator.runtime.run_events import RunEventType, append_graph_run_event
 
 if TYPE_CHECKING:
@@ -26,6 +27,9 @@ _log = logging.getLogger(__name__)
 def decision_router(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     """Decide whether to iterate, stage, or end based on the evaluation report."""
     gid = UUID(state["graph_run_id"])
+    raise_if_interrupt_requested(
+        ctx.repo, gid, UUID(state["thread_id"])
+    )
     ev = state.get("evaluation_report") or {}
     status = ev.get("status", "fail")
     iteration = int(state.get("iteration_index", 0))

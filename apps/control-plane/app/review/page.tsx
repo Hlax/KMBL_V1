@@ -227,12 +227,13 @@ export default async function ReviewPage({
 
   return (
     <>
-      <h1 className="pub-page-title">Review queue</h1>
+      <h1 className="pub-page-title">Staging review</h1>
       <p className="muted" style={{ marginTop: "-0.25rem", marginBottom: "1rem" }}>
-        Persisted staging snapshots — what needs operator attention next, and what is already
-        tied to canon. Follow the header <strong>Flow</strong> strip: Run → Review → Preview →
-        Publish; each card below shows the same staging facts as run detail for quick image /
-        static checks.
+        Immutable <strong>staging_snapshot</strong> rows only — publication candidates frozen at a
+        point in time. Approve, reject, rate, and publish from here. For live graph activity and
+        run-level output, use <Link href="/runs">Review</Link> (graph runs). If the queue is empty
+        while the graph completed, policy may be <code>on_nomination</code> or{" "}
+        <code>never</code>; materialize a snapshot via the orchestrator when needed.
       </p>
 
       {backendUnimplemented ? (
@@ -247,7 +248,8 @@ export default async function ReviewPage({
         <strong>Queue</strong> — ordered by priority (review → publish → published → other),
         newest first within each tier. Filters only change which persisted rows are shown — not
         live graph state.{" "}
-        <Link href="/publication">Publication</Link> is immutable canon after publish.
+        <Link href="/publication">Public releases</Link> are immutable canon after publish from an
+        approved snapshot here.
       </p>
 
       <div className="op-banner op-banner--neutral review-filter-context">
@@ -325,9 +327,9 @@ export default async function ReviewPage({
         <p className="muted small">
           <Link href="/review">Clear filters</Link>
           {" · "}
-          <Link href="/runs">Runs</Link>
+          <Link href="/runs">Review (graph runs)</Link>
           {" · "}
-          <Link href="/publication">Publication</Link>
+          <Link href="/publication">Public releases</Link>
         </p>
       </form>
 

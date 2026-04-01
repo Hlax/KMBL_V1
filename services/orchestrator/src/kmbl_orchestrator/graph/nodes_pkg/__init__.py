@@ -1,4 +1,6 @@
-"""Graph-node functions, split into one module per node.
+"""Graph-node functions — **canonical** package for per-node implementations.
+
+``graph/nodes.py`` re-exports this package for backward compatibility.
 
 Each function accepts ``(ctx, state)`` and is bound via
 ``functools.partial(fn, ctx)`` at graph-build time in ``graph/app.py``.

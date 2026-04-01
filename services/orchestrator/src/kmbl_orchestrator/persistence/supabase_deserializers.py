@@ -20,6 +20,7 @@ from kmbl_orchestrator.domain import (
     EvaluationReportRecord,
     GraphRunEventRecord,
     GraphRunRecord,
+    GraphRunStatus,
     IdentityProfileRecord,
     IdentitySourceRecord,
     PublicationSnapshotRecord,
@@ -63,18 +64,25 @@ def _ts_to_iso(value: Any) -> str | None:
 
 def _row_to_graph_run(row: dict[str, Any]) -> GraphRunRecord:
     iid = row.get("identity_id")
+    tt = row["trigger_type"]
     return GraphRunRecord(
         graph_run_id=UUID(row["graph_run_id"]),
         thread_id=UUID(row["thread_id"]),
         identity_id=UUID(iid) if iid else None,
         trigger_type=cast(
-            Literal["prompt", "resume", "schedule", "system"], row["trigger_type"]
+            Literal[
+                "prompt",
+                "resume",
+                "schedule",
+                "system",
+                "autonomous_loop",
+            ],
+            tt,
         ),
-        status=cast(
-            Literal["running", "paused", "completed", "failed"], row["status"]
-        ),
+        status=cast(GraphRunStatus, row["status"]),
         started_at=_ts_to_iso(row["started_at"]) or "",
         ended_at=_ts_to_iso(row.get("ended_at")),
+        interrupt_requested_at=_ts_to_iso(row.get("interrupt_requested_at")),
     )
 
 

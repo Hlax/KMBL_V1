@@ -210,6 +210,9 @@ def _merge_metadata(merged: dict[str, Any], new_payload: dict[str, Any]) -> None
     if new_fs is not None:
         merged["metadata"]["frontend_static"] = copy.deepcopy(new_fs)
 
+    if "preview_kind" in new_meta:
+        merged["metadata"]["preview_kind"] = new_meta["preview_kind"]
+
 
 # ---------------------------------------------------------------------------
 # Build payload from a single build candidate (same V1 shape, for merge/replace)
@@ -527,9 +530,13 @@ def approve_working_staging(
     working_staging: WorkingStagingRecord,
     *,
     approved_by: str = "operator",
-    source_staging_snapshot_id: UUID | None = None,
+    source_staging_snapshot_id: UUID,
 ) -> tuple[WorkingStagingRecord, PublicationSnapshotRecord, StagingCheckpointRecord]:
     """Freeze working staging into a publication snapshot.
+
+    ``source_staging_snapshot_id`` must reference a persisted ``staging_snapshot`` row
+    (e.g. latest review snapshot for the thread). Callers resolve it; this function
+    does not invent surrogate ids.
 
     Returns (updated working staging, new publication, pre-approval checkpoint).
     """
@@ -540,7 +547,7 @@ def approve_working_staging(
 
     publication = PublicationSnapshotRecord(
         publication_snapshot_id=uuid4(),
-        source_staging_snapshot_id=source_staging_snapshot_id or uuid4(),
+        source_staging_snapshot_id=source_staging_snapshot_id,
         source_working_staging_id=working_staging.working_staging_id,
         source_staging_checkpoint_id=checkpoint.staging_checkpoint_id,
         thread_id=working_staging.thread_id,

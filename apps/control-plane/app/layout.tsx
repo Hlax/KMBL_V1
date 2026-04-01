@@ -1,12 +1,11 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { ControlPlaneNav } from "./components/ControlPlaneNav";
-import { OperatorFlowStrip } from "./components/OperatorFlowStrip";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "KMBL Control Plane",
-  description: "Operator shell — orchestration runs through the Python service.",
+  title: "KMBL",
+  description: "Autonomous creative operating system — orchestration via the Python service.",
 };
 
 export const viewport = {
@@ -24,7 +23,6 @@ export default function RootLayout({
       <body>
         <main>
           <ControlPlaneNav />
-          <OperatorFlowStrip />
           {children}
         </main>
       </body>

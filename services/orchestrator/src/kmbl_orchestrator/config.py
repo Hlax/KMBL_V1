@@ -3,6 +3,8 @@
 from functools import lru_cache
 from pathlib import Path
 
+from typing import Literal
+
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -180,6 +182,16 @@ class Settings(BaseSettings):
         description="Enable image generation during habitat assembly (uses KiloClaw kmbl-image-gen).",
         validation_alias=AliasChoices(
             "HABITAT_IMAGE_GENERATION_ENABLED", "habitat_image_generation_enabled"
+        ),
+    )
+    # When to persist an immutable staging_snapshot row on stage transitions.
+    # always: every stage (legacy default). on_nomination: only when evaluator nominates.
+    # never: live working_staging only until POST materialize or policy change.
+    staging_snapshot_policy: Literal["always", "on_nomination", "never"] = Field(
+        default="always",
+        validation_alias=AliasChoices(
+            "KMBL_STAGING_SNAPSHOT_POLICY",
+            "staging_snapshot_policy",
         ),
     )
 

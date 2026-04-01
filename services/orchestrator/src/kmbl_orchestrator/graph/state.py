@@ -29,6 +29,9 @@ class GraphState(TypedDict, total=False):
     build_candidate_id: str | None
     evaluation_report_id: str | None
 
+    # Evaluator nomination for review snapshot rows (from raw kmbl-evaluator JSON).
+    evaluator_nomination: dict[str, Any] | None
+
     iteration_index: int
     max_iterations: int
 

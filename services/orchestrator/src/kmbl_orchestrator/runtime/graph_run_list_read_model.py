@@ -25,6 +25,7 @@ def build_graph_run_list_read_model(
     stats = repo.aggregate_role_invocation_stats_for_graph_runs(gids)
     staging = repo.latest_staging_snapshot_ids_for_graph_runs(gids)
     interrupts = repo.graph_run_ids_with_interrupt_orchestrator_error(gids)
+    snapshots = repo.get_run_snapshots_for_graph_runs(gids)
     thread_ids = list({r.thread_id for r in runs})
     threads = {tid: repo.get_thread(tid) for tid in thread_ids}
     out: list[dict[str, Any]] = []
@@ -46,7 +47,7 @@ def build_graph_run_list_read_model(
             has_interrupt_signal=has_intr,
             latest_staging_snapshot_id=staging_s,
         )
-        snap = repo.get_run_snapshot(gr.graph_run_id)
+        snap = snapshots.get(gr.graph_run_id)
         scen_tag = scenario_tag_from_run_state(snap)
         scen_badge = scenario_badge_from_tag(scen_tag)
         out.append(

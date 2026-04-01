@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 /**
- * Visible operator pipeline: Run → Review → Preview → Publish.
+ * Visible operator pipeline: Run → Review snapshots → Preview → Public release.
  * No new routes — links to existing surfaces.
  */
 export function OperatorFlowStrip() {
@@ -17,7 +17,7 @@ export function OperatorFlowStrip() {
           →
         </li>
         <li>
-          <Link href="/review">Review</Link>
+          <Link href="/review">Review snapshots</Link>
           <span className="op-flow-strip__hint">staging_snapshot</span>
         </li>
         <li aria-hidden className="op-flow-strip__arrow">
@@ -32,7 +32,7 @@ export function OperatorFlowStrip() {
         </li>
         <li>
           <Link href="/publication">Publish</Link>
-          <span className="op-flow-strip__hint">publication_snapshot</span>
+          <span className="op-flow-strip__hint">public release (publication_snapshot)</span>
         </li>
       </ol>
     </div>

@@ -70,6 +70,12 @@ def _run_state_hint(status: str, *, has_interrupt_signal: bool) -> str:
         return "failed"
     if status == "completed":
         return "completed"
+    if status == "interrupted":
+        return "interrupted (cooperative stop)"
+    if status == "interrupt_requested":
+        return "interrupt requested — stop pending at next graph boundary"
+    if status == "starting":
+        return "starting (queued / not yet executing)"
     if status == "running":
         if has_interrupt_signal:
             return "running (interrupt checkpoint present — may be paused awaiting resume)"
@@ -96,7 +102,18 @@ def _timeline_item_from_event(e: GraphRunEventRecord) -> dict[str, Any]:
         RunEventType.DECISION_MADE: ("decision", "Decision recorded"),
         RunEventType.GRAPH_RUN_COMPLETED: ("run_completed", "Graph run completed"),
         RunEventType.GRAPH_RUN_FAILED: ("run_failed", "Graph run failed"),
+        RunEventType.INTERRUPT_REQUESTED: ("interrupt_requested", "Interrupt requested by operator"),
+        RunEventType.INTERRUPT_ACKNOWLEDGED: ("interrupt_acknowledged", "Interrupt acknowledged at boundary"),
+        RunEventType.GRAPH_RUN_INTERRUPTED: ("run_interrupted", "Graph run interrupted"),
         RunEventType.STAGING_SNAPSHOT_CREATED: ("staging_created", "Staging snapshot created"),
+        RunEventType.STAGING_SNAPSHOT_SKIPPED: (
+            "staging_skipped",
+            "Review snapshot skipped (policy or nomination)",
+        ),
+        RunEventType.WORKING_STAGING_UPDATED: (
+            "working_staging_updated",
+            "Working staging updated (live)",
+        ),
         RunEventType.STAGING_SNAPSHOT_BLOCKED: ("staging_blocked", "Staging snapshot blocked"),
         RunEventType.STAGING_SNAPSHOT_APPROVED: ("staging_approved", "Staging snapshot approved (audit)"),
         RunEventType.STAGING_SNAPSHOT_UNAPPROVED: (
@@ -182,11 +199,16 @@ def build_graph_run_detail_read_model(
     identity_s = str(eff_id) if eff_id else None
     graph_run_identity_s = str(gr.identity_id) if gr.identity_id else None
 
+    snapshot_skipped_intentionally = any(
+        e.event_type == RunEventType.STAGING_SNAPSHOT_SKIPPED for e in events_sorted
+    )
+
     hint = _run_state_hint(gr.status, has_interrupt_signal=has_interrupt_signal)
     att_state, att_reason = derive_graph_run_attention(
         status=gr.status,
         has_interrupt_signal=has_interrupt_signal,
         latest_staging_snapshot_id=staging_id,
+        snapshot_skipped_intentionally=snapshot_skipped_intentionally,
     )
 
     return {
@@ -197,6 +219,7 @@ def build_graph_run_detail_read_model(
             "graph_run_identity_id": graph_run_identity_s,
             "trigger_type": gr.trigger_type,
             "status": gr.status,
+            "interrupt_requested_at": gr.interrupt_requested_at,
             "started_at": gr.started_at,
             "ended_at": gr.ended_at,
             "max_iteration_index": _max_iteration(invocations),

@@ -11,6 +11,7 @@ from kmbl_orchestrator.runtime.run_events import RunEventType
 OPERATOR_TRIGGERED_EVENT_TYPES: frozenset[str] = frozenset(
     {
         RunEventType.GRAPH_RUN_RESUMED,
+        RunEventType.INTERRUPT_REQUESTED,
     }
 )
 
@@ -18,6 +19,8 @@ OPERATOR_TRIGGERED_EVENT_TYPES: frozenset[str] = frozenset(
 def _action_label_and_kind(event_type: str) -> tuple[str, str]:
     if event_type == RunEventType.GRAPH_RUN_RESUMED:
         return "graph_run_resumed", "Resume (operator)"
+    if event_type == RunEventType.INTERRUPT_REQUESTED:
+        return "interrupt_requested", "Interrupt requested (operator)"
     return event_type, event_type
 
 

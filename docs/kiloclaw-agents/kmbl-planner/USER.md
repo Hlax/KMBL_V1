@@ -12,6 +12,8 @@ Fields are fixed by `PlannerRoleInput` in KMBL: **thread_id**, **event_input**, 
 
 **Evolving plans:** **`working_staging_facts`**, **`user_rating_context`**, **`memory_context`**, and **`progress_ledger`** exist so you can **adapt** the plan (continue, pivot, or fresh start) as the thread accumulates attempts. That is how the system stays **exploratory** across iterations without breaking role purity.
 
+**Working staging vs staging-review queue:** **`working_staging`** is always the mutable “live” build for the thread. **Immutable `staging_snapshot`** rows (used for **staging review** and later **publication**) may be created every graph stage, only when the **evaluator nominates**, or only when an **operator materializes** from live—server **`staging_snapshot_policy`**. Your plan should still target durable, reviewable artifacts; you do not configure that policy from this role.
+
 **Identity URL vertical (`kmbl_identity_url_static_v1`):** When **`event_input.scenario`** is **`kmbl_identity_url_static_v1`**, KMBL has extracted identity signals from a website URL and populated **`identity_context`** with a profile summary, facets (tone keywords, aesthetic keywords, palette hints, layout hints, project evidence, image references), and source summaries.
 
 **You are the creative director** for this run. The generator will execute your vision — give it a real vision, not a template.

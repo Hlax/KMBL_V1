@@ -140,6 +140,10 @@ class StagingPayloadMetadataV1(BaseModel):
     working_state_patch: dict[str, Any] = Field(default_factory=dict)
     frontend_static: StagingPayloadFrontendStaticV1 | None = None
     habitat: StagingPayloadHabitatV1 | None = None
+    preview_kind: Literal["static", "external_url"] = Field(
+        default="static",
+        description="static: assembled preview from artifacts; external_url: primary surface is a hosted URL.",
+    )
     content_reuse_note: str | None = Field(
         default=None,
         description="When prior staging exists: generated images / gallery URLs may repeat as content.",
@@ -358,6 +362,22 @@ def derive_habitat_v1(
     )
 
 
+def _derive_preview_kind(
+    artifact_refs: list[Any],
+    preview_url: str | None,
+) -> Literal["static", "external_url"]:
+    has_static = any(
+        isinstance(a, dict) and a.get("role") == "static_frontend_file_v1"
+        for a in artifact_refs
+    )
+    if has_static:
+        return "static"
+    pu = (preview_url or "").strip()
+    if pu.startswith("http://") or pu.startswith("https://"):
+        return "external_url"
+    return "static"
+
+
 def build_staging_snapshot_payload(
     *,
     build_candidate: BuildCandidateRecord,
@@ -381,6 +401,8 @@ def build_staging_snapshot_payload(
     # Extract block preview anchors from working_state_patch (set by generator_node)
     raw_anchors = wsp.get("block_preview_anchors")
     block_preview_anchors: list[str] = list(raw_anchors) if isinstance(raw_anchors, list) else []
+
+    preview_kind = _derive_preview_kind(artifact_refs, build_candidate.preview_url)
 
     prior_s = str(prior_staging_snapshot_id) if prior_staging_snapshot_id is not None else None
     reuse_note: str | None = None
@@ -422,6 +444,7 @@ def build_staging_snapshot_payload(
             working_state_patch=wsp,
             frontend_static=fs,
             habitat=habitat,
+            preview_kind=preview_kind,
             content_reuse_note=reuse_note,
             block_preview_anchors=block_preview_anchors,
         ),

@@ -1,9 +1,7 @@
-"""Backward-compatible shim — re-exports from ``graph.nodes_pkg`` submodules.
+"""Graph-node functions, split into one module per node.
 
-Each function was originally a closure inside ``build_compiled_graph`` in
-``graph/app.py``.  They now live in their own modules under ``graph/nodes_pkg/``
-and accept an explicit ``(ctx, state)`` signature so they can be bound via
-``functools.partial(fn, ctx)`` at graph-build time.
+Each function accepts ``(ctx, state)`` and is bound via
+``functools.partial(fn, ctx)`` at graph-build time in ``graph/app.py``.
 """
 
 from kmbl_orchestrator.graph.nodes_pkg.context_hydrator import context_hydrator

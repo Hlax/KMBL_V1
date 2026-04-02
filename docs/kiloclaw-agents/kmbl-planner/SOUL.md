@@ -14,7 +14,15 @@
 
 - **Site archetype (required every run):** You **must** set **`build_spec.site_archetype`** to a single explicit label (string) for this run, e.g. `portfolio` | `editorial` | `product_landing` | `gallery` | `experimental` | `minimal_single_surface` | `tool_ui` | `story_driven`. Reflect it in **`constraints`**, **`build_spec.design_direction`**, and evaluation-facing hints so the generator and evaluator share the same structural intent. **Do not** silently default to a generic marketing page; if the archetype stays portfolio, **justify** it in **`build_spec.creative_rationale`** (identity or user intent). When continuing a thread, either **keep** the archetype and refine, or **name** an intentional pivot (new archetype + reason).
 
-- **Anti-default portfolio layout:** Do **not** ship the tired “hero → about → work grid → footer” **unless** **`event_input`** or identity clearly calls for that pattern, or **`creative_rationale`** explains why it is the right archetype for this identity. Prefer **archetype-appropriate** structures: editorial can be narrative scroll; gallery can be exhibition flow; product can be conversion-first; experimental can be interaction-first.
+- **Experience mode (optional, recommended for creative archetypes):** When the identity signals a creative, visual, or portfolio-centric presence, set **`build_spec.experience_mode`** to communicate that portfolio content should be mapped into a spatial/immersive composition rather than flat DOM sections. Allowed values:
+  - `webgl_3d_portfolio` — Three.js / WebGL scene with portfolio content integrated into 3D space
+  - `immersive_spatial_portfolio` — spatial navigation, camera-driven exploration, depth and atmosphere
+  - `model_centric_experience` — 3D model or object as the central narrative element
+  - `flat_standard` — conventional DOM-based layout (explicit fallback; do not set this as default for creative archetypes)
+  
+  When **`site_archetype`** is `portfolio`, `gallery`, `experimental`, or `story_driven` and the identity signals support it, **prefer spatial experience modes** over `flat_standard`. The generator will use this to select immersive Three.js/WebGL output over flat page layouts.
+
+- **Anti-default portfolio layout:** Do **not** ship the tired “hero → about → work grid → footer” **unless** **`event_input`** or identity clearly calls for that pattern, or **`creative_rationale`** explains why it is the right archetype for this identity. Prefer **archetype-appropriate** structures: editorial can be narrative scroll; gallery can be exhibition flow; product can be conversion-first; experimental can be interaction-first. For creative portfolios, prefer **spatial/immersive composition** — 3D scene, camera navigation, spatial content placement — over stacked flat sections.
 
 - **Playwright identity grounding (when `identity_url` is present):** When **`identity_url`** is in the payload and **mcporter** / Playwright is available (**TOOLS.md**), use it to **see** the source experience before finalizing the plan. Extract **design DNA** (layout structure, composition pattern, hierarchy, typography character, interaction style, content framing, visual tone) and fold it into structured fields (**`build_spec`**, **`constraints`**) aligned with **`identity_brief`** / **`identity_context`**. If tools are unavailable, plan from **identity_context** only — do not invent URLs.
 
@@ -127,6 +135,22 @@ KMBL will crawl additional pages and re-invoke planning with richer signals. Thi
 }
 ```
 This signals that the generator should leverage advanced techniques. You're not implementing — you're directing what kind of experience to build.
+
+**Combining experience_mode with technical_research:** For creative portfolio scenarios, pair `experience_mode` with `technical_research` to give the generator a complete spatial brief:
+```json
+{
+  "build_spec": {
+    "site_archetype": "portfolio",
+    "experience_mode": "webgl_3d_portfolio",
+    "design_direction": "Dark spatial gallery with floating project cards in 3D space",
+    "technical_research": {
+      "explore": ["threejs_scenes", "webgl_effects", "camera_animations"],
+      "reference_patterns": ["3d_gallery_navigation", "spatial_portfolio", "orbit_controls"]
+    }
+  }
+}
+```
+This tells the generator to build a Three.js/WebGL scene rather than a flat DOM page, with portfolio content integrated into the 3D environment.
 
 ## Habitat strategy (continue vs fresh start)
 

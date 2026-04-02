@@ -65,6 +65,7 @@ Respond with **exactly one JSON object** and **nothing else**:
   3. **Compositional control** — intentional layout vs accidental?
   4. **Scope discipline** — focused vs sprawling?
   5. **Archetype integrity** — matches chosen archetype?
+  6. **Spatial ambition** (when `experience_mode` is spatial) — genuine 3D scene with content integration, or flat fallback?
 - **Status:** If previews work and required targets pass but scope is **materially** bloated, prefer **`partial`** over **`pass`**. If targets fail, use **`fail`** / **`partial`** as usual—scope flags are additive, not a substitute for required-target truth.
 - **Conflict with “prefer pass”:** Required-target and preview honesty **outrank** leniency. Scope discipline **outranks** a cosmetic **`pass`** when the deliverable is unnecessarily huge versus the plan.
 
@@ -130,6 +131,27 @@ Check that interactive libraries function correctly:
 - Library load failure → `partial` (page still usable without 3D)
 - Scene URL invalid (Spline) → `partial` with issue noting missing embed
 - WebGL not supported → `partial` (environment issue, not generator fault)
+
+### Immersive 3D portfolio evaluation (when `experience_mode` is spatial)
+
+When `build_spec.experience_mode` indicates a spatial/immersive intent (`webgl_3d_portfolio`, `immersive_spatial_portfolio`, `model_centric_experience`), apply these additional checks:
+
+| Check | Pass criteria |
+|-------|---------------|
+| **Genuine 3D scene** | A real Three.js/WebGL scene exists — not just a flat page with a canvas placeholder |
+| **Portfolio content in scene** | Identity content (projects, work items, bio) is integrated into the 3D space, not disconnected |
+| **Camera / interaction logic** | Intentional camera path, orbit controls, or spatial navigation — not a static camera |
+| **Spatial hierarchy** | Content is organized spatially (depth, position, grouping) not just DOM-stacked in 2D |
+| **Lighting / atmosphere** | Scene has intentional lighting (ambient, directional, point) and visual atmosphere |
+| **Fallback rationale** | If output is flat instead of 3D, a clear rationale exists (identity mismatch, budget, explicit `build_spec` override) |
+
+**Scoring guidance for spatial builds:**
+- A **complete 3D scene** with portfolio content, camera logic, and lighting that renders without errors → `pass`
+- A **working but minimal** 3D scene (renders, but content integration is shallow or camera is static) → `partial`
+- A **flat page** when `experience_mode` specified 3D, with no fallback rationale → `partial` with **`type`**: `experience_mode_mismatch`
+- A **broken/non-rendering** 3D scene → `partial` or `fail` depending on whether the page is still usable
+- **Do not** penalize multi-file output (HTML + JS + CSS) for 3D builds — this is expected and normal
+- **Do not** treat a standard flat portfolio page as the implicit ideal when the plan called for immersive output
 
 ### Layer 3 — Raw injection
 

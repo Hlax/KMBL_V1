@@ -200,7 +200,7 @@ def test_stub_generator_persists_primary_move_metadata() -> None:
     raw = cand.raw_payload_json or {}
     pm = raw.get("_kmbl_primary_move")
     assert isinstance(pm, dict)
-    assert pm.get("move_type") == "typography"
+    assert pm.get("move_type") == "composition"
 
 
 def test_evaluator_output_contract_accepts_scope_overreach_issue() -> None:

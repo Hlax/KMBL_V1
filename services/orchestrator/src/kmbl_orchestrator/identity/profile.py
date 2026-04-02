@@ -137,6 +137,20 @@ def _match_keywords(text: str, vocab: dict[str, set[str]], max_matches: int = 4)
     return [label for label, _ in scored[:max_matches]]
 
 
+def _match_keywords_weighted(
+    text: str, vocab: dict[str, set[str]], max_matches: int = 4,
+) -> list[tuple[str, int]]:
+    """Match text against a keyword vocabulary, return (label, hit_count) pairs."""
+    lower = text.lower()
+    scored: list[tuple[str, int]] = []
+    for label, keywords in vocab.items():
+        hits = sum(1 for kw in keywords if kw in lower)
+        if hits > 0:
+            scored.append((label, hits))
+    scored.sort(key=lambda x: x[1], reverse=True)
+    return scored[:max_matches]
+
+
 def extract_structured_identity(
     *,
     seed_data: dict[str, Any] | None = None,
@@ -266,6 +280,57 @@ EXPERIENCE_MODES = frozenset({
 _SPATIAL_ARCHETYPES = {"portfolio", "gallery", "experimental", "story_driven"}
 
 
+def derive_experience_mode_with_confidence(
+    structured_identity: StructuredIdentityProfile,
+    *,
+    site_archetype: str | None = None,
+) -> dict[str, Any]:
+    """
+    Derive experience_mode with a confidence score from structured identity signals.
+
+    Returns ``{"experience_mode": str, "experience_confidence": float}``.
+    Confidence (0.0–1.0) reflects signal strength for the winning rule.
+    """
+    themes = set(structured_identity.themes)
+    visual = set(structured_identity.visual_tendencies)
+    content = set(structured_identity.content_types)
+    complexity = structured_identity.complexity
+
+    # Rule 1: Explicit spatial visual tendency → immersive
+    if "spatial" in visual:
+        return {"experience_mode": "immersive_spatial_portfolio", "experience_confidence": 0.9}
+
+    # Rule 2: Ambitious + visual-heavy → webgl_3d
+    if complexity == "ambitious" and visual & {"image-driven", "motion-heavy"}:
+        return {"experience_mode": "webgl_3d_portfolio", "experience_confidence": 0.85}
+
+    # Rule 3: Spatial archetype + creative theme signals → webgl_3d
+    creative_themes = themes & {"cinematic", "experimental", "artistic"}
+    if site_archetype and site_archetype in _SPATIAL_ARCHETYPES and creative_themes:
+        return {"experience_mode": "webgl_3d_portfolio", "experience_confidence": 0.8}
+
+    # Rule 4: Text-heavy with no visual signals → flat
+    text_only_content = content <= {"writing"} and content  # writing only, non-empty
+    if text_only_content and not visual:
+        return {"experience_mode": "flat_standard", "experience_confidence": 0.85}
+
+    # Rule 5: Simple complexity, no spatial/motion → flat
+    if complexity == "simple" and not (visual & {"spatial", "motion-heavy", "image-driven"}):
+        return {"experience_mode": "flat_standard", "experience_confidence": 0.8}
+
+    # Rule 6a: Moderate or above with any visual/portfolio signal → webgl_3d
+    portfolio_content = content & {"projects", "photography", "design", "art"}
+    if portfolio_content and (visual or creative_themes):
+        return {"experience_mode": "webgl_3d_portfolio", "experience_confidence": 0.7}
+
+    # Rule 6b: Site archetype is spatial even without strong creative themes
+    if site_archetype and site_archetype in _SPATIAL_ARCHETYPES:
+        return {"experience_mode": "webgl_3d_portfolio", "experience_confidence": 0.7}
+
+    # Rule 7: Fallback
+    return {"experience_mode": "flat_standard", "experience_confidence": 0.4}
+
+
 def derive_experience_mode(
     structured_identity: StructuredIdentityProfile,
     *,
@@ -287,41 +352,62 @@ def derive_experience_mode(
       6b. Spatial site_archetype without strong creative themes → webgl_3d_portfolio
       7. Fallback → flat_standard
     """
-    themes = set(structured_identity.themes)
-    visual = set(structured_identity.visual_tendencies)
-    content = set(structured_identity.content_types)
-    complexity = structured_identity.complexity
+    result = derive_experience_mode_with_confidence(
+        structured_identity, site_archetype=site_archetype,
+    )
+    return result["experience_mode"]
 
-    # Rule 1: Explicit spatial visual tendency → immersive
-    if "spatial" in visual:
-        return "immersive_spatial_portfolio"
 
-    # Rule 2: Ambitious + visual-heavy → webgl_3d
-    if complexity == "ambitious" and visual & {"image-driven", "motion-heavy"}:
-        return "webgl_3d_portfolio"
+# ── Weighted Identity Signals ────────────────────────────────────────────────
 
-    # Rule 3: Spatial archetype + creative theme signals → webgl_3d
-    creative_themes = themes & {"cinematic", "experimental", "artistic"}
-    if site_archetype and site_archetype in _SPATIAL_ARCHETYPES and creative_themes:
-        return "webgl_3d_portfolio"
 
-    # Rule 4: Text-heavy with no visual signals → flat
-    text_only_content = content <= {"writing"} and content  # writing only, non-empty
-    if text_only_content and not visual:
-        return "flat_standard"
+def compute_weighted_identity_signals(
+    profile: StructuredIdentityProfile,
+    combined_text: str,
+) -> dict[str, Any]:
+    """
+    Return a weighted version of the identity profile dict.
 
-    # Rule 5: Simple complexity, no spatial/motion → flat
-    if complexity == "simple" and not (visual & {"spatial", "motion-heavy", "image-driven"}):
-        return "flat_standard"
+    Same structure as ``profile.to_dict()`` but ``themes`` entries become
+    ``[{"value": str, "weight": float}, ...]`` with weights derived from
+    keyword hit counts (normalized to 0.0–1.0 range).  Deterministic.
+    """
+    base = profile.to_dict()
 
-    # Rule 6a: Moderate or above with any visual/portfolio signal → webgl_3d
-    portfolio_content = content & {"projects", "photography", "design", "art"}
-    if portfolio_content and (visual or creative_themes):
-        return "webgl_3d_portfolio"
+    theme_hits = _match_keywords_weighted(combined_text, _THEME_KEYWORDS, max_matches=len(_THEME_KEYWORDS))
+    if not theme_hits:
+        return base
 
-    # Rule 6b: Site archetype is spatial even without strong creative themes
-    if site_archetype and site_archetype in _SPATIAL_ARCHETYPES:
-        return "webgl_3d_portfolio"
+    max_hits = max(count for _, count in theme_hits)
+    hit_map = {label: count for label, count in theme_hits}
 
-    # Rule 7: Fallback
-    return "flat_standard"
+    if "themes" in base:
+        base["themes"] = [
+            {
+                "value": t,
+                "weight": round(hit_map[t] / max_hits, 3) if t in hit_map else 0.0,
+            }
+            for t in profile.themes
+        ]
+
+    return base
+
+
+# ── Spatial Translation Hints ────────────────────────────────────────────────
+
+_SPATIAL_TRANSLATION_MAP: dict[str, str] = {
+    "image-driven": "map projects to 3D planes",
+    "motion-heavy": "use animated transitions and camera movement",
+    "spatial": "full 3D scene layout with depth and perspective",
+    "typography-first": "use text as spatial elements in 3D space",
+}
+
+
+def derive_spatial_translation_hints(visual_tendencies: list[str]) -> list[str]:
+    """Deterministic mapping from visual tendencies to spatial translation hints."""
+    hints: list[str] = []
+    for tendency in visual_tendencies:
+        hint = _SPATIAL_TRANSLATION_MAP.get(tendency)
+        if hint:
+            hints.append(hint)
+    return hints

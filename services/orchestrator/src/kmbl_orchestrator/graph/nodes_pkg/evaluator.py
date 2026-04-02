@@ -240,6 +240,41 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             )
     report = apply_preview_surface_gate(report, is_static_vertical=is_static_vertical)
 
+    # ── 3D content guardrail for spatial experience modes ────────────────
+    bs_from_state = state.get("build_spec") or {}
+    exp_mode = bs_from_state.get("experience_mode", "")
+    if exp_mode in ("immersive_spatial_portfolio", "webgl_3d_portfolio"):
+        _3d_keywords = {"three", "webgl", "3d"}
+        has_3d_content = False
+        candidate_artifacts = bc.get("artifact_outputs") or []
+        for art in candidate_artifacts:
+            art_role = str(art.get("role", "")).lower()
+            art_content = str(art.get("content", "")).lower()
+            art_path = str(art.get("path", "")).lower()
+            searchable = f"{art_role} {art_content} {art_path}"
+            if any(kw in searchable for kw in _3d_keywords):
+                has_3d_content = True
+                break
+        if not has_3d_content and report.status != "fail":
+            _log.warning(
+                "graph_run graph_run_id=%s 3d_content_guardrail: "
+                "experience_mode=%s but no 3D content found in artifacts, downgrading to fail",
+                gid, exp_mode,
+            )
+            existing_issues = list(report.issues_json or [])
+            existing_issues.append({
+                "severity": "critical",
+                "category": "3d_content_missing",
+                "message": (
+                    f"experience_mode is '{exp_mode}' but build candidate "
+                    "contains no WebGL/Three.js/3D content"
+                ),
+            })
+            report = report.model_copy(update={
+                "status": "fail",
+                "issues_json": existing_issues,
+            })
+
     # Fix 2: compute alignment score from evaluator output + identity_brief
     identity_brief = state.get("identity_brief")
     alignment_score: float | None = None

@@ -151,6 +151,14 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         # Fix 3: retry_context carries orchestrator-selected direction on iterations
         # Generator must use retry_context.retry_direction to determine approach
     }
+    # Derive spatial translation hints from structured identity visual tendencies
+    si_payload = state.get("structured_identity")
+    if si_payload and isinstance(si_payload, dict):
+        from kmbl_orchestrator.identity.profile import derive_spatial_translation_hints
+        visual_t = si_payload.get("visual_tendencies") or []
+        hints = derive_spatial_translation_hints(visual_t)
+        if hints:
+            payload["spatial_translation_hints"] = hints
     # Merge retry_context into iteration_plan when present.
     # In-graph retries: iteration > 0 (evaluator feedback from prior step).
     # Autonomous loop ticks: each run_graph starts at iteration_index 0, but the loop

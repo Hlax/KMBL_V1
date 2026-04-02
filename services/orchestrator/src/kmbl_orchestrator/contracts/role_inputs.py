@@ -89,6 +89,13 @@ class GeneratorRoleInput(BaseModel):
             "map identity themes into spatial design, use 3D composition intentionally."
         ),
     )
+    spatial_translation_hints: list[str] | None = Field(
+        default=None,
+        description=(
+            "Deterministic mapping from visual tendencies to spatial design hints. "
+            "E.g. 'map projects to 3D planes', 'use animated transitions and camera movement'."
+        ),
+    )
 
 
 class EvaluatorRoleInput(BaseModel):

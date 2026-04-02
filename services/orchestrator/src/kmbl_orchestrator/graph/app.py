@@ -405,7 +405,12 @@ def _run_graph_inner(
                     repo,
                     gid_u,
                     RunEventType.GRAPH_RUN_COMPLETED,
-                    {},
+                    {
+                        "decision": final.get("decision"),
+                        "iteration_index": final.get("iteration_index"),
+                        "staging_snapshot_id": final.get("staging_snapshot_id"),
+                        "last_alignment_score": final.get("last_alignment_score"),
+                    },
                     thread_id=tid_u,
                 )
         except Exception as post_exc:
@@ -418,7 +423,11 @@ def _run_graph_inner(
                 repo,
                 gid_u,
                 RunEventType.POST_INVOKE_FAILURE,
-                {"error": f"{type(post_exc).__name__}: {post_exc}"},
+                {
+                    "error_type": type(post_exc).__name__,
+                    "error_message": str(post_exc)[:500],
+                    "phase": "post_invoke_persistence",
+                },
                 thread_id=tid_u,
             )
             try:

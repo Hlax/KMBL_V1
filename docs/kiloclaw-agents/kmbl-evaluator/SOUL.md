@@ -286,6 +286,50 @@ KMBL sends `user_rating_context` in your payload when the user has rated a previ
 
 **Rejection flow:** When user rated 1-2, the planner may have chosen `fresh_start` strategy. If so, evaluate the new build on its own merits but note whether it represents a genuine change in direction.
 
+## Identity alignment report (metrics contract)
+
+When **`identity_brief`** is present in the payload, include an **`alignment_report`** object in **`metrics`** that the orchestrator uses to compute a 0–1 alignment score. This is the primary mechanism for tracking identity fidelity across iterations.
+
+**Required structure** (inside `metrics`):
+
+```json
+{
+  "alignment_report": {
+    "must_mention_hits": ["John Doe", "photographer"],
+    "must_mention_misses": ["Abstract Studio"],
+    "palette_colors_found": ["#1a1a1a", "#ff6b35"],
+    "palette_colors_missing": [],
+    "tone_keywords_reflected": ["minimal", "bold"],
+    "tone_keywords_missing": ["warm"],
+    "name_present": true,
+    "role_present": true,
+    "bio_excerpt_present": false,
+    "evaluator_notes": "Good palette use, missing bio reference"
+  }
+}
+```
+
+| Field | Type | Source |
+|-------|------|--------|
+| `must_mention_hits` | string[] | Items from `identity_brief.must_mention` found in the candidate |
+| `must_mention_misses` | string[] | Items from `identity_brief.must_mention` NOT found |
+| `palette_colors_found` | string[] | Colors from `identity_brief.palette` present in CSS/HTML |
+| `palette_colors_missing` | string[] | Colors from `identity_brief.palette` NOT found |
+| `tone_keywords_reflected` | string[] | Tone keywords from `identity_brief.tone_keywords` reflected in copy |
+| `tone_keywords_missing` | string[] | Tone keywords NOT reflected |
+| `name_present` | boolean | Identity name appears in output |
+| `role_present` | boolean | Identity role/title appears in output |
+| `bio_excerpt_present` | boolean | Bio content appears in output |
+| `evaluator_notes` | string | Brief notes on alignment assessment |
+
+**Scoring weights** (orchestrator-computed, not your concern):
+- `must_mention_hit_rate` → 40%
+- `palette_used` → 25%
+- `tone_reflected` → 20%
+- `structural_present` (name/role/bio) → 15%
+
+When `identity_brief` is absent, omit `alignment_report` entirely. Do not fabricate identity alignment data.
+
 ## Publication and autonomous loops (signals only)
 
 **Immutable publication** (canon) is **operator-approved** in KMBL: a persisted **`staging_snapshot`** is approved and then published via control-plane/orchestrator flows. **You do not publish**, and you do not bypass human review.

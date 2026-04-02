@@ -261,9 +261,11 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             thread_id=tid,
             repo=ctx.repo,
         )
+    persist_validation_failed = False
     try:
         validate_role_output_for_persistence("generator", raw)
     except (ValidationError, ValueError) as e:
+        persist_validation_failed = True
         _log.warning(
             "generator persist-time validation issue (non-fatal, normalization proceeds): %s", e,
         )
@@ -274,7 +276,9 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             {
                 "role": "generator",
                 "phase": "persist_validation",
-                "warning": str(e),
+                "severity": "degraded",
+                "warning": str(e)[:500],
+                "message": "generator output failed persist-time validation; normalization will attempt rescue",
             },
             thread_id=tid,
         )
@@ -299,6 +303,16 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         identity_id=identity_id,
         enable_image_generation=ctx.settings.habitat_image_generation_enabled,
     )
+    # Track persist_validation_failed in candidate metadata for downstream awareness
+    if persist_validation_failed:
+        cand = cand.model_copy(
+            update={
+                "raw_payload_json": {
+                    **(cand.raw_payload_json or {}),
+                    "_persist_validation_failed": True,
+                }
+            }
+        )
     # Emit normalization rescue event when the normalizer had to recover
     rescue_paths = (cand.raw_payload_json or {}).get("_normalization_rescues")
     if rescue_paths:

@@ -24,6 +24,7 @@ from kmbl_orchestrator.domain import (
     CheckpointRecord,
     GraphRunRecord,
     ThreadRecord,
+    is_valid_status_transition,
 )
 from kmbl_orchestrator.errors import (
     RoleInvocationFailed,
@@ -229,6 +230,15 @@ def _run_graph_inner(
             repo.update_graph_run_status(
                 gid_u, "running", None, clear_interrupt_requested=False
             )
+        elif gr0 is not None and gr0.status not in ("running", "starting"):
+            _log.error(
+                "run_graph graph_run_id=%s invalid_status_for_invoke status=%s",
+                gid0,
+                gr0.status,
+            )
+            raise RuntimeError(
+                f"graph_run {gid0} has status '{gr0.status}' — expected 'starting' or 'running'"
+            )
     try:
         final = app.invoke(base)
     except RunInterrupted as e:
@@ -338,6 +348,11 @@ def _run_graph_inner(
         if gid0:
             gid_u = UUID(str(gid0))
             tid_s = base.get("thread_id")
+            error_info: dict[str, Any] = {
+                "error_kind": "graph_error",
+                "error_type": type(e).__name__,
+                "error_message": str(e)[:500],
+            }
             if tid_s:
                 tid_u = UUID(str(tid_s))
                 _save_checkpoint_with_event(
@@ -347,12 +362,7 @@ def _run_graph_inner(
                         thread_id=tid_u,
                         graph_run_id=gid_u,
                         checkpoint_kind="interrupt",
-                        state_json={
-                            "orchestrator_error": {
-                                "error_kind": "graph_error",
-                                "error_message": f"{type(e).__name__}: {e}",
-                            }
-                        },
+                        state_json={"orchestrator_error": error_info},
                         context_compaction_json=None,
                     ),
                 )
@@ -360,7 +370,7 @@ def _run_graph_inner(
                     repo,
                     gid_u,
                     RunEventType.GRAPH_RUN_FAILED,
-                    {"error_kind": "graph_error"},
+                    error_info,
                 )
             repo.update_graph_run_status(
                 gid_u,
@@ -390,13 +400,25 @@ def _run_graph_inner(
                     _save_checkpoint_with_event(ctx.repo, post)
                     repo.update_thread_current_checkpoint(UUID(tid_s), post.checkpoint_id)
                 ended = datetime.now(timezone.utc).isoformat()
+                # Validate status transition before applying
+                current_run = repo.get_graph_run(gid_u)
+                if current_run and not is_valid_status_transition(current_run.status, "completed"):
+                    _log.warning(
+                        "run_graph graph_run_id=%s invalid_transition current=%s target=completed",
+                        gid, current_run.status,
+                    )
                 repo.update_graph_run_status(gid_u, "completed", ended)
                 repo.attach_run_snapshot(gid_u, dict(final))
                 append_graph_run_event(
                     repo,
                     gid_u,
                     RunEventType.GRAPH_RUN_COMPLETED,
-                    {},
+                    {
+                        "decision": final.get("decision"),
+                        "iteration_index": final.get("iteration_index"),
+                        "staging_snapshot_id": final.get("staging_snapshot_id"),
+                        "last_alignment_score": final.get("last_alignment_score"),
+                    },
                     thread_id=tid_u,
                 )
         except Exception as post_exc:
@@ -409,7 +431,11 @@ def _run_graph_inner(
                 repo,
                 gid_u,
                 RunEventType.POST_INVOKE_FAILURE,
-                {"error": f"{type(post_exc).__name__}: {post_exc}"},
+                {
+                    "error_type": type(post_exc).__name__,
+                    "error_message": str(post_exc)[:500],
+                    "phase": "post_invoke_persistence",
+                },
                 thread_id=tid_u,
             )
             try:

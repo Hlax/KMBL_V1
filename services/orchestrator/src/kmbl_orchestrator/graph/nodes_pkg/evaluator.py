@@ -70,11 +70,12 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     if spec is None:
         raise RoleInvocationFailed(
             phase="evaluator",
+            graph_run_id=gid,
+            thread_id=tid,
             detail={
                 "error_kind": "configuration_error",
                 "message": f"build_spec not found for build_spec_id={bsid}",
             },
-            thread_id=tid,
         )
     success = spec.success_criteria_json
     targets = spec.evaluation_targets_json

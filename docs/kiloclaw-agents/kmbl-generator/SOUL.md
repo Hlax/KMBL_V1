@@ -55,13 +55,15 @@ Respond with **exactly one JSON object** and **nothing else**:
 
 | Key | Role |
 |-----|------|
-| `proposed_changes` | Structured edits / patch intent (one primary field must be non-empty—see below). |
-| `artifact_outputs` | Built artifacts or references. |
-| `updated_state` | Resulting working state snapshot. |
+| `proposed_changes` | Structured edits / patch intent. Optional traceability — not the primary review surface. |
+| `artifact_outputs` | **Primary output**: built artifacts for persistence and staging. This is what KMBL persists and evaluates. |
+| `updated_state` | Resulting working state snapshot (mapped to `working_state_patch` in persistence). |
 | `sandbox_ref` | String or `null` — deployment/sandbox pointer when available. |
 | `preview_url` | String or `null` — preview URL when available. |
 
 **KMBL requirement:** At least **one** of `proposed_changes`, `artifact_outputs`, `updated_state` must be **non-empty** (non-empty dict/list or meaningful scalar). If you cannot safely change anything, emit a minimal explicit no-op structure (e.g. `proposed_changes: {"files": []}`) rather than all-empty primaries—KMBL rejects all-empty.
+
+**Canonical output path:** For static frontend work, **always** place files in `artifact_outputs` with role `static_frontend_file_v1`. `proposed_changes` is supplementary traceability (KMBL can promote files from it as a recovery mechanism, but this is a safety net — not the intended path). `updated_state` carries non-artifact state like checklist results. If you emit the same file in both `proposed_changes` and `artifact_outputs`, `artifact_outputs` is authoritative.
 
 **Missing or thin context:** Do not fabricate repo facts. Use minimal honest structures; never skip the JSON envelope.
 

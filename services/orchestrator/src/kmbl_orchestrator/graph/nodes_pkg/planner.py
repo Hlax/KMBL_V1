@@ -182,23 +182,25 @@ def planner_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     if not isinstance(existing_mode, str) or not existing_mode.strip():
         from kmbl_orchestrator.identity.profile import (
             StructuredIdentityProfile,
-            derive_experience_mode,
+            derive_experience_mode_with_confidence,
         )
         si_payload = state.get("structured_identity")
         if si_payload and isinstance(si_payload, dict):
             si = StructuredIdentityProfile.model_validate(si_payload)
         else:
             si = StructuredIdentityProfile()
-        derived_mode = derive_experience_mode(
+        mode_result = derive_experience_mode_with_confidence(
             si, site_archetype=bs.get("site_archetype"),
         )
+        derived_mode = mode_result["experience_mode"]
         bs["experience_mode"] = derived_mode
         md = raw.setdefault("_kmbl_planner_metadata", {})
         md["experience_mode_derived"] = True
         md["experience_mode_source"] = "structured_identity"
+        md["experience_confidence"] = mode_result["experience_confidence"]
         _log.info(
-            "graph_run graph_run_id=%s experience_mode derived=%s archetype=%s",
-            gid, derived_mode, bs.get("site_archetype"),
+            "graph_run graph_run_id=%s experience_mode derived=%s confidence=%.2f archetype=%s",
+            gid, derived_mode, mode_result["experience_confidence"], bs.get("site_archetype"),
         )
     try:
         validate_role_output_for_persistence("planner", raw)

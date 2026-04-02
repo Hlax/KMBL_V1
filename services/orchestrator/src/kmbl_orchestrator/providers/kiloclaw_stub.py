@@ -51,11 +51,30 @@ class KiloClawStubClient:
             return _apply_role_contract(role_type, raw)
         if role_type == "generator":
             raw = {
-                "proposed_changes": {"files": []},
-                "artifact_outputs": [],
+                "proposed_changes": {
+                    "files": [
+                        {
+                            "path": "component/hero.html",
+                            "language": "html",
+                            "content": "<section class='hero'><h1>Stub Hero</h1>"
+                            "<p>Stub portfolio content</p></section>",
+                        }
+                    ]
+                },
+                "artifact_outputs": [
+                    {
+                        "role": "static_frontend_file_v1",
+                        "path": "component/hero.html",
+                        "language": "html",
+                        "content": "<section class='hero'><h1>Stub Hero</h1>"
+                        "<p>Stub portfolio content</p></section>",
+                        "entry_for_preview": True,
+                        "bundle_id": "stub-bundle-001",
+                    }
+                ],
                 "updated_state": {"revision": 1},
                 "sandbox_ref": "stub-sandbox",
-                "preview_url": "https://preview.example.invalid",
+                "preview_url": "http://localhost:3000/stub-preview",
                 # Bounded-iteration smoke (see kmbl-generator SOUL)
                 "_kmbl_primary_move": {
                     "mode": "refine",
@@ -79,7 +98,16 @@ class KiloClawStubClient:
                 "summary": f"stub evaluation (iteration {iteration})",
                 "issues": issues,
                 "artifacts": [],
-                "metrics": {"stub": True, "iteration": iteration},
+                "metrics": {
+                    "stub": True,
+                    "iteration": iteration,
+                    "alignment_report": {
+                        "must_mention_hit_rate": 0.75 if status == "pass" else 0.4,
+                        "palette_used": True if status == "pass" else False,
+                        "tone_reflected": True if status == "pass" else False,
+                        "structural_present": True,
+                    },
+                },
             }
             return _apply_role_contract(role_type, raw)
         raise ValueError(f"unknown role_type: {role_type}")

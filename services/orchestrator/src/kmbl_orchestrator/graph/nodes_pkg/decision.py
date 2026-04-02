@@ -31,7 +31,22 @@ def decision_router(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         ctx.repo, gid, UUID(state["thread_id"])
     )
     ev = state.get("evaluation_report") or {}
-    status = ev.get("status", "fail")
+    if not isinstance(ev, dict) or "status" not in ev:
+        _log.warning(
+            "decision_router graph_run_id=%s evaluation_report missing or malformed, defaulting to fail",
+            gid,
+        )
+        append_graph_run_event(
+            ctx.repo,
+            gid,
+            RunEventType.CONTRACT_WARNING,
+            {
+                "kind": "missing_evaluation_report",
+                "message": "evaluation_report missing or has no status field; defaulting to fail",
+            },
+            thread_id=UUID(state["thread_id"]),
+        )
+    status = ev.get("status", "fail") if isinstance(ev, dict) else "fail"
     iteration = int(state.get("iteration_index", 0))
     max_iter = int(state.get("max_iterations", ctx.settings.graph_max_iterations_default))
 
@@ -106,6 +121,19 @@ def decision_router(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             prior_direction=prior_direction,
         )
         out["retry_direction"] = retry_dir
+
+        if alignment_score is None:
+            append_graph_run_event(
+                ctx.repo,
+                gid,
+                RunEventType.CONTRACT_WARNING,
+                {
+                    "kind": "alignment_score_unavailable",
+                    "retry_direction": retry_dir,
+                    "message": "alignment score unavailable; retry direction based on heuristics only",
+                },
+                thread_id=UUID(state["thread_id"]),
+            )
 
         # Extract failed criteria IDs from issues for planner context
         issues = ev.get("issues") or []

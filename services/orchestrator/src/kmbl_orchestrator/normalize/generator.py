@@ -445,10 +445,10 @@ def normalize_generator_output(
     candidate_id = uuid4()
     rescue_paths: list[str] = []
 
-    # Build content index from proposed_changes/updated_state for cross-reference
+    # Build content index from proposed_changes/updated_state for cross-reference.
+    # This is an enrichment step, not a rescue — only log as rescue if it actually
+    # fills content into artifacts that were missing it.
     content_index = _build_content_index(raw)
-    if content_index:
-        rescue_paths.append("content_index_built")
 
     ao = raw.get("artifact_outputs")
     artifacts = list(ao) if isinstance(ao, list) else []

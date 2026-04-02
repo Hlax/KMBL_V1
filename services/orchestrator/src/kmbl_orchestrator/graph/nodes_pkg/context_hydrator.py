@@ -40,8 +40,15 @@ def context_hydrator(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             brief = build_identity_brief_from_repo(ctx.repo, iid_uuid)
             if brief is not None:
                 identity_brief_payload = brief.to_generator_payload()
-        except ValueError:
+        except Exception as exc:
+            _log.warning(
+                "identity_context hydration failed identity_id=%s exc_type=%s exc=%s",
+                iid_raw,
+                type(exc).__name__,
+                str(exc)[:200],
+            )
             ic = {}
+            identity_brief_payload = None
     else:
         ic = state.get("identity_context") or {}
     # If identity_brief was already set in state (e.g. resume), keep it

@@ -229,6 +229,15 @@ def _run_graph_inner(
             repo.update_graph_run_status(
                 gid_u, "running", None, clear_interrupt_requested=False
             )
+        elif gr0 is not None and gr0.status not in ("running", "starting"):
+            _log.error(
+                "run_graph graph_run_id=%s invalid_status_for_invoke status=%s",
+                gid0,
+                gr0.status,
+            )
+            raise RuntimeError(
+                f"graph_run {gid0} has status '{gr0.status}' — expected 'starting' or 'running'"
+            )
     try:
         final = app.invoke(base)
     except RunInterrupted as e:
@@ -338,6 +347,11 @@ def _run_graph_inner(
         if gid0:
             gid_u = UUID(str(gid0))
             tid_s = base.get("thread_id")
+            error_info: dict[str, Any] = {
+                "error_kind": "graph_error",
+                "error_type": type(e).__name__,
+                "error_message": f"{type(e).__name__}: {e}",
+            }
             if tid_s:
                 tid_u = UUID(str(tid_s))
                 _save_checkpoint_with_event(
@@ -347,12 +361,7 @@ def _run_graph_inner(
                         thread_id=tid_u,
                         graph_run_id=gid_u,
                         checkpoint_kind="interrupt",
-                        state_json={
-                            "orchestrator_error": {
-                                "error_kind": "graph_error",
-                                "error_message": f"{type(e).__name__}: {e}",
-                            }
-                        },
+                        state_json={"orchestrator_error": error_info},
                         context_compaction_json=None,
                     ),
                 )
@@ -360,7 +369,7 @@ def _run_graph_inner(
                     repo,
                     gid_u,
                     RunEventType.GRAPH_RUN_FAILED,
-                    {"error_kind": "graph_error"},
+                    error_info,
                 )
             repo.update_graph_run_status(
                 gid_u,

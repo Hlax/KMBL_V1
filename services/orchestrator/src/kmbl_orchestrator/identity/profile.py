@@ -283,7 +283,8 @@ def derive_experience_mode(
       3. If site_archetype is spatial (portfolio/gallery/experimental) + creative themes → webgl_3d_portfolio
       4. If content_types are text-heavy (writing only, no visual) → flat_standard
       5. If complexity is 'simple' and no spatial signals → flat_standard
-      6. Default for moderate complexity with any visual signal → webgl_3d_portfolio
+      6a. Moderate+ complexity with portfolio/visual content + visual/creative signals → webgl_3d_portfolio
+      6b. Spatial site_archetype without strong creative themes → webgl_3d_portfolio
       7. Fallback → flat_standard
     """
     themes = set(structured_identity.themes)
@@ -313,7 +314,7 @@ def derive_experience_mode(
     if complexity == "simple" and not (visual & {"spatial", "motion-heavy", "image-driven"}):
         return "flat_standard"
 
-    # Rule 6: Moderate or above with any visual/portfolio signal → webgl_3d
+    # Rule 6a: Moderate or above with any visual/portfolio signal → webgl_3d
     portfolio_content = content & {"projects", "photography", "design", "art"}
     if portfolio_content and (visual or creative_themes):
         return "webgl_3d_portfolio"

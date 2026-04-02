@@ -136,7 +136,7 @@ class TestExtractStructuredIdentity:
                 "tone_keywords": ["artistic"],
             },
         )
-        assert len(profile.themes) > 0  # Should find 'artistic'
+        assert "artistic" in profile.themes  # 'artistic' keyword from raw_text
         assert "photography" in profile.content_types or "art" in profile.content_types
 
     def test_notable_entities_includes_project_evidence(self) -> None:

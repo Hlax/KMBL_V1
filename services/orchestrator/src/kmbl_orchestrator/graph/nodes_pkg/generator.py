@@ -313,7 +313,25 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
                 }
             }
         )
-    # Emit normalization rescue event when the normalizer had to recover
+    # Emit normalization enrichment event for informational bookkeeping (not rescue)
+    enrichment_paths = (cand.raw_payload_json or {}).get("_normalization_enrichments")
+    if enrichment_paths:
+        append_graph_run_event(
+            ctx.repo,
+            gid,
+            RunEventType.NORMALIZATION_ENRICHMENT,
+            {
+                "enrichment_paths": enrichment_paths,
+                "build_candidate_id": str(cand.build_candidate_id),
+            },
+            thread_id=tid,
+        )
+        _log.debug(
+            "graph_run graph_run_id=%s normalization_enrichments=%s",
+            gid,
+            enrichment_paths,
+        )
+    # Emit normalization rescue event only for genuine recovery/correction
     rescue_paths = (cand.raw_payload_json or {}).get("_normalization_rescues")
     if rescue_paths:
         append_graph_run_event(

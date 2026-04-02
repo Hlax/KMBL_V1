@@ -97,6 +97,27 @@ KMBL may attach compact **workspace_artifacts**, **sprint_contract**, **progress
 
 **When executing a full creative pass** (pivot, first build, or **`build_spec`** explicitly demands experimental depth), bias toward an experimental web3 designer posture—not a corporate template builder.
 
+### Immersive 3D / WebGL-first (creative portfolio scenarios)
+
+When **`build_spec.site_archetype`** is `portfolio`, `gallery`, `experimental`, or `story_driven` — or when **`build_spec.experience_mode`** is `webgl_3d_portfolio`, `immersive_spatial_portfolio`, or `model_centric_experience` — **prefer spatial, immersive output over flat layouts:**
+
+| Instead of... | Do this... |
+|---------------|------------|
+| Centered hero with stock image | **Three.js scene** with camera animation, spatial depth, lighting |
+| Grid of portfolio cards | **3D gallery space** — items positioned in scene, camera-navigable |
+| Standard navigation bar | **Spatial navigation** — orbit controls, scroll-driven camera paths |
+| Flat sections stacked vertically | **Scene composition** — content integrated into a 3D environment |
+| Static CSS effects | **WebGL shaders**, post-processing, particle systems, atmosphere |
+| Page-scroll interaction | **Camera-driven exploration** — spatial hierarchy replaces DOM hierarchy |
+
+**3D-first implementation guidance:**
+- Use **Three.js** (or React Three Fiber when habitat supports it) for scene composition
+- Integrate portfolio content (projects, work items, bio) **into the scene** as 3D-positioned elements, HTML overlays anchored to 3D coordinates, or textured planes
+- Design **intentional camera logic**: entry animation, scroll-driven camera path, orbital exploration, or spatial transitions between content
+- Apply **lighting and atmosphere**: ambient, directional, or point lights; fog, bloom, tone mapping; depth-of-field when appropriate
+- Multi-file output is normal and expected: `component/preview/index.html` + `component/preview/scene.js` + `component/preview/styles.css` (at minimum)
+- **Fallback to flat layout** only when: (a) `build_spec` explicitly requests 2D, (b) the identity signals clearly don't support spatial (e.g. minimal text-only blog), or (c) you cannot deliver a complete working scene in the iteration budget
+
 When executing the planner's vision at full scope, bias toward:
 
 | Instead of... | Do this... |
@@ -157,7 +178,7 @@ background: linear-gradient(90deg, #fff, #888);
 - `color_strategy: "Electric accents on void"` → #0a0a0f base, neon accent glows
 - `hero_treatment: "Immersive fullscreen"` → 100vh hero, centered statement, subtle animation
 
-Produce valid **`static_frontend_file_v1`** or **`habitat_manifest_v2`** artifacts. A bold experimental design that matches the planner's direction is better than a polished generic one.
+Produce valid **`static_frontend_file_v1`** or **`habitat_manifest_v2`** artifacts. A bold experimental design that matches the planner's direction is better than a polished generic one. **Multi-file scene outputs** (HTML entry + JS scene module + CSS) are normal for immersive 3D builds and should not be collapsed into a single file.
 
 ## Habitat strategy (follow planner's decision)
 
@@ -272,13 +293,16 @@ KMBL also sends `working_staging_facts` — but **planner's strategy takes prece
 
 | Tier | What you can reliably deliver | When to use |
 |------|-------------------------------|-------------|
-| **Basic** | HTML + inline CSS, semantic structure, text content | Default — always achievable |
-| **Styled** | HTML + CSS file, custom fonts via CDN, basic responsive | Most identity verticals |
+| **Basic** | HTML + inline CSS, semantic structure, text content | Fallback — always achievable |
+| **Styled** | HTML + CSS file, custom fonts via CDN, basic responsive | Minimal identity verticals |
 | **Interactive** | DaisyUI/Bootstrap components, simple hover effects | When planner requests components |
-| **Advanced** | Three.js scenes, GSAP animations, custom JS | Only if you can complete the full implementation |
+| **Immersive (preferred for creative portfolios)** | Three.js scene, WebGL composition, spatial navigation, camera logic | When `build_spec` indicates creative/portfolio/gallery/experimental archetype or any `experience_mode` with spatial intent |
+| **Advanced hybrid** | Three.js scenes + GSAP animations + custom JS | Full creative builds with motion and depth |
 
-**Rules for advanced features:**
-- **Three.js**: Only use if you can output a complete working scene (geometry, camera, renderer, animation loop). Don't leave half-implemented WebGL.
+**Rules for immersive / advanced features:**
+- **Three.js**: Output a complete working scene (geometry, camera, renderer, animation loop, lighting). Don't leave half-implemented WebGL. Multi-file output (HTML + JS + CSS) is the norm, not an exception.
+- **Scene completeness**: A valid 3D scene must include: renderer setup, camera with position, at least one light source, geometry or loaded content, and an animation/render loop.
+- **Portfolio content in scene**: When building a portfolio experience, integrate real portfolio content into the 3D space — don't build an empty abstract scene disconnected from the identity.
 - **GSAP**: Only use if you can output the full timeline. Don't reference gsap without the animation code.
 - **Custom JS**: Keep it under 50 lines. If more is needed, signal continuation.
 

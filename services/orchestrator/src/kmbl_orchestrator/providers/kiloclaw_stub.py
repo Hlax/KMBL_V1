@@ -54,23 +54,109 @@ class KiloClawStubClient:
                 "proposed_changes": {
                     "files": [
                         {
-                            "path": "component/hero.html",
+                            "path": "component/preview/index.html",
                             "language": "html",
-                            "content": "<section class='hero'><h1>Stub Hero</h1>"
-                            "<p>Stub portfolio content</p></section>",
-                        }
+                            "content": (
+                                "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+                                "<title>Stub Portfolio</title>"
+                                "<link rel='stylesheet' href='styles.css'>"
+                                "</head><body>"
+                                "<canvas id='scene'></canvas>"
+                                "<div id='overlay'><h1>Stub Portfolio</h1>"
+                                "<p>Immersive 3D portfolio experience</p></div>"
+                                "<script src='https://cdn.jsdelivr.net/npm/three@0.160/build/three.min.js'></script>"
+                                "<script src='scene.js'></script>"
+                                "</body></html>"
+                            ),
+                        },
+                        {
+                            "path": "component/preview/scene.js",
+                            "language": "js",
+                            "content": (
+                                "(function(){"
+                                "var s=new THREE.Scene();"
+                                "var c=new THREE.PerspectiveCamera(60,innerWidth/innerHeight,0.1,100);"
+                                "c.position.set(0,0,5);"
+                                "var r=new THREE.WebGLRenderer({canvas:document.getElementById('scene'),antialias:true});"
+                                "r.setSize(innerWidth,innerHeight);"
+                                "s.add(new THREE.AmbientLight(0x404040));"
+                                "s.add(new THREE.DirectionalLight(0xffffff,0.8));"
+                                "var g=new THREE.BoxGeometry(1,1,1);"
+                                "var m=new THREE.MeshStandardMaterial({color:0x6644ff});"
+                                "var cube=new THREE.Mesh(g,m);s.add(cube);"
+                                "function a(){requestAnimationFrame(a);cube.rotation.y+=0.01;r.render(s,c);}"
+                                "a();"
+                                "})()"
+                            ),
+                        },
+                        {
+                            "path": "component/preview/styles.css",
+                            "language": "css",
+                            "content": (
+                                "body{margin:0;background:#0a0a0f;overflow:hidden}"
+                                "#scene{position:fixed;top:0;left:0;width:100%;height:100%}"
+                                "#overlay{position:relative;z-index:1;color:#fff;"
+                                "font-family:system-ui;text-align:center;padding-top:40vh}"
+                                "h1{font-size:3rem;text-shadow:0 0 40px rgba(100,100,255,0.5)}"
+                            ),
+                        },
                     ]
                 },
                 "artifact_outputs": [
                     {
                         "role": "static_frontend_file_v1",
-                        "path": "component/hero.html",
+                        "path": "component/preview/index.html",
                         "language": "html",
-                        "content": "<section class='hero'><h1>Stub Hero</h1>"
-                        "<p>Stub portfolio content</p></section>",
+                        "content": (
+                            "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+                            "<title>Stub Portfolio</title>"
+                            "<link rel='stylesheet' href='styles.css'>"
+                            "</head><body>"
+                            "<canvas id='scene'></canvas>"
+                            "<div id='overlay'><h1>Stub Portfolio</h1>"
+                            "<p>Immersive 3D portfolio experience</p></div>"
+                            "<script src='https://cdn.jsdelivr.net/npm/three@0.160/build/three.min.js'></script>"
+                            "<script src='scene.js'></script>"
+                            "</body></html>"
+                        ),
                         "entry_for_preview": True,
                         "bundle_id": "stub-bundle-001",
-                    }
+                    },
+                    {
+                        "role": "static_frontend_file_v1",
+                        "path": "component/preview/scene.js",
+                        "language": "js",
+                        "content": (
+                            "(function(){"
+                            "var s=new THREE.Scene();"
+                            "var c=new THREE.PerspectiveCamera(60,innerWidth/innerHeight,0.1,100);"
+                            "c.position.set(0,0,5);"
+                            "var r=new THREE.WebGLRenderer({canvas:document.getElementById('scene'),antialias:true});"
+                            "r.setSize(innerWidth,innerHeight);"
+                            "s.add(new THREE.AmbientLight(0x404040));"
+                            "s.add(new THREE.DirectionalLight(0xffffff,0.8));"
+                            "var g=new THREE.BoxGeometry(1,1,1);"
+                            "var m=new THREE.MeshStandardMaterial({color:0x6644ff});"
+                            "var cube=new THREE.Mesh(g,m);s.add(cube);"
+                            "function a(){requestAnimationFrame(a);cube.rotation.y+=0.01;r.render(s,c);}"
+                            "a();"
+                            "})()"
+                        ),
+                        "bundle_id": "stub-bundle-001",
+                    },
+                    {
+                        "role": "static_frontend_file_v1",
+                        "path": "component/preview/styles.css",
+                        "language": "css",
+                        "content": (
+                            "body{margin:0;background:#0a0a0f;overflow:hidden}"
+                            "#scene{position:fixed;top:0;left:0;width:100%;height:100%}"
+                            "#overlay{position:relative;z-index:1;color:#fff;"
+                            "font-family:system-ui;text-align:center;padding-top:40vh}"
+                            "h1{font-size:3rem;text-shadow:0 0 40px rgba(100,100,255,0.5)}"
+                        ),
+                        "bundle_id": "stub-bundle-001",
+                    },
                 ],
                 "updated_state": {"revision": 1},
                 "sandbox_ref": "stub-sandbox",
@@ -78,7 +164,7 @@ class KiloClawStubClient:
                 # Bounded-iteration smoke (see kmbl-generator SOUL)
                 "_kmbl_primary_move": {
                     "mode": "refine",
-                    "move_type": "typography",
+                    "move_type": "composition",
                     "primary_surface": "hero",
                 },
             }

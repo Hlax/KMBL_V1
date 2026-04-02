@@ -21,6 +21,11 @@ class GraphState(TypedDict, total=False):
     # Not planner-mediated — survives planner reinterpretation.
     identity_brief: dict[str, Any] | None
 
+    # Structured identity profile: themes, tone, visual_tendencies, content_types,
+    # complexity, notable_entities — derived deterministically from identity signals.
+    # Used for experience_mode derivation and intent-aware evaluation.
+    structured_identity: dict[str, Any] | None
+
     build_spec: dict[str, Any] | None
     build_candidate: dict[str, Any] | None
     evaluation_report: dict[str, Any] | None

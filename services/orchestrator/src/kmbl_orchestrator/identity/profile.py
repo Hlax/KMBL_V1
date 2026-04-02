@@ -1,0 +1,326 @@
+"""
+Structured Identity Profile — derived from IdentitySeed for intent-driven planning.
+
+This module produces a normalized, structured representation of identity signals
+that replaces semi-unstructured text throughout the planner → generator → evaluator
+pipeline.  Every field is deterministic and derivable from existing IdentitySeed
+data — no external services required.
+
+The StructuredIdentityProfile is the single authoritative structured representation
+of "who this identity is" for downstream nodes.  It travels alongside the existing
+IdentityBrief (which carries generator-actionable constraints like palette_hex and
+must_mention) but adds higher-level classification signals that inform planning
+decisions such as experience_mode derivation.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field
+
+_log = logging.getLogger(__name__)
+
+# ── Vocabulary constants (deterministic, keyword-based) ──────────────────────
+
+_THEME_KEYWORDS: dict[str, set[str]] = {
+    "editorial": {"blog", "article", "writing", "editorial", "journal", "essay", "publication"},
+    "cinematic": {"cinematic", "film", "video", "motion", "reel", "showreel", "trailer"},
+    "minimal": {"minimal", "minimalist", "clean", "simple", "whitespace"},
+    "experimental": {"experimental", "abstract", "generative", "creative coding", "glitch", "avant-garde"},
+    "corporate": {"corporate", "enterprise", "business", "consulting", "solutions", "b2b"},
+    "artistic": {"artistic", "art", "gallery", "exhibition", "installation", "studio"},
+    "technical": {"technical", "engineering", "developer", "code", "api", "devops", "infrastructure"},
+}
+
+_TONE_KEYWORDS: dict[str, set[str]] = {
+    "serious": {"serious", "professional", "corporate", "formal", "enterprise"},
+    "playful": {"playful", "fun", "creative", "colorful", "vibrant", "friendly", "whimsical"},
+    "abstract": {"abstract", "experimental", "generative", "conceptual", "avant-garde"},
+    "technical": {"technical", "engineering", "developer", "code", "api", "documentation"},
+    "warm": {"warm", "personal", "friendly", "approachable", "inviting", "cozy"},
+    "bold": {"bold", "striking", "dramatic", "intense", "powerful", "dark"},
+}
+
+_VISUAL_TENDENCY_KEYWORDS: dict[str, set[str]] = {
+    "motion-heavy": {"motion", "animation", "cinematic", "video", "reel", "showreel", "kinetic"},
+    "typography-first": {"editorial", "writing", "blog", "journal", "text", "copy", "article"},
+    "spatial": {
+        "3d", "three.js", "webgl", "spatial", "immersive", "interactive",
+        "gallery", "exhibition", "installation", "panorama",
+    },
+    "image-driven": {
+        "photography", "photo", "photographer", "gallery", "portfolio",
+        "visual", "image", "illustration", "artwork",
+    },
+}
+
+_CONTENT_TYPE_KEYWORDS: dict[str, set[str]] = {
+    "projects": {"project", "projects", "work", "portfolio", "case study", "case studies"},
+    "writing": {"blog", "article", "writing", "essay", "journal", "publication", "post"},
+    "photography": {"photography", "photo", "photographer", "shots", "captures", "lens"},
+    "code": {"code", "github", "repository", "open source", "developer", "engineering"},
+    "design": {"design", "designer", "ui", "ux", "interface", "graphic", "branding"},
+    "art": {"art", "artwork", "illustration", "painting", "sculpture", "digital art"},
+    "services": {"service", "services", "offering", "consulting", "agency", "freelance"},
+}
+
+_COMPLEXITY_SIGNALS_AMBITIOUS: set[str] = {
+    "immersive", "interactive", "3d", "webgl", "three.js", "spatial",
+    "experimental", "generative", "cinematic", "parallax", "animation",
+    "multi-page", "gallery", "complex",
+}
+
+_COMPLEXITY_SIGNALS_SIMPLE: set[str] = {
+    "minimal", "simple", "clean", "one-page", "landing", "basic",
+    "text-only", "blog", "resume", "cv",
+}
+
+
+class StructuredIdentityProfile(BaseModel):
+    """Normalized, structured identity signals for intent-driven pipeline propagation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    themes: list[str] = Field(
+        default_factory=list,
+        description="Identity themes: editorial, cinematic, minimal, experimental, corporate, artistic, technical.",
+    )
+    tone: list[str] = Field(
+        default_factory=list,
+        description="Tone signals: serious, playful, abstract, technical, warm, bold.",
+    )
+    visual_tendencies: list[str] = Field(
+        default_factory=list,
+        description="Visual tendencies: motion-heavy, typography-first, spatial, image-driven.",
+    )
+    content_types: list[str] = Field(
+        default_factory=list,
+        description="Content types: projects, writing, photography, code, design, art, services.",
+    )
+    complexity: str = Field(
+        default="moderate",
+        description="Complexity signal: simple, moderate, ambitious.",
+    )
+    notable_entities: list[str] = Field(
+        default_factory=list,
+        description="Notable entities: project names, collaborators, brands (max 10).",
+    )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Compact dict for payload injection — omits empty lists."""
+        d: dict[str, Any] = {}
+        if self.themes:
+            d["themes"] = self.themes
+        if self.tone:
+            d["tone"] = self.tone
+        if self.visual_tendencies:
+            d["visual_tendencies"] = self.visual_tendencies
+        if self.content_types:
+            d["content_types"] = self.content_types
+        d["complexity"] = self.complexity
+        if self.notable_entities:
+            d["notable_entities"] = self.notable_entities
+        return d
+
+
+def _match_keywords(text: str, vocab: dict[str, set[str]], max_matches: int = 4) -> list[str]:
+    """Match text against a keyword vocabulary, return matching category labels."""
+    lower = text.lower()
+    scored: list[tuple[str, int]] = []
+    for label, keywords in vocab.items():
+        hits = sum(1 for kw in keywords if kw in lower)
+        if hits > 0:
+            scored.append((label, hits))
+    scored.sort(key=lambda x: x[1], reverse=True)
+    return [label for label, _ in scored[:max_matches]]
+
+
+def extract_structured_identity(
+    *,
+    seed_data: dict[str, Any] | None = None,
+    profile_data: dict[str, Any] | None = None,
+    identity_brief: dict[str, Any] | None = None,
+) -> StructuredIdentityProfile:
+    """
+    Derive a StructuredIdentityProfile from available identity data.
+
+    This function is deterministic and does not call external services.
+    It works from any combination of:
+      - seed_data: IdentitySourceRecord.metadata_json + raw_text
+      - profile_data: IdentityProfileRecord.facets_json
+      - identity_brief: the already-built IdentityBrief payload dict
+
+    All inputs are optional — partial extraction is valid.
+    """
+    sd = seed_data or {}
+    pd = profile_data or {}
+    ib = identity_brief or {}
+
+    # Build a combined text corpus for keyword matching
+    text_parts: list[str] = []
+    raw_text = sd.get("raw_text") or ""
+    if raw_text:
+        text_parts.append(raw_text)
+
+    # Aggregate keyword lists from all sources
+    all_tone_kw: list[str] = (
+        ib.get("tone_keywords")
+        or pd.get("tone_keywords")
+        or sd.get("tone_keywords")
+        or []
+    )
+    all_aesthetic_kw: list[str] = (
+        ib.get("aesthetic_keywords")
+        or pd.get("aesthetic_keywords")
+        or sd.get("aesthetic_keywords")
+        or []
+    )
+    all_layout_hints: list[str] = ib.get("layout_hints") or pd.get("layout_hints") or []
+    all_headings: list[str] = ib.get("headings_sample") or pd.get("headings") or []
+    project_evidence: list[str] = pd.get("project_evidence") or []
+    display_name: str = ib.get("display_name") or ""
+    role_or_title: str = ib.get("role_or_title") or ""
+    short_bio: str = ib.get("short_bio") or ""
+
+    # Build searchable text from all signals
+    text_parts.extend(all_tone_kw)
+    text_parts.extend(all_aesthetic_kw)
+    text_parts.extend(all_layout_hints)
+    text_parts.extend(all_headings)
+    text_parts.extend(project_evidence)
+    if role_or_title:
+        text_parts.append(role_or_title)
+    if short_bio:
+        text_parts.append(short_bio)
+
+    combined_text = " ".join(text_parts)
+
+    # ── Themes ───────────────────────────────────────────────────────────
+    themes = _match_keywords(combined_text, _THEME_KEYWORDS, max_matches=3)
+
+    # ── Tone ─────────────────────────────────────────────────────────────
+    tone = _match_keywords(combined_text, _TONE_KEYWORDS, max_matches=3)
+
+    # ── Visual tendencies ────────────────────────────────────────────────
+    visual_tendencies = _match_keywords(
+        combined_text, _VISUAL_TENDENCY_KEYWORDS, max_matches=3,
+    )
+    # Boost image-driven if image_refs are abundant
+    image_refs = ib.get("image_refs") or pd.get("image_refs") or []
+    if len(image_refs) >= 4 and "image-driven" not in visual_tendencies:
+        visual_tendencies.append("image-driven")
+
+    # ── Content types ────────────────────────────────────────────────────
+    content_types = _match_keywords(combined_text, _CONTENT_TYPE_KEYWORDS, max_matches=4)
+
+    # ── Complexity ───────────────────────────────────────────────────────
+    lower_text = combined_text.lower()
+    ambitious_hits = sum(1 for s in _COMPLEXITY_SIGNALS_AMBITIOUS if s in lower_text)
+    simple_hits = sum(1 for s in _COMPLEXITY_SIGNALS_SIMPLE if s in lower_text)
+    if ambitious_hits >= 2:
+        complexity = "ambitious"
+    elif simple_hits >= 2:
+        complexity = "simple"
+    else:
+        complexity = "moderate"
+
+    # ── Notable entities ─────────────────────────────────────────────────
+    notable: list[str] = []
+    if display_name:
+        notable.append(display_name)
+    # Extract short project names from evidence
+    for ev in project_evidence[:8]:
+        short = str(ev).strip()[:60]
+        if short and short not in notable:
+            notable.append(short)
+    notable = notable[:10]
+
+    profile = StructuredIdentityProfile(
+        themes=themes,
+        tone=tone,
+        visual_tendencies=visual_tendencies,
+        content_types=content_types,
+        complexity=complexity,
+        notable_entities=notable,
+    )
+    _log.debug(
+        "structured_identity_profile extracted: themes=%s tone=%s visual=%s complexity=%s",
+        themes, tone, visual_tendencies, complexity,
+    )
+    return profile
+
+
+# ── Experience Mode Derivation ───────────────────────────────────────────────
+
+# Valid experience_mode values (from SOUL.md)
+EXPERIENCE_MODES = frozenset({
+    "webgl_3d_portfolio",
+    "immersive_spatial_portfolio",
+    "model_centric_experience",
+    "flat_standard",
+})
+
+# Spatial archetypes that strongly signal immersive mode
+_SPATIAL_ARCHETYPES = {"portfolio", "gallery", "experimental", "story_driven"}
+
+
+def derive_experience_mode(
+    structured_identity: StructuredIdentityProfile,
+    *,
+    site_archetype: str | None = None,
+) -> str:
+    """
+    Derive experience_mode from structured identity signals.
+
+    Returns one of the canonical experience_mode values. The derivation is
+    deterministic and explainable — no hardcoded always-3D behavior.
+
+    Decision logic:
+      1. If visual_tendencies include 'spatial' → immersive_spatial_portfolio
+      2. If complexity is 'ambitious' + visual heavy (image-driven or motion-heavy) → webgl_3d_portfolio
+      3. If site_archetype is spatial (portfolio/gallery/experimental) + creative themes → webgl_3d_portfolio
+      4. If content_types are text-heavy (writing only, no visual) → flat_standard
+      5. If complexity is 'simple' and no spatial signals → flat_standard
+      6. Default for moderate complexity with any visual signal → webgl_3d_portfolio
+      7. Fallback → flat_standard
+    """
+    themes = set(structured_identity.themes)
+    visual = set(structured_identity.visual_tendencies)
+    content = set(structured_identity.content_types)
+    complexity = structured_identity.complexity
+
+    # Rule 1: Explicit spatial visual tendency → immersive
+    if "spatial" in visual:
+        return "immersive_spatial_portfolio"
+
+    # Rule 2: Ambitious + visual-heavy → webgl_3d
+    if complexity == "ambitious" and visual & {"image-driven", "motion-heavy"}:
+        return "webgl_3d_portfolio"
+
+    # Rule 3: Spatial archetype + creative theme signals → webgl_3d
+    creative_themes = themes & {"cinematic", "experimental", "artistic"}
+    if site_archetype and site_archetype in _SPATIAL_ARCHETYPES and creative_themes:
+        return "webgl_3d_portfolio"
+
+    # Rule 4: Text-heavy with no visual signals → flat
+    text_only_content = content <= {"writing"} and content  # writing only, non-empty
+    if text_only_content and not visual:
+        return "flat_standard"
+
+    # Rule 5: Simple complexity, no spatial/motion → flat
+    if complexity == "simple" and not (visual & {"spatial", "motion-heavy", "image-driven"}):
+        return "flat_standard"
+
+    # Rule 6: Moderate or above with any visual/portfolio signal → webgl_3d
+    portfolio_content = content & {"projects", "photography", "design", "art"}
+    if portfolio_content and (visual or creative_themes):
+        return "webgl_3d_portfolio"
+
+    # Rule 6b: Site archetype is spatial even without strong creative themes
+    if site_archetype and site_archetype in _SPATIAL_ARCHETYPES:
+        return "webgl_3d_portfolio"
+
+    # Rule 7: Fallback
+    return "flat_standard"

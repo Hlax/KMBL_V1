@@ -127,6 +127,9 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         "user_rating_context": user_rating_context,
         # Fix 1+2: identity_brief enables evaluator to produce alignment_report
         "identity_brief": state.get("identity_brief"),
+        # Structured identity profile: themes, tone, visual_tendencies, content_types,
+        # complexity — enables intent-aware judgment (experience_mode alignment, spatial checks).
+        "structured_identity": state.get("structured_identity"),
         # Prefer live assembled staging preview for Playwright / visual grounding
         "preview_url": preview_url,
         "iteration_context": {

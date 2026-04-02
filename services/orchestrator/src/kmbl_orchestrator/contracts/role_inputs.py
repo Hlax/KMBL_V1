@@ -36,6 +36,14 @@ class PlannerRoleInput(BaseModel):
             "and optional Playwright/mcporter grounding (kmbl-planner)."
         ),
     )
+    structured_identity: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Structured identity profile: themes, tone, visual_tendencies, content_types, "
+            "complexity, notable_entities. Derived deterministically from identity signals. "
+            "Use for experience_mode selection and identity-driven planning decisions."
+        ),
+    )
 
 
 class GeneratorRoleInput(BaseModel):
@@ -73,6 +81,14 @@ class GeneratorRoleInput(BaseModel):
             "image_refs, confidence, is_fallback."
         ),
     )
+    structured_identity: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Structured identity profile: themes, tone, visual_tendencies, content_types, "
+            "complexity, notable_entities. Use to shape generation decisions: "
+            "map identity themes into spatial design, use 3D composition intentionally."
+        ),
+    )
 
 
 class EvaluatorRoleInput(BaseModel):
@@ -99,6 +115,14 @@ class EvaluatorRoleInput(BaseModel):
             "Same identity brief passed to generator. Use to produce alignment_report: "
             "check must_mention items present, palette colors used, tone reflected. "
             "Report as alignment_report block in output metrics."
+        ),
+    )
+    structured_identity: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Structured identity profile: themes, tone, visual_tendencies, content_types, "
+            "complexity. Use for intent-aware evaluation: check alignment with identity themes, "
+            "whether spatial/3D decisions reflect intent, whether flat fallback is justified."
         ),
     )
     preview_url: str | None = Field(

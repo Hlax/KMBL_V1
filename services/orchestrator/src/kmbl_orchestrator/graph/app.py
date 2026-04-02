@@ -24,6 +24,7 @@ from kmbl_orchestrator.domain import (
     CheckpointRecord,
     GraphRunRecord,
     ThreadRecord,
+    is_valid_status_transition,
 )
 from kmbl_orchestrator.errors import (
     RoleInvocationFailed,
@@ -399,6 +400,13 @@ def _run_graph_inner(
                     _save_checkpoint_with_event(ctx.repo, post)
                     repo.update_thread_current_checkpoint(UUID(tid_s), post.checkpoint_id)
                 ended = datetime.now(timezone.utc).isoformat()
+                # Validate status transition before applying
+                current_run = repo.get_graph_run(gid_u)
+                if current_run and not is_valid_status_transition(current_run.status, "completed"):
+                    _log.warning(
+                        "run_graph graph_run_id=%s invalid_transition current=%s target=completed",
+                        gid, current_run.status,
+                    )
                 repo.update_graph_run_status(gid_u, "completed", ended)
                 repo.attach_run_snapshot(gid_u, dict(final))
                 append_graph_run_event(

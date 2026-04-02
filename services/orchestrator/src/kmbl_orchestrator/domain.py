@@ -83,6 +83,33 @@ ACTIVE_GRAPH_RUN_STATUSES: frozenset[GraphRunStatus] = frozenset(
     }
 )
 
+# Terminal states — no further transitions allowed.
+TERMINAL_GRAPH_RUN_STATUSES: frozenset[GraphRunStatus] = frozenset(
+    {
+        "completed",
+        "failed",
+        "interrupted",
+    }
+)
+
+# Valid status transitions — used for pre-condition validation.
+# Key is the current status; value is the set of valid next statuses.
+VALID_STATUS_TRANSITIONS: dict[GraphRunStatus, frozenset[GraphRunStatus]] = {
+    "starting": frozenset({"running", "failed"}),
+    "running": frozenset({"completed", "failed", "interrupted", "interrupt_requested", "paused"}),
+    "paused": frozenset({"running", "failed"}),
+    "interrupt_requested": frozenset({"interrupted", "failed"}),
+    "interrupted": frozenset(),  # terminal
+    "completed": frozenset(),  # terminal
+    "failed": frozenset(),  # terminal
+}
+
+
+def is_valid_status_transition(current: GraphRunStatus, target: GraphRunStatus) -> bool:
+    """Check if a status transition is valid."""
+    valid_next = VALID_STATUS_TRANSITIONS.get(current, frozenset())
+    return target in valid_next
+
 
 class GraphRunRecord(BaseModel):
     graph_run_id: UUID

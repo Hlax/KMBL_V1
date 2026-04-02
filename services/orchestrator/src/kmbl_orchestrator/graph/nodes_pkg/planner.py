@@ -128,6 +128,9 @@ def planner_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         "user_interrupts": user_interrupts if user_interrupts else None,
         # Explicit for identity-vertical + Playwright grounding (see kmbl-planner SOUL)
         "identity_url": identity_url,
+        # Structured identity profile for intent-driven planning.
+        # Carries themes, tone, visual_tendencies, content_types, complexity, notable_entities.
+        "structured_identity": state.get("structured_identity"),
     }
     t_pl = time.perf_counter()
     try:
@@ -171,6 +174,32 @@ def planner_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     if normalized_fields:
         md = raw.setdefault("_kmbl_planner_metadata", {})
         md["normalized_missing_fields"] = normalized_fields
+
+    # Ensure experience_mode is always explicitly set in build_spec.
+    # If the planner set it, we respect it; otherwise, derive from structured identity.
+    bs = raw["build_spec"]
+    existing_mode = bs.get("experience_mode")
+    if not isinstance(existing_mode, str) or not existing_mode.strip():
+        from kmbl_orchestrator.identity.profile import (
+            StructuredIdentityProfile,
+            derive_experience_mode,
+        )
+        si_payload = state.get("structured_identity")
+        if si_payload and isinstance(si_payload, dict):
+            si = StructuredIdentityProfile.model_validate(si_payload)
+        else:
+            si = StructuredIdentityProfile()
+        derived_mode = derive_experience_mode(
+            si, site_archetype=bs.get("site_archetype"),
+        )
+        bs["experience_mode"] = derived_mode
+        md = raw.setdefault("_kmbl_planner_metadata", {})
+        md["experience_mode_derived"] = True
+        md["experience_mode_source"] = "structured_identity"
+        _log.info(
+            "graph_run graph_run_id=%s experience_mode derived=%s archetype=%s",
+            gid, derived_mode, bs.get("site_archetype"),
+        )
     try:
         validate_role_output_for_persistence("planner", raw)
     except (ValidationError, ValueError) as e:

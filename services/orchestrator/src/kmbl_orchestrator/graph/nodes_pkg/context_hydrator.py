@@ -10,6 +10,7 @@ from kmbl_orchestrator.graph.state import GraphState
 from kmbl_orchestrator.runtime.interrupt_checks import raise_if_interrupt_requested
 from kmbl_orchestrator.identity.brief import build_identity_brief_from_repo
 from kmbl_orchestrator.identity.hydrate import build_planner_identity_context
+from kmbl_orchestrator.identity.profile import extract_structured_identity
 from kmbl_orchestrator.runtime.session_staging_links import (
     merge_session_staging_into_event_input,
 )
@@ -21,7 +22,7 @@ _log = logging.getLogger(__name__)
 
 
 def context_hydrator(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
-    """Hydrate identity context, identity brief, and event input for the run."""
+    """Hydrate identity context, identity brief, structured identity, and event input for the run."""
     raise_if_interrupt_requested(
         ctx.repo,
         UUID(str(state["graph_run_id"])),
@@ -29,6 +30,7 @@ def context_hydrator(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     )
     iid_raw = state.get("identity_id")
     identity_brief_payload: dict[str, Any] | None = None
+    structured_identity_payload: dict[str, Any] | None = None
     if iid_raw:
         try:
             iid_uuid = UUID(str(iid_raw))
@@ -40,6 +42,27 @@ def context_hydrator(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             brief = build_identity_brief_from_repo(ctx.repo, iid_uuid)
             if brief is not None:
                 identity_brief_payload = brief.to_generator_payload()
+
+            # Build structured identity profile for intent-driven planning.
+            # This provides themes, tone, visual_tendencies, content_types, complexity
+            # that inform experience_mode derivation and downstream evaluation.
+            seed_data: dict[str, Any] = {}
+            profile_data: dict[str, Any] = {}
+            profile = ctx.repo.get_identity_profile(iid_uuid)
+            sources = ctx.repo.list_identity_sources(iid_uuid)
+            if sources:
+                latest = sources[0]
+                seed_data = dict(latest.metadata_json or {})
+                seed_data["raw_text"] = latest.raw_text or ""
+            if profile:
+                profile_data = dict(profile.facets_json or {})
+
+            structured = extract_structured_identity(
+                seed_data=seed_data,
+                profile_data=profile_data,
+                identity_brief=identity_brief_payload,
+            )
+            structured_identity_payload = structured.to_dict()
         except Exception as exc:
             _log.warning(
                 "identity_context hydration failed identity_id=%s exc_type=%s exc=%s",
@@ -49,11 +72,14 @@ def context_hydrator(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             )
             ic = {}
             identity_brief_payload = None
+            structured_identity_payload = None
     else:
         ic = state.get("identity_context") or {}
     # If identity_brief was already set in state (e.g. resume), keep it
     if identity_brief_payload is None:
         identity_brief_payload = state.get("identity_brief")
+    if structured_identity_payload is None:
+        structured_identity_payload = state.get("structured_identity")
 
     gid = state.get("graph_run_id")
     tid = state.get("thread_id")
@@ -72,4 +98,6 @@ def context_hydrator(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     }
     if identity_brief_payload is not None:
         out["identity_brief"] = identity_brief_payload
+    if structured_identity_payload is not None:
+        out["structured_identity"] = structured_identity_payload
     return out

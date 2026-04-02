@@ -145,6 +145,9 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         "working_staging_facts": ws_facts,
         # Fix 1: identity_brief injected directly — survives planner reinterpretation
         "identity_brief": state.get("identity_brief"),
+        # Structured identity profile: themes, tone, visual_tendencies, content_types,
+        # complexity, notable_entities — enables identity-shaped generation.
+        "structured_identity": state.get("structured_identity"),
         # Fix 3: retry_context carries orchestrator-selected direction on iterations
         # Generator must use retry_context.retry_direction to determine approach
     }

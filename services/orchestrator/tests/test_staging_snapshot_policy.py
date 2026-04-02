@@ -1,4 +1,8 @@
-"""staging_snapshot_policy gating for automatic review snapshot rows."""
+"""staging_snapshot_policy gating for automatic review snapshot rows.
+
+Mirrors ``graph.nodes_pkg.staging._should_create_staging_snapshot`` / ``staging_node``
+(automatic ``staging_snapshot`` rows). Operator materialization: ``materialize_review_snapshot_from_live``.
+"""
 
 from __future__ import annotations
 

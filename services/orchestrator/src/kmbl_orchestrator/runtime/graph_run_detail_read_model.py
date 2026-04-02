@@ -25,6 +25,16 @@ from kmbl_orchestrator.runtime.operator_action_read_model import (
 from kmbl_orchestrator.runtime.run_events import RunEventType
 
 # Subset of persisted role_invocation.routing_metadata_json (generator only) for operator UI.
+# KiloClaw transport trace (all roles) — from role_invocation.routing_metadata_json
+_TRANSPORT_TRACE_KEYS: tuple[str, ...] = (
+    "kiloclaw_transport_configured",
+    "kiloclaw_transport_resolved",
+    "kiloclaw_stub_mode",
+    "kiloclaw_api_key_present",
+    "kiloclaw_auto_resolution_note",
+    "kiloclaw_openclaw_cli_path",
+)
+
 _ROUTING_HINT_KEYS: tuple[str, ...] = (
     "kmb_routing_version",
     "generator_route_kind",
@@ -55,6 +65,46 @@ def _routing_hints_payload(
     if not hints:
         return None, "none"
     return hints, "persisted"
+
+
+def _quality_and_pressure_from_persisted(
+    *,
+    events: list[GraphRunEventRecord],
+    invocations: list[RoleInvocationRecord],
+    ev: EvaluationReportRecord | None,
+) -> dict[str, Any]:
+    """Durable quality / v1 pressure signals from persisted rows (not process memory)."""
+    rescue_events = sum(
+        1 for e in events if e.event_type == RunEventType.NORMALIZATION_RESCUE
+    )
+    inv_rescue = sum(
+        1
+        for r in invocations
+        if r.role_type == "generator"
+        and (r.routing_metadata_json or {}).get("normalization_rescue") is True
+    )
+    ws_updates = sum(1 for e in events if e.event_type == RunEventType.WORKING_STAGING_UPDATED)
+    snap_created = sum(1 for e in events if e.event_type == RunEventType.STAGING_SNAPSHOT_CREATED)
+    snap_skipped = sum(1 for e in events if e.event_type == RunEventType.STAGING_SNAPSHOT_SKIPPED)
+    eval_status = ev.status if ev else None
+    return {
+        "durable_normalization_rescue": {
+            "event_count": rescue_events,
+            "generator_invocation_flag_count": inv_rescue,
+        },
+        "v1_pressure_telemetry": {
+            "note": (
+                "Lightweight governance signals from persisted graph_run_event rows and role_invocation "
+                "metadata — extensible; not a full autonomy policy."
+            ),
+            "normalization_rescue_event_count": rescue_events,
+            "working_staging_update_event_count": ws_updates,
+            "staging_snapshot_created_event_count": snap_created,
+            "staging_snapshot_skipped_event_count": snap_skipped,
+            "latest_evaluation_status": eval_status,
+            "evaluation_is_partial_or_fail": eval_status in ("partial", "fail"),
+        },
+    }
 
 
 def _max_iteration(invocations: list[RoleInvocationRecord]) -> int | None:
@@ -171,6 +221,8 @@ def build_graph_run_detail_read_model(
     inv_out = []
     for r in inv_sorted:
         rh, rsrc = _routing_hints_payload(r)
+        rm = dict(r.routing_metadata_json or {})
+        tt = {k: rm[k] for k in _TRANSPORT_TRACE_KEYS if k in rm}
         row: dict[str, Any] = {
             "role_invocation_id": str(r.role_invocation_id),
             "role_type": r.role_type,
@@ -182,6 +234,10 @@ def build_graph_run_detail_read_model(
             "provider_config_key": r.provider_config_key,
             "routing_fact_source": rsrc,
         }
+        if tt:
+            row["kiloclaw_transport_trace"] = tt
+        if r.role_type == "generator" and rm.get("normalization_rescue"):
+            row["normalization_rescue"] = True
         if rh is not None:
             row["routing_hints"] = rh
         inv_out.append(row)
@@ -211,6 +267,22 @@ def build_graph_run_detail_read_model(
         snapshot_skipped_intentionally=snapshot_skipped_intentionally,
     )
 
+    first_planner = next((r for r in inv_sorted if r.role_type == "planner"), None)
+    planner_tt: dict[str, Any] | None = None
+    if first_planner:
+        prm = dict(first_planner.routing_metadata_json or {})
+        planner_tt = {k: prm[k] for k in _TRANSPORT_TRACE_KEYS if k in prm}
+
+    summary_extra: dict[str, Any] = {}
+    if planner_tt:
+        summary_extra["kiloclaw_transport_trace"] = planner_tt
+
+    qp = _quality_and_pressure_from_persisted(
+        events=events_sorted,
+        invocations=inv_sorted,
+        ev=ev,
+    )
+
     return {
         "summary": {
             "graph_run_id": str(gr.graph_run_id),
@@ -229,6 +301,9 @@ def build_graph_run_detail_read_model(
             "attention_reason": att_reason,
             "resume_count": resume_count,
             "last_resumed_at": last_resumed_at,
+            **summary_extra,
+            "quality_metrics": qp["durable_normalization_rescue"],
+            "pressure_summary": qp["v1_pressure_telemetry"],
         },
         "operator_actions": operator_actions,
         "role_invocations": inv_out,

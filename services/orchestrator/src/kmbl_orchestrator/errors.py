@@ -56,3 +56,11 @@ class RunInterrupted(Exception):
         self.graph_run_id = graph_run_id
         self.thread_id = thread_id
         super().__init__("run interrupt requested")
+
+
+class KiloclawRoleInvocationForbiddenError(Exception):
+    """Hard stop: role invocation cannot proceed under current transport policy (e.g. stub in production)."""
+
+    def __init__(self, message: str, *, operator_hint: str = "") -> None:
+        self.operator_hint = operator_hint
+        super().__init__(message)

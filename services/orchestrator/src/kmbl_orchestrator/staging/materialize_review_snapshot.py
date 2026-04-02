@@ -19,6 +19,8 @@ def materialize_review_snapshot_from_live(
 
     Use when ``staging_snapshot_policy`` skipped automatic snapshots but operators
     need a frozen review row (or to recover provenance for publication FK).
+    Aligns with ``graph.nodes_pkg.staging.staging_node`` payload shape via
+    ``build_staging_snapshot_payload`` (same as automatic snapshots).
     """
     ws = repo.get_working_staging_for_thread(thread_id)
     if ws is None:

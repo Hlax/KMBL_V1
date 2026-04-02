@@ -57,7 +57,16 @@ from kmbl_orchestrator.runtime.run_resume import (
     compute_resume_eligibility,
     event_input_for_resume,
 )
-from kmbl_orchestrator.runtime.run_events import RunEventType, append_graph_run_event
+from kmbl_orchestrator.providers.kiloclaw_protocol import (
+    KiloclawTransportConfigError,
+    compute_kiloclaw_resolution,
+    log_kiloclaw_transport_banner,
+)
+from kmbl_orchestrator.runtime.run_events import (
+    RunEventType,
+    append_graph_run_event,
+    normalization_rescue_event_total,
+)
 from kmbl_orchestrator.runtime.run_failure_view import build_run_failure_view
 from kmbl_orchestrator.runtime.run_snapshot_sanitize import (
     sanitize_checkpoint_state_for_api,
@@ -98,6 +107,7 @@ def _orchestrator_verbose_logging() -> None:
 async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Lifespan handler — replaces deprecated ``@app.on_event("startup")``."""
     _orchestrator_verbose_logging()
+    log_kiloclaw_transport_banner(get_settings())
     yield
 
 
@@ -304,6 +314,8 @@ def _evaluation_history_summaries(
 
 
 def _kiloclaw_configured(settings: Settings, eff: str) -> bool:
+    if eff == "invalid":
+        return False
     if eff == "stub":
         return True
     if eff == "http":
@@ -323,6 +335,29 @@ def health(settings: Settings = Depends(get_settings)) -> dict[str, object]:
     )
     persist_ok = persisted_graph_runs_available(settings)
     kc_ok = _kiloclaw_configured(settings, eff)
+
+    kiloclaw_resolution: dict[str, object] = {}
+    try:
+        r = compute_kiloclaw_resolution(settings)
+        kiloclaw_resolution = {
+            "configuration_valid": True,
+            **r.to_trace_dict(),
+            "real_agent_capable": not r.stub_mode,
+        }
+    except KiloclawTransportConfigError as e:
+        kiloclaw_resolution = {
+            "configuration_valid": False,
+            "configuration_error": str(e),
+            "real_agent_capable": False,
+        }
+
+    dispatch = settings.orchestrator_graph_run_dispatch
+    dispatch_note = (
+        "Graph runs use FastAPI BackgroundTasks (same process, not durable across restarts)."
+        if dispatch == "fastapi_background"
+        else f"dispatch_mode={dispatch}"
+    )
+
     return {
         "status": "ok",
         "service": "kmbl-orchestrator",
@@ -330,14 +365,23 @@ def health(settings: Settings = Depends(get_settings)) -> dict[str, object]:
             "host": settings.orchestrator_host,
             "port": settings.orchestrator_port,
         },
+        "kmbl_env": settings.kmbl_env,
+        "allow_stub_transport": settings.allow_stub_transport,
         "kiloclaw_transport": settings.kiloclaw_transport,
         "kiloclaw_transport_effective": eff,
+        "kiloclaw_resolution": kiloclaw_resolution,
         "kiloclaw_base_url": settings.kiloclaw_base_url,
         "kiloclaw_invoke_path": settings.kiloclaw_invoke_path,
         "kiloclaw_chat_completions_user": settings.kiloclaw_chat_completions_user,
         "kiloclaw_planner_config_key": settings.kiloclaw_planner_config_key,
         "kiloclaw_generator_config_key": settings.kiloclaw_generator_config_key,
         "kiloclaw_evaluator_config_key": settings.kiloclaw_evaluator_config_key,
+        "normalization_rescue_events_total": normalization_rescue_event_total(),
+        "normalization_rescue_events_total_note": (
+            "Process-local counter since orchestrator start — use graph_run detail quality_metrics for durable counts."
+        ),
+        "orchestrator_graph_run_dispatch": dispatch,
+        "orchestrator_graph_run_dispatch_note": dispatch_note,
         "env": {
             "supabase_url_configured": bool((settings.supabase_url or "").strip()),
             "supabase_service_role_key_configured": bool(
@@ -349,6 +393,8 @@ def health(settings: Settings = Depends(get_settings)) -> dict[str, object]:
         "readiness": {
             "supabase_configured": supabase_ok,
             "kiloclaw_configured": kc_ok,
+            "kiloclaw_transport_operational": eff != "invalid"
+            and bool(kiloclaw_resolution.get("configuration_valid")),
             "persisted_runs_available": persist_ok,
             "ready_for_full_local_run": persist_ok and kc_ok,
             "note": (

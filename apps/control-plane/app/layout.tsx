@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { ControlPlaneNav } from "./components/ControlPlaneNav";
+import { OrchestratorTruthBanner } from "./components/OrchestratorTruthBanner";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -23,6 +24,7 @@ export default function RootLayout({
       <body>
         <main>
           <ControlPlaneNav />
+          <OrchestratorTruthBanner />
           {children}
         </main>
       </body>

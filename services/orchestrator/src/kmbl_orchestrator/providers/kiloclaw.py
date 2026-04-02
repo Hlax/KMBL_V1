@@ -16,8 +16,12 @@ from kmbl_orchestrator.providers.kiloclaw_parsing import extract_role_payload_fr
 from kmbl_orchestrator.providers.kiloclaw_protocol import (
     KiloClawClient,
     KiloClawInvocationError,
+    KiloclawTransportConfigError,
     RoleType,
+    assert_kiloclaw_role_invocation_permitted,
+    compute_kiloclaw_resolution,
     get_kiloclaw_client,
+    get_kiloclaw_client_with_trace,
     provider_failure,
 )
 from kmbl_orchestrator.providers.kiloclaw_stub import KiloClawStubClient
@@ -26,10 +30,14 @@ __all__ = [
     "KiloClawClient",
     "KiloClawHttpClient",
     "KiloClawInvocationError",
+    "KiloclawTransportConfigError",
     "KiloClawStubClient",
     "OpenClawCliClient",
     "RoleType",
+    "assert_kiloclaw_role_invocation_permitted",
+    "compute_kiloclaw_resolution",
     "extract_role_payload_from_openclaw_output",
     "get_kiloclaw_client",
+    "get_kiloclaw_client_with_trace",
     "provider_failure",
 ]

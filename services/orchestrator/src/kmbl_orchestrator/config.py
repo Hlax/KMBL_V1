@@ -5,7 +5,7 @@ from pathlib import Path
 
 from typing import Literal
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Resolve env files from repo layout so imports work no matter the process cwd.
@@ -185,24 +185,49 @@ class Settings(BaseSettings):
         ),
     )
     # When to persist an immutable staging_snapshot row on stage transitions.
-    # always: every stage (legacy default). on_nomination: only when evaluator nominates.
-    # never: live working_staging only until POST materialize or policy change.
+    # on_nomination (default): intentional review rows when evaluator nominates — live surface is working_staging.
+    # always: every stage (legacy / dense review). never: live only until materialize or policy change.
     staging_snapshot_policy: Literal["always", "on_nomination", "never"] = Field(
-        default="always",
+        default="on_nomination",
         validation_alias=AliasChoices(
             "KMBL_STAGING_SNAPSHOT_POLICY",
             "staging_snapshot_policy",
         ),
     )
+    # deployment: development | test | production — production defaults stub transport off unless overridden
+    kmbl_env: Literal["development", "test", "production"] = Field(
+        default="development",
+        validation_alias=AliasChoices("KMBL_ENV", "kmbl_env"),
+    )
+    # None at load: default from kmbl_env (stub allowed except production). Set explicitly to override.
+    allow_stub_transport: bool | None = Field(
+        default=None,
+        validation_alias=AliasChoices("ALLOW_STUB_TRANSPORT", "allow_stub_transport"),
+    )
+
+    @model_validator(mode="after")
+    def _default_allow_stub_from_env(self) -> "Settings":
+        if self.allow_stub_transport is None:
+            object.__setattr__(self, "allow_stub_transport", self.kmbl_env != "production")
+        return self
+
+    def effective_allow_stub_transport(self) -> bool:
+        """Whether stub KiloClaw transport is permitted (handles model_construct without validator)."""
+        if self.allow_stub_transport is None:
+            return self.kmbl_env != "production"
+        return bool(self.allow_stub_transport)
 
     def effective_kiloclaw_transport(self) -> str:
-        """Resolve auto: http when API key set, else stub; otherwise return configured transport."""
-        t = (self.kiloclaw_transport or "auto").strip().lower()
-        if t in ("auto", ""):
-            if (self.kiloclaw_api_key or "").strip():
-                return "http"
-            return "stub"
-        return t
+        """Resolved transport name, or ``invalid`` if configuration fails validation."""
+        from kmbl_orchestrator.providers.kiloclaw_protocol import (
+            KiloclawTransportConfigError,
+            compute_kiloclaw_resolution,
+        )
+
+        try:
+            return compute_kiloclaw_resolution(self).resolved
+        except KiloclawTransportConfigError:
+            return "invalid"
 
 
 @lru_cache

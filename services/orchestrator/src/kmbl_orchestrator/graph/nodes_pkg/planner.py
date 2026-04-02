@@ -18,7 +18,7 @@ from kmbl_orchestrator.contracts.planner_normalize import (
     normalize_build_spec_for_persistence,
 )
 from kmbl_orchestrator.domain import CheckpointRecord
-from kmbl_orchestrator.errors import RoleInvocationFailed
+from kmbl_orchestrator.errors import KiloclawRoleInvocationForbiddenError, RoleInvocationFailed
 from kmbl_orchestrator.graph.helpers import (
     _persist_invocation_failure,
     _save_checkpoint_with_event,
@@ -130,14 +130,26 @@ def planner_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         "identity_url": identity_url,
     }
     t_pl = time.perf_counter()
-    inv, raw = ctx.invoker.invoke(
-        graph_run_id=gid,
-        thread_id=tid,
-        role_type="planner",
-        provider_config_key=ctx.settings.kiloclaw_planner_config_key,
-        input_payload=payload,
-        iteration_index=state.get("iteration_index", 0),
-    )
+    try:
+        inv, raw = ctx.invoker.invoke(
+            graph_run_id=gid,
+            thread_id=tid,
+            role_type="planner",
+            provider_config_key=ctx.settings.kiloclaw_planner_config_key,
+            input_payload=payload,
+            iteration_index=state.get("iteration_index", 0),
+        )
+    except KiloclawRoleInvocationForbiddenError as e:
+        raise RoleInvocationFailed(
+            phase="planner",
+            graph_run_id=gid,
+            thread_id=tid,
+            detail={
+                "error_kind": "transport_forbidden",
+                "message": str(e),
+                "operator_hint": e.operator_hint,
+            },
+        ) from e
     _log.info(
         "graph_run graph_run_id=%s stage=planner_invocation_finished elapsed_ms=%.1f",
         gid,

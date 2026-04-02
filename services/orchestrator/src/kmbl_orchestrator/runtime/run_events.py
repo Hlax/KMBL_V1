@@ -8,6 +8,14 @@ from uuid import UUID, uuid4
 from kmbl_orchestrator.domain import GraphRunEventRecord
 from kmbl_orchestrator.persistence.repository import Repository
 
+# Process-local counter for observability (normalization repair paths).
+_normalization_rescue_total = 0
+
+
+def normalization_rescue_event_total() -> int:
+    """Total NORMALIZATION_RESCUE events appended in this process (resets on restart)."""
+    return _normalization_rescue_total
+
 
 class RunEventType:
     GRAPH_RUN_STARTED = "graph_run_started"
@@ -66,6 +74,9 @@ def append_graph_run_event(
     *,
     thread_id: UUID | None = None,
 ) -> None:
+    global _normalization_rescue_total
+    if event_type == RunEventType.NORMALIZATION_RESCUE:
+        _normalization_rescue_total += 1
     repo.save_graph_run_event(
         GraphRunEventRecord(
             graph_run_event_id=uuid4(),

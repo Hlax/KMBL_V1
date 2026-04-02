@@ -292,6 +292,18 @@ class GraphRunSummaryBlock(BaseModel):
     attention_reason: str
     resume_count: int = 0
     last_resumed_at: str | None = None
+    kiloclaw_transport_trace: dict[str, Any] | None = Field(
+        default=None,
+        description="From first planner routing_metadata_json when present.",
+    )
+    quality_metrics: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Durable normalization rescue counts (events + generator routing flags).",
+    )
+    pressure_summary: dict[str, Any] = Field(
+        default_factory=dict,
+        description="v1 pressure telemetry from persisted graph_run_event rows (extensible).",
+    )
 
 
 class RoleInvocationDetailItem(BaseModel):
@@ -308,6 +320,14 @@ class RoleInvocationDetailItem(BaseModel):
         description="Subset of persisted routing_metadata_json (generator invocations only).",
     )
     routing_fact_source: Literal["persisted", "none"] = "none"
+    kiloclaw_transport_trace: dict[str, Any] | None = Field(
+        default=None,
+        description="Subset of persisted routing_metadata_json (KiloClaw trace keys).",
+    )
+    normalization_rescue: bool | None = Field(
+        default=None,
+        description="True when generator invocation required normalization rescue (persisted flag).",
+    )
 
 
 class AssociatedOutputsBlock(BaseModel):

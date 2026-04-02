@@ -14,7 +14,7 @@ from kmbl_orchestrator.contracts.persistence_validate import (
     validate_role_output_for_persistence,
 )
 from kmbl_orchestrator.domain import CheckpointRecord
-from kmbl_orchestrator.errors import RoleInvocationFailed
+from kmbl_orchestrator.errors import KiloclawRoleInvocationForbiddenError, RoleInvocationFailed
 from kmbl_orchestrator.graph.helpers import (
     _apply_html_blocks_to_candidate,
     _iteration_plan_extras_from_ws_facts,
@@ -211,15 +211,27 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             detail=detail,
         ) from e
     t_gen = time.perf_counter()
-    inv, raw = ctx.invoker.invoke(
-        graph_run_id=gid,
-        thread_id=tid,
-        role_type="generator",
-        provider_config_key=gen_key,
-        input_payload=payload,
-        iteration_index=iteration,
-        routing_metadata=routing_meta,
-    )
+    try:
+        inv, raw = ctx.invoker.invoke(
+            graph_run_id=gid,
+            thread_id=tid,
+            role_type="generator",
+            provider_config_key=gen_key,
+            input_payload=payload,
+            iteration_index=iteration,
+            routing_metadata=routing_meta,
+        )
+    except KiloclawRoleInvocationForbiddenError as e:
+        raise RoleInvocationFailed(
+            phase="generator",
+            graph_run_id=gid,
+            thread_id=tid,
+            detail={
+                "error_kind": "transport_forbidden",
+                "message": str(e),
+                "operator_hint": e.operator_hint,
+            },
+        ) from e
     _log.info(
         "graph_run graph_run_id=%s stage=generator_invocation_finished elapsed_ms=%.1f",
         gid,
@@ -300,6 +312,16 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             },
             thread_id=tid,
         )
+        inv = inv.model_copy(
+            update={
+                "routing_metadata_json": {
+                    **dict(inv.routing_metadata_json or {}),
+                    "normalization_rescue": True,
+                    "normalization_rescue_paths": rescue_paths,
+                }
+            }
+        )
+        ctx.repo.save_role_invocation(inv)
         _log.info(
             "graph_run graph_run_id=%s normalization_rescues=%s",
             gid,

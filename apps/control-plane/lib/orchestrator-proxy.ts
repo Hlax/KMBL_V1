@@ -28,6 +28,9 @@ export function isOrchestratorRouteNotFound(
  * Fallback bodies when the upstream URL returns FastAPI’s route miss (`{"detail":"Not Found"}`).
  * Current orchestrator builds expose these GET routes; keep fallbacks for mis-pointed URLs or
  * older binaries — they are not used when the orchestrator returns a real JSON body.
+ *
+ * Inventory (fail-open 200 + synthetic data): see docs/CONTROL_PLANE_ORCHESTRATOR_PROXY.md
+ * — runs list, run detail, operator-summary, proposals, publication, publication/current, staging.
  */
 
 export function fallbackRunsList() {

@@ -226,6 +226,13 @@ export type GraphRunSummaryBlock = {
   attention_reason?: string;
   resume_count?: number;
   last_resumed_at?: string | null;
+  /** Denormalized `graph_run.identity_id` when set (may match thread identity). */
+  graph_run_identity_id?: string | null;
+  kiloclaw_transport_trace?: Record<string, unknown> | null;
+  /** Durable normalization rescue: event_count, generator_invocation_flag_count */
+  quality_metrics?: Record<string, unknown>;
+  /** v1 pressure telemetry from persisted events */
+  pressure_summary?: Record<string, unknown>;
 };
 
 export type RoleInvocationDetailItem = {
@@ -240,6 +247,8 @@ export type RoleInvocationDetailItem = {
   /** Subset of persisted routing_metadata_json (generator rows). */
   routing_hints?: Record<string, unknown> | null;
   routing_fact_source?: "persisted" | "none";
+  kiloclaw_transport_trace?: Record<string, unknown> | null;
+  normalization_rescue?: boolean | null;
 };
 
 export type AssociatedOutputsBlock = {

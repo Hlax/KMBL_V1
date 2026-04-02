@@ -16,6 +16,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from kmbl_orchestrator.config import Settings, get_settings
+from kmbl_orchestrator.errors import KiloclawRoleInvocationForbiddenError
 from kmbl_orchestrator.contracts.image_artifact_v1 import ImageArtifactV1
 
 _log = logging.getLogger(__name__)
@@ -123,8 +124,21 @@ class ImageService:
         """
         try:
             from kmbl_orchestrator.providers.kiloclaw import get_kiloclaw_client
+            from kmbl_orchestrator.providers.kiloclaw_protocol import (
+                assert_kiloclaw_role_invocation_permitted,
+            )
 
             client = get_kiloclaw_client(self._settings)
+            try:
+                assert_kiloclaw_role_invocation_permitted(
+                    settings=self._settings,
+                    client=client,
+                )
+            except KiloclawRoleInvocationForbiddenError as e:
+                return HabitatImageResult(
+                    status="failed",
+                    error=f"transport_forbidden: {e} {e.operator_hint}".strip(),
+                )
             config_key = self._settings.kiloclaw_generator_openai_image_config_key
             
             if not config_key:

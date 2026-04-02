@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Literal
 
 from kmbl_orchestrator.config import Settings, get_settings
 from kmbl_orchestrator.providers.kiloclaw_protocol import RoleType
 from kmbl_orchestrator.providers.kiloclaw_parsing import _apply_role_contract
+
+_log = logging.getLogger(__name__)
 
 
 class KiloClawStubClient:
@@ -26,6 +29,11 @@ class KiloClawStubClient:
         payload: dict[str, Any],
     ) -> dict[str, Any]:
         _ = self._settings
+        _log.warning(
+            "KILOCLAW_STUB_TRANSPORT invoke_role role=%s config_key=%s — NOT a real OpenClaw/KiloClaw call",
+            role_type,
+            provider_config_key,
+        )
         _ = provider_config_key
         if role_type == "planner":
             raw = {

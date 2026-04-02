@@ -36,6 +36,11 @@ _log = logging.getLogger(__name__)
 
 
 def _should_create_staging_snapshot(policy: str, marked_for_review: bool) -> bool:
+    """Whether staging_node should persist a staging_snapshot row (not operator materialize).
+
+    ``on_nomination`` requires evaluator nomination (see ``extract_evaluator_nomination``).
+    Unknown policy values default to True (safe: do not silently drop review snapshots).
+    """
     if policy == "always":
         return True
     if policy == "never":
@@ -232,7 +237,7 @@ def staging_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     mark_reason = nomination["mark_reason"]
     review_tags: list[str] = list(nomination["review_tags"])
 
-    policy = getattr(ctx.settings, "staging_snapshot_policy", "always")
+    policy = getattr(ctx.settings, "staging_snapshot_policy", "on_nomination")
     should_snapshot = _should_create_staging_snapshot(policy, marked)
 
     ssid: UUID | None = None

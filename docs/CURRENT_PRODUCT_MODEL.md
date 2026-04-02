@@ -15,7 +15,7 @@ This document describes **how the system behaves today** in code (LangGraph orch
 ## Review snapshots (staging_snapshot)
 
 - Immutable **`staging_snapshot`** rows are **frozen review candidates** (queue for human review, rating, approval flows).
-- **Automatic** creation of a new row on each successful staging pass is **not** guaranteed. It depends on **`KMBL_STAGING_SNAPSHOT_POLICY`** (`always` | `on_nomination` | `never`) in orchestrator settings.
+- **Automatic** creation of a new row on each successful staging pass is **not** guaranteed. It depends on **`KMBL_STAGING_SNAPSHOT_POLICY`** (`always` | `on_nomination` | `never`) in orchestrator settings. **Default in code is `on_nomination`** — live evolution stays in **working staging** until nomination, materialize, or explicit `always` policy.
   - **`always`**: a review snapshot row is typically created when staging completes (subject to integrity checks).
   - **`on_nomination`**: a row is created only when the evaluator **nominates** (`marked_for_review` / nomination fields).
   - **`never`**: no automatic row; operators rely on **working staging** until they **materialize** (see below).

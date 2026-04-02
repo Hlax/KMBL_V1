@@ -54,6 +54,8 @@ def _make_settings() -> Settings:
         kiloclaw_transport="stub",
         graph_max_iterations_default=3,
         habitat_image_generation_enabled=False,
+        # Integration expects a review snapshot row each pass; product default is on_nomination.
+        staging_snapshot_policy="always",
     )
 
 

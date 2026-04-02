@@ -279,8 +279,16 @@ def test_stub_run_timeline_includes_preview_on_staging_created() -> None:
     from kmbl_orchestrator.roles.invoke import DefaultRoleInvoker
 
     repo = InMemoryRepository()
-    invoker = DefaultRoleInvoker(settings=Settings.model_construct(kiloclaw_transport="stub"))
-    settings = Settings.model_construct(kiloclaw_transport="stub")
+    invoker = DefaultRoleInvoker(
+        settings=Settings.model_construct(
+            kiloclaw_transport="stub",
+            staging_snapshot_policy="always",
+        )
+    )
+    settings = Settings.model_construct(
+        kiloclaw_transport="stub",
+        staging_snapshot_policy="always",
+    )
     tid, gid = persist_graph_run_start(
         repo,
         thread_id=None,

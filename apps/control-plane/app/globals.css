@@ -2080,6 +2080,44 @@ a.op-gallery-strip__label:hover {
   color: #d4d4de;
 }
 
+.cp-truth-banner {
+  margin: 0 0 1rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: 6px;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.cp-truth-banner--error {
+  background: #2a1518;
+  border: 1px solid #6b3038;
+  color: #f0d0d4;
+}
+
+.cp-truth-banner--warn {
+  background: #2a2615;
+  border: 1px solid #6b6230;
+  color: #f0ead0;
+}
+
+.cp-truth-banner--mode-ok {
+  background: #152a1a;
+  border: 1px solid #306b40;
+  color: #d8f0dc;
+}
+
+.cp-truth-banner--fallback {
+  background: #2a2215;
+  border: 1px solid #8b6914;
+  color: #f5ecd0;
+}
+
+.cp-truth-banner__sub {
+  margin-top: 0.45rem;
+  font-size: 0.86rem;
+  opacity: 0.95;
+}
+
 @media (min-width: 52rem) {
   .live-habitat-split__preview .live-habitat-frame-wrap {
     height: min(62dvh, 520px);

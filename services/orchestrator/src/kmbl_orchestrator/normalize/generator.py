@@ -444,21 +444,26 @@ def normalize_generator_output(
     """
     candidate_id = uuid4()
     rescue_paths: list[str] = []
+    enrichment_paths: list[str] = []
 
     # Build content index from proposed_changes/updated_state for cross-reference.
-    # This is an enrichment step, not a rescue — only log as rescue if it actually
-    # fills content into artifacts that were missing it.
+    # This is informational enrichment (normal bookkeeping), not rescue/correction.
     content_index = _build_content_index(raw)
+    if content_index:
+        enrichment_paths.append(f"content_index_built:{len(content_index)}")
 
     ao = raw.get("artifact_outputs")
     artifacts = list(ao) if isinstance(ao, list) else []
 
-    # Enrich artifacts missing content with content from files arrays
-    pre_enrich_count = sum(1 for a in artifacts if isinstance(a, dict) and not a.get("content"))
+    # Enrich artifacts missing content with content from files arrays.
+    # This is normal enrichment — artifacts referencing files in proposed_changes
+    # is a valid generator pattern, not malformed output requiring rescue.
+    content_before = sum(1 for a in artifacts if isinstance(a, dict) and a.get("content"))
     artifacts = _enrich_artifacts_with_content(artifacts, content_index)
-    post_enrich_count = sum(1 for a in artifacts if isinstance(a, dict) and a.get("content"))
-    if pre_enrich_count > 0 and post_enrich_count > pre_enrich_count:
-        rescue_paths.append(f"content_enrichment:{post_enrich_count - pre_enrich_count}")
+    content_after = sum(1 for a in artifacts if isinstance(a, dict) and a.get("content"))
+    enriched_count = content_after - content_before
+    if enriched_count > 0:
+        enrichment_paths.append(f"content_enrichment:{enriched_count}")
 
     try:
         artifacts = normalize_combined_artifact_outputs_list(artifacts)
@@ -521,8 +526,11 @@ def normalize_generator_output(
     sandbox = raw.get("sandbox_ref")
     preview = raw.get("preview_url")
 
-    # Embed rescue audit into raw_payload_json so the graph node can surface it
+    # Embed audit trails into raw_payload_json so the graph node can surface them.
+    # Enrichments are informational (normal bookkeeping); rescues are actual recovery.
     raw_with_audit = dict(raw)
+    if enrichment_paths:
+        raw_with_audit["_normalization_enrichments"] = enrichment_paths
     if rescue_paths:
         raw_with_audit["_normalization_rescues"] = rescue_paths
 

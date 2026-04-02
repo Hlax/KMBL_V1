@@ -298,7 +298,12 @@ class GraphRunSummaryBlock(BaseModel):
     )
     quality_metrics: dict[str, Any] = Field(
         default_factory=dict,
-        description="Durable normalization rescue counts (events + generator routing flags).",
+        description=(
+            "Durable normalization rescue counts (events + generator routing flags). "
+            "Only genuine recovery/correction events are counted; informational "
+            "enrichment (e.g. content_index_built, content_enrichment) is tracked "
+            "separately and does not inflate rescue metrics."
+        ),
     )
     pressure_summary: dict[str, Any] = Field(
         default_factory=dict,
@@ -326,7 +331,11 @@ class RoleInvocationDetailItem(BaseModel):
     )
     normalization_rescue: bool | None = Field(
         default=None,
-        description="True when generator invocation required normalization rescue (persisted flag).",
+        description=(
+            "True when generator invocation required normalization rescue — "
+            "i.e. actual recovery/correction of malformed output (persisted flag). "
+            "Informational enrichment does not set this flag."
+        ),
     )
 
 

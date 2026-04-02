@@ -200,12 +200,12 @@ class TestNormalizationRescueObservability:
             build_spec_id=bsid,
         )
         rescues = (cand.raw_payload_json or {}).get("_normalization_rescues")
-        # Content index is not a rescue, other paths should not fire for clean output
-        assert not any(
-            k in (rescues or [])
-            for k in ["recover_from_proposed_changes", "recover_from_updated_state",
-                      "artifact_norm_fallback", "post_recovery_norm_fallback"]
-        ), f"unexpected rescues for clean output: {rescues}"
+        # No rescue paths should fire for clean output
+        assert not rescues, f"unexpected rescues for clean output: {rescues}"
+        # content_enrichment must not appear in rescue paths
+        assert "content_enrichment" not in str(rescues or []), (
+            "content_enrichment should not be classified as rescue"
+        )
 
     def test_normalization_rescue_event_emitted_in_graph(self) -> None:
         """When the generator stub produces a recoverable output, a NORMALIZATION_RESCUE event appears."""
@@ -218,6 +218,52 @@ class TestNormalizationRescueObservability:
         # Stub output is clean — should produce zero rescue events
         assert len(rescue_evs) == 0, (
             f"unexpected rescue events for stub transport: {[e.payload_json for e in rescue_evs]}"
+        )
+
+    def test_content_enrichment_is_not_rescue(self) -> None:
+        """Content enrichment (cross-referencing content from proposed_changes) is informational, not rescue."""
+        raw = {
+            "artifact_outputs": [
+                {
+                    "role": "static_frontend_file_v1",
+                    "path": "component/preview/index.html",
+                    "language": "html",
+                    # content intentionally missing — will be enriched from proposed_changes
+                }
+            ],
+            "proposed_changes": {
+                "files": [
+                    {
+                        "path": "component/preview/index.html",
+                        "content": "<html><body>enriched content</body></html>",
+                    }
+                ]
+            },
+        }
+        tid = uuid4()
+        gid = uuid4()
+        inv_id = uuid4()
+        bsid = uuid4()
+        cand = normalize_generator_output(
+            raw,
+            thread_id=tid,
+            graph_run_id=gid,
+            generator_invocation_id=inv_id,
+            build_spec_id=bsid,
+        )
+        # Enrichment should be tracked as enrichment, not rescue
+        enrichments = (cand.raw_payload_json or {}).get("_normalization_enrichments")
+        rescues = (cand.raw_payload_json or {}).get("_normalization_rescues")
+        assert enrichments is not None, "expected _normalization_enrichments in raw_payload_json"
+        assert any("content_enrichment" in e for e in enrichments), (
+            f"expected content_enrichment in enrichments: {enrichments}"
+        )
+        assert any("content_index_built" in e for e in enrichments), (
+            f"expected content_index_built in enrichments: {enrichments}"
+        )
+        # content_enrichment must NOT be in rescue paths
+        assert not any("content_enrichment" in str(r) for r in (rescues or [])), (
+            f"content_enrichment should not be in rescue paths: {rescues}"
         )
 
 

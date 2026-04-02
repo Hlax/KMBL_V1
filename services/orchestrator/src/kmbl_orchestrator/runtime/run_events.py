@@ -55,6 +55,7 @@ class RunEventType:
 
     # Normalization observability
     NORMALIZATION_RESCUE = "normalization_rescue"
+    NORMALIZATION_ENRICHMENT = "normalization_enrichment"
 
     # Identity feedback loop
     IDENTITY_FEEDBACK_UPSERT = "identity_feedback_upsert"

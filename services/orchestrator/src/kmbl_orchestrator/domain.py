@@ -106,7 +106,16 @@ VALID_STATUS_TRANSITIONS: dict[GraphRunStatus, frozenset[GraphRunStatus]] = {
 
 
 def is_valid_status_transition(current: GraphRunStatus, target: GraphRunStatus) -> bool:
-    """Check if a status transition is valid."""
+    """Check if a status transition is valid according to the lifecycle model.
+
+    Args:
+        current: The current status of the graph run.
+        target: The desired next status.
+
+    Returns:
+        True if the transition is allowed, False otherwise.
+        Terminal states (completed, failed, interrupted) allow no further transitions.
+    """
     valid_next = VALID_STATUS_TRANSITIONS.get(current, frozenset())
     return target in valid_next
 

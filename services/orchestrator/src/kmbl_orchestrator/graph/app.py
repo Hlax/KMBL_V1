@@ -351,7 +351,7 @@ def _run_graph_inner(
             error_info: dict[str, Any] = {
                 "error_kind": "graph_error",
                 "error_type": type(e).__name__,
-                "error_message": f"{type(e).__name__}: {e}",
+                "error_message": str(e)[:500],
             }
             if tid_s:
                 tid_u = UUID(str(tid_s))

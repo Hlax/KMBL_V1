@@ -82,6 +82,28 @@ def decision_router(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             },
         )
 
+    # Emit explicit warning when a non-passing evaluation reaches staging at max iterations.
+    # This is the degraded-success path: the evaluator said "fail" or "partial" but we
+    # exhausted iterations, so we stage anyway.  Operators must be able to see this.
+    if decision == "stage" and status in ("fail", "partial"):
+        alignment_score_val: float | None = state.get("last_alignment_score")
+        append_graph_run_event(
+            ctx.repo,
+            gid,
+            RunEventType.DEGRADED_STAGING,
+            {
+                "message": (
+                    f"Staging with evaluator status '{status}' after {iteration} iteration(s) "
+                    f"(max_iterations={max_iter}). Output may not meet quality bar."
+                ),
+                "evaluation_status": status,
+                "iteration_index": iteration,
+                "max_iterations": max_iter,
+                "last_alignment_score": alignment_score_val,
+            },
+            thread_id=UUID(state["thread_id"]),
+        )
+
     out: dict[str, Any] = {"decision": decision}
     if interrupt_reason:
         out["interrupt_reason"] = interrupt_reason

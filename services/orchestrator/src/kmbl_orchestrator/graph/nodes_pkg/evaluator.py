@@ -241,6 +241,8 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     report = apply_preview_surface_gate(report, is_static_vertical=is_static_vertical)
 
     # ── 3D content guardrail for spatial experience modes ────────────────
+    # Soft policy: do not force fail when the LLM evaluator already passed — use partial + metrics
+    # so the graph can iterate without a hard dead-end before the generator adds Three/WebGL.
     bs_from_state = state.get("build_spec") or {}
     exp_mode = bs_from_state.get("experience_mode", "")
     if exp_mode in ("immersive_spatial_portfolio", "webgl_3d_portfolio"):
@@ -255,25 +257,34 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             if any(kw in searchable for kw in _3d_keywords):
                 has_3d_content = True
                 break
-        if not has_3d_content and report.status != "fail":
+        if not has_3d_content and report.status in ("pass", "partial"):
             _log.warning(
                 "graph_run graph_run_id=%s 3d_content_guardrail: "
-                "experience_mode=%s but no 3D content found in artifacts, downgrading to fail",
-                gid, exp_mode,
+                "experience_mode=%s but no 3D content found in artifacts; "
+                "recording partial + metrics (not hard fail)",
+                gid,
+                exp_mode,
             )
             existing_issues = list(report.issues_json or [])
             existing_issues.append({
-                "severity": "critical",
+                "severity": "high",
                 "category": "3d_content_missing",
                 "message": (
                     f"experience_mode is '{exp_mode}' but build candidate "
-                    "contains no WebGL/Three.js/3D content"
+                    "contains no WebGL/Three.js/3D content — iterate to add real 3D or lower ambition in build_spec"
                 ),
             })
-            report = report.model_copy(update={
-                "status": "fail",
-                "issues_json": existing_issues,
-            })
+            m = dict(report.metrics_json or {})
+            m["experience_mode_3d_unfulfilled"] = True
+            m["experience_mode_requested"] = exp_mode
+            new_status = "partial"
+            report = report.model_copy(
+                update={
+                    "status": new_status,
+                    "issues_json": existing_issues,
+                    "metrics_json": m,
+                }
+            )
 
     # Fix 2: compute alignment score from evaluator output + identity_brief
     identity_brief = state.get("identity_brief")

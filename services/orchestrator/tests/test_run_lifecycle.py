@@ -30,6 +30,30 @@ def client(clear_singleton: None) -> TestClient:
     return TestClient(app)
 
 
+def test_start_same_thread_after_interrupt_requested_returns_200_not_409(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Same thread after interrupt_requested: prior run is finalized; second start returns 200."""
+    monkeypatch.setattr(
+        "kmbl_orchestrator.api.main._run_graph_background",
+        lambda **kwargs: None,
+    )
+    r1 = client.post("/orchestrator/runs/start", json={})
+    assert r1.status_code == 200
+    tid = r1.json()["thread_id"]
+    gid = r1.json()["graph_run_id"]
+    assert client.post(f"/orchestrator/runs/{gid}/interrupt").status_code == 200
+    st = client.get(f"/orchestrator/runs/{gid}")
+    assert st.json()["status"] == "interrupt_requested"
+    r2 = client.post("/orchestrator/runs/start", json={"thread_id": tid})
+    assert r2.status_code == 200
+    assert r2.json()["thread_id"] == tid
+    assert r2.json()["graph_run_id"] != gid
+    old = client.get(f"/orchestrator/runs/{gid}")
+    assert old.status_code == 200
+    assert old.json()["status"] == "interrupted"
+
+
 def test_duplicate_start_same_thread_returns_409(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

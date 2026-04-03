@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { parseOrchestratorErrorMessage } from "@/lib/orchestrator-error-message";
 import { serverOriginFromHeaders } from "@/lib/server-origin";
 import { LiveHabitatClient } from "./LiveHabitatClient";
 
@@ -31,10 +32,7 @@ export default async function LiveHabitatPage({
       loadErr = "Invalid JSON from live habitat API";
     }
     if (!res.ok && !loadErr) {
-      loadErr =
-        typeof initial?.error === "string"
-          ? initial.error
-          : `HTTP ${res.status}`;
+      loadErr = parseOrchestratorErrorMessage(initial, res.status);
     }
   } catch (e) {
     loadErr = e instanceof Error ? e.message : String(e);
@@ -52,11 +50,16 @@ export default async function LiveHabitatPage({
       </p>
 
       <h1 className="pub-page-title">Live Habitat</h1>
+      <p className="muted small" style={{ marginTop: "-0.35rem", marginBottom: "0.25rem" }}>
+        Thread ID (use this in <code className="mono small">/habitat/live/…</code>, not graph run id)
+      </p>
       <p className="pub-page-id mono">{threadId}</p>
 
       <p className="op-banner op-banner--staging" style={{ marginBottom: "1rem" }}>
         <strong>Mutable surface</strong> — current working staging for this thread. This is not a
         frozen review snapshot and not publication. It updates as generator iterations apply.
+        A <strong>404</strong> usually means no <code className="mono small">working_staging</code>{" "}
+        row exists yet for this thread (e.g. the run failed before staging persisted).
       </p>
 
       {loadErr ? (
@@ -64,8 +67,9 @@ export default async function LiveHabitatPage({
           <p className="pub-empty__title">Could not load live habitat</p>
           <p className="pub-empty__body mono small">{loadErr}</p>
           <p className="muted small">
-            Ensure the orchestrator is reachable and this thread has working staging (e.g. after a
-            run has staged at least once).
+            Ensure the orchestrator is reachable. If the message is “no working staging for this
+            thread”, the thread id is valid but no mutable staging row exists yet — complete a run
+            that reaches the staging step, or check an earlier successful run on the same thread.
           </p>
         </div>
       ) : (

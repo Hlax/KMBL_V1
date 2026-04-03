@@ -7,6 +7,8 @@ from uuid import UUID
 from fastapi import APIRouter, Body, Depends, HTTPException
 
 from kmbl_orchestrator.api.deps import get_repo
+from kmbl_orchestrator.config import Settings, get_settings
+from kmbl_orchestrator.memory.ops import append_memory_event, record_operator_memory_from_staging_approval
 from kmbl_orchestrator.api.staging_helpers import staging_mutation_response
 from kmbl_orchestrator.api.staging_models import (
     ApproveStagingBody,
@@ -30,6 +32,7 @@ def approve_staging_snapshot(
     staging_snapshot_id: str,
     body: ApproveStagingBody = Body(default=ApproveStagingBody()),
     repo: Repository = Depends(get_repo),
+    settings: Settings = Depends(get_settings),
 ) -> StagingMutationResponse:
     """Transition ``review_ready`` → ``approved`` (explicit human approval; not a workflow engine)."""
     try:
@@ -94,6 +97,26 @@ def approve_staging_snapshot(
                 "approved_by": body.approved_by,
             },
         )
+    if updated.identity_id is not None:
+        wt = record_operator_memory_from_staging_approval(
+            repo,
+            identity_id=updated.identity_id,
+            graph_run_id=updated.graph_run_id,
+            staging_snapshot_id=updated.staging_snapshot_id,
+            settings=settings,
+        )
+        if wt is not None and updated.graph_run_id is not None:
+            append_memory_event(
+                repo,
+                graph_run_id=updated.graph_run_id,
+                thread_id=updated.thread_id,
+                kind="updated",
+                payload={
+                    "memory_keys_written": wt.memory_keys_written,
+                    "categories": wt.categories,
+                    "phase": "operator_staging_approved",
+                },
+            )
     return staging_mutation_response(updated)
 
 

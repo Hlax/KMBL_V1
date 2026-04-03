@@ -45,6 +45,25 @@ class IdentityProfileRecord(BaseModel):
     updated_at: str = Field(default_factory=_utc_now_iso)
 
 
+MemoryCategory: TypeAlias = Literal["identity_derived", "run_outcome", "operator_confirmed"]
+
+
+class IdentityCrossRunMemoryRecord(BaseModel):
+    """identity_cross_run_memory — explainable cross-run memory (per identity, merge by category + key)."""
+
+    identity_cross_run_memory_id: UUID
+    identity_id: UUID
+    category: MemoryCategory
+    memory_key: str
+    payload_json: dict[str, Any] = Field(default_factory=dict)
+    strength: float = 0.0
+    provenance: str = ""
+    source_graph_run_id: UUID | None = None
+    operator_signal: str | None = None
+    created_at: str = Field(default_factory=_utc_now_iso)
+    updated_at: str = Field(default_factory=_utc_now_iso)
+
+
 class RoleInvocationRecord(BaseModel):
     role_invocation_id: UUID
     graph_run_id: UUID

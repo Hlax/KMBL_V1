@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { AgentThoughtStream } from "@/app/components/AgentThoughtStream";
 import { MaterializeReviewSnapshotButton } from "@/app/components/MaterializeReviewSnapshotButton";
+import { parseOrchestratorErrorMessage } from "@/lib/orchestrator-error-message";
 
 /** Staging preview iframe reload cadence (same-origin proxy to working-staging HTML). */
 const PREVIEW_REFRESH_MS = 5 * 60 * 1000;
@@ -43,11 +44,7 @@ export function LiveHabitatClient({
           return;
         }
         if (!r.ok) {
-          setErr(
-            typeof (parsed as { error?: string }).error === "string"
-              ? (parsed as { error: string }).error
-              : `HTTP ${r.status}`,
-          );
+          setErr(parseOrchestratorErrorMessage(parsed, r.status));
           return;
         }
         setErr(null);

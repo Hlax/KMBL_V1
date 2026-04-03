@@ -21,6 +21,7 @@ from kmbl_orchestrator.domain import (
     GraphRunEventRecord,
     GraphRunRecord,
     GraphRunStatus,
+    IdentityCrossRunMemoryRecord,
     IdentityProfileRecord,
     IdentitySourceRecord,
     PublicationSnapshotRecord,
@@ -355,6 +356,31 @@ class Repository(Protocol):
 
     def upsert_identity_profile(self, record: IdentityProfileRecord) -> None: ...
 
+    def get_identity_cross_run_memory(
+        self,
+        identity_id: UUID,
+        category: str,
+        memory_key: str,
+    ) -> IdentityCrossRunMemoryRecord | None:
+        """Return the row for the (identity_id, category, memory_key) triple, if any."""
+
+    def list_identity_cross_run_memory(
+        self,
+        identity_id: UUID,
+        *,
+        category: str | None = None,
+        limit: int = 200,
+    ) -> list[IdentityCrossRunMemoryRecord]:
+        """Rows for ``identity_id``, newest ``updated_at`` first. Optional exact ``category`` filter."""
+
+    def list_identity_cross_run_memory_by_source_run(
+        self, graph_run_id: UUID
+    ) -> list[IdentityCrossRunMemoryRecord]:
+        """Rows whose ``source_graph_run_id`` matches (for operator visibility)."""
+
+    def upsert_identity_cross_run_memory(self, record: IdentityCrossRunMemoryRecord) -> None:
+        """Insert or replace by unique (identity_id, category, memory_key)."""
+
     # --- Working staging ---
 
     def get_working_staging_for_thread(
@@ -437,6 +463,7 @@ class InMemoryRepository:
         self._publications: dict[str, PublicationSnapshotRecord] = {}
         self._identity_sources: list[IdentitySourceRecord] = []
         self._identity_profiles: dict[str, IdentityProfileRecord] = {}
+        self._identity_cross_run_memory: dict[str, IdentityCrossRunMemoryRecord] = {}
         self._autonomous_loops: dict[str, AutonomousLoopRecord] = {}
         # Thread-level advisory locks
         self._thread_locks: dict[str, threading.Lock] = {}
@@ -1128,6 +1155,50 @@ class InMemoryRepository:
     def upsert_identity_profile(self, record: IdentityProfileRecord) -> None:
         self._identity_profiles[str(record.identity_id)] = record
 
+    @staticmethod
+    def _icrm_key(identity_id: UUID, category: str, memory_key: str) -> str:
+        return f"{identity_id}|{category}|{memory_key}"
+
+    def get_identity_cross_run_memory(
+        self,
+        identity_id: UUID,
+        category: str,
+        memory_key: str,
+    ) -> IdentityCrossRunMemoryRecord | None:
+        return self._identity_cross_run_memory.get(
+            self._icrm_key(identity_id, category, memory_key)
+        )
+
+    def list_identity_cross_run_memory(
+        self,
+        identity_id: UUID,
+        *,
+        category: str | None = None,
+        limit: int = 200,
+    ) -> list[IdentityCrossRunMemoryRecord]:
+        iid = str(identity_id)
+        rows = [
+            r for r in self._identity_cross_run_memory.values()
+            if str(r.identity_id) == iid and (category is None or r.category == category)
+        ]
+        rows.sort(key=lambda r: r.updated_at, reverse=True)
+        return rows[:limit]
+
+    def list_identity_cross_run_memory_by_source_run(
+        self, graph_run_id: UUID
+    ) -> list[IdentityCrossRunMemoryRecord]:
+        gid = str(graph_run_id)
+        rows = [
+            r for r in self._identity_cross_run_memory.values()
+            if r.source_graph_run_id is not None and str(r.source_graph_run_id) == gid
+        ]
+        rows.sort(key=lambda r: r.updated_at, reverse=True)
+        return rows
+
+    def upsert_identity_cross_run_memory(self, record: IdentityCrossRunMemoryRecord) -> None:
+        k = self._icrm_key(record.identity_id, record.category, record.memory_key)
+        self._identity_cross_run_memory[k] = record
+
     # ---- Working staging ----
 
     def get_working_staging_for_thread(
@@ -1167,7 +1238,8 @@ class InMemoryRepository:
         "_build_specs", "_build_candidates", "_evaluation_reports",
         "_run_snapshots", "_graph_run_events", "_staging_snapshots",
         "_working_stagings", "_staging_checkpoints", "_publications",
-        "_identity_sources", "_identity_profiles", "_autonomous_loops",
+        "_identity_sources", "_identity_profiles", "_identity_cross_run_memory",
+        "_autonomous_loops",
     )
 
     @contextmanager

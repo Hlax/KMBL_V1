@@ -13,6 +13,7 @@ from kmbl_orchestrator.domain import (
     GraphRunRecord,
     RoleInvocationRecord,
     ThreadRecord,
+    WorkingStagingRecord,
 )
 from kmbl_orchestrator.persistence.factory import reset_repository_singleton_for_tests
 from kmbl_orchestrator.persistence.repository import InMemoryRepository
@@ -91,11 +92,51 @@ def test_graph_run_detail_endpoint_shape(clear_singleton: None) -> None:
         qm = body["summary"]["quality_metrics"]
         assert qm["event_count"] == 0
         assert qm["generator_invocation_flag_count"] == 0
+        assert body["summary"]["working_staging_present"] is False
         assert len(body["role_invocations"]) == 1
         assert body["role_invocations"][0]["role_type"] == "planner"
         assert len(body["timeline"]) == 2
         kinds = [t["kind"] for t in body["timeline"]]
         assert "run_started" in kinds and "run_completed" in kinds
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_graph_run_detail_working_staging_present_true_when_row_exists(
+    clear_singleton: None,
+) -> None:
+    tid = uuid4()
+    gid = uuid4()
+    repo = InMemoryRepository()
+    repo.ensure_thread(ThreadRecord(thread_id=tid, thread_kind="build", status="active"))
+    repo.save_graph_run(
+        GraphRunRecord(
+            graph_run_id=gid,
+            thread_id=tid,
+            trigger_type="prompt",
+            status="failed",
+            started_at="2026-03-29T10:00:00+00:00",
+            ended_at="2026-03-29T10:01:00+00:00",
+        )
+    )
+    repo.save_working_staging(
+        WorkingStagingRecord(
+            working_staging_id=uuid4(),
+            thread_id=tid,
+            identity_id=None,
+            payload_json={"x": 1},
+        )
+    )
+
+    def _ov() -> InMemoryRepository:
+        return repo
+
+    app.dependency_overrides[get_repo] = _ov
+    try:
+        client = TestClient(app)
+        r = client.get(f"/orchestrator/runs/{gid}/detail")
+        assert r.status_code == 200
+        assert r.json()["summary"]["working_staging_present"] is True
     finally:
         app.dependency_overrides.clear()
 

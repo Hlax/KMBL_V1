@@ -1,6 +1,21 @@
 # Control plane → orchestrator proxy behavior
 
-Next.js API routes under `apps/control-plane/app/api/` forward to the Python orchestrator using `NEXT_PUBLIC_ORCHESTRATOR_URL`. When the upstream returns FastAPI’s route miss (`404` with `{"detail":"Not Found"}`), helpers in [`orchestrator-proxy.ts`](../apps/control-plane/lib/orchestrator-proxy.ts) return **synthetic JSON** with `backend_unimplemented: true`.
+Next.js API routes under `apps/control-plane/app/api/` forward to the Python orchestrator using a **single resolved base URL** on the server. Resolution order (see [`orchestrator-server-origin.ts`](../apps/control-plane/lib/orchestrator-server-origin.ts)):
+
+1. **`NEXT_PUBLIC_ORCHESTRATOR_URL`** (trimmed, no trailing slash) — primary; use this in `.env.local` for local and in Vercel env for production.
+2. **`ORCHESTRATOR_ORIGIN`** — legacy fallback when (1) is unset (older setups).
+3. **`http://127.0.0.1:8010`** — local default.
+
+**Why this matters:** Previously, `POST /api/runs/start` used only `ORCHESTRATOR_ORIGIN` with a localhost default, while most other routes used `NEXT_PUBLIC_ORCHESTRATOR_URL`. If you pointed the app at a **remote** orchestrator via `NEXT_PUBLIC_ORCHESTRATOR_URL` but left `ORCHESTRATOR_ORIGIN` unset, **run start** could still call **localhost**, hitting a different (often stale) Python process — for example old behavior such as `409` with `active_status: interrupt_requested` after the server was fixed. Keep **one** orchestrator URL in `NEXT_PUBLIC_ORCHESTRATOR_URL` so every proxy agrees.
+
+When the upstream returns FastAPI’s route miss (`404` with `{"detail":"Not Found"}`), helpers in [`orchestrator-proxy.ts`](../apps/control-plane/lib/orchestrator-proxy.ts) return **synthetic JSON** with `backend_unimplemented: true`.
+
+## Live habitat (`/habitat/live/{thread_id}`)
+
+- The path parameter is **`thread_id`**, not `graph_run_id`. Use the thread id from graph run detail (`summary.thread_id`).
+- Orchestrator `GET /orchestrator/working-staging/{thread_id}/live` returns **404** when there is no `working_staging` row for that thread. That is normal if a run **failed before the staging node** persisted working staging (see LangGraph flow: staging runs only after a **stage** decision).
+- Error bodies use FastAPI’s **`detail`** field; the control plane maps that to the UI (see [`orchestrator-error-message.ts`](../apps/control-plane/lib/orchestrator-error-message.ts)).
+- `GET /orchestrator/runs/{id}/detail` includes **`working_staging_present`** on the summary when the orchestrator supports it, so operators can see whether live habitat will succeed before opening the page.
 
 ## Fail-open routes (200 + fallback body)
 

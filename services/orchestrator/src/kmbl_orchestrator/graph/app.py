@@ -1,6 +1,6 @@
 """
-LangGraph application — minimal v1: thread → context → checkpoint → planner → generator
-→ evaluator → decision → (iterate | staging | end).
+LangGraph application — thread → context → checkpoint → planner → generator
+→ evaluator → decision → (replan: planner | iterate: generator | staging | end).
 """
 
 from __future__ import annotations
@@ -38,6 +38,7 @@ from kmbl_orchestrator.graph.helpers import (
     _uuid,
     compute_evaluator_decision,  # noqa: F401  re-export for tests
     maybe_suppress_duplicate_staging,  # noqa: F401  re-export for tests
+    should_route_to_planner_on_iterate,  # noqa: F401  re-export for tests
 )
 from kmbl_orchestrator.graph.nodes import (
     context_hydrator as _context_hydrator,
@@ -48,6 +49,7 @@ from kmbl_orchestrator.graph.nodes import (
     staging_node as _staging_node,
 )
 from kmbl_orchestrator.graph.state import GraphState
+from kmbl_orchestrator.memory.ops import append_memory_event, record_run_outcome_memory
 from kmbl_orchestrator.persistence.repository import Repository
 from kmbl_orchestrator.roles.invoke import DefaultRoleInvoker
 from kmbl_orchestrator.runtime.interrupt_checks import raise_if_interrupt_requested
@@ -123,6 +125,24 @@ def build_compiled_graph(ctx: GraphContext):
     def route_after_decision(state: GraphState) -> str:
         d = state.get("decision")
         if d == "iterate":
+            if should_route_to_planner_on_iterate(dict(state), ctx.settings):
+                gid_raw = state.get("graph_run_id")
+                tid_raw = state.get("thread_id")
+                if gid_raw and tid_raw:
+                    append_graph_run_event(
+                        ctx.repo,
+                        UUID(str(gid_raw)),
+                        RunEventType.DECISION_ITERATE,
+                        {
+                            "next_node": "planner",
+                            "retry_direction": state.get("retry_direction"),
+                            "stagnation_count": (state.get("current_state") or {}).get(
+                                "stagnation_count"
+                            ),
+                        },
+                        thread_id=UUID(str(tid_raw)),
+                    )
+                return "planner"
             return "generator"
         if d == "stage":
             return "staging"
@@ -149,6 +169,7 @@ def build_compiled_graph(ctx: GraphContext):
         "decision_router",
         route_after_decision,
         {
+            "planner": "planner",
             "generator": "generator",
             "staging": "staging",
             "end": END,
@@ -421,6 +442,24 @@ def _run_graph_inner(
                     },
                     thread_id=tid_u,
                 )
+                wt = record_run_outcome_memory(
+                    repo,
+                    graph_run_id=gid_u,
+                    settings=ctx.settings,
+                    final_state=dict(final),
+                )
+                if wt is not None:
+                    append_memory_event(
+                        repo,
+                        graph_run_id=gid_u,
+                        thread_id=tid_u,
+                        kind="updated",
+                        payload={
+                            "memory_keys_written": wt.memory_keys_written,
+                            "categories": wt.categories,
+                            "phase": "run_outcome",
+                        },
+                    )
         except Exception as post_exc:
             _log.exception(
                 "run_graph post-invoke persistence failed graph_run_id=%s exc=%s",

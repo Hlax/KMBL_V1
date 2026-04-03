@@ -27,6 +27,7 @@ from kmbl_orchestrator.graph.state import GraphState
 from kmbl_orchestrator.normalize import normalize_planner_output
 from kmbl_orchestrator.runtime.interrupt_checks import raise_if_interrupt_requested
 from kmbl_orchestrator.runtime.run_events import RunEventType, append_graph_run_event
+from kmbl_orchestrator.memory.ops import memory_bias_for_experience_mode
 from kmbl_orchestrator.staging.facts import (
     build_working_staging_facts,
     working_staging_facts_to_payload,
@@ -117,7 +118,8 @@ def planner_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     else:
         identity_url = identity_url.strip()
 
-    payload = {
+    iteration_idx = int(state.get("iteration_index", 0))
+    payload: dict[str, Any] = {
         "thread_id": state["thread_id"],
         "identity_context": state.get("identity_context") or {},
         "memory_context": state.get("memory_context") or {},
@@ -132,6 +134,21 @@ def planner_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         # Carries themes, tone, visual_tendencies, content_types, complexity, notable_entities.
         "structured_identity": state.get("structured_identity"),
     }
+    if iteration_idx > 0:
+        ev = state.get("evaluation_report") if isinstance(state.get("evaluation_report"), dict) else {}
+        bs = state.get("build_spec") if isinstance(state.get("build_spec"), dict) else {}
+        payload["replan_context"] = {
+            "replan": True,
+            "iteration_index": iteration_idx,
+            "prior_build_spec_id": state.get("build_spec_id"),
+            "prior_evaluation_report": {
+                "status": ev.get("status"),
+                "summary": ev.get("summary"),
+                "issues": ev.get("issues"),
+            },
+            "retry_context": state.get("retry_context"),
+            "prior_build_spec": bs,
+        }
     t_pl = time.perf_counter()
     try:
         inv, raw = ctx.invoker.invoke(
@@ -177,6 +194,8 @@ def planner_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
 
     # Ensure experience_mode is always explicitly set in build_spec.
     # If the planner set it, we respect it; otherwise, derive from structured identity.
+    # Cross-run memory may bias toward a remembered mode only when identity confidence is low
+    # (see memory_bias_for_experience_mode); planner-authored experience_mode is never overridden.
     bs = raw["build_spec"]
     existing_mode = bs.get("experience_mode")
     if not isinstance(existing_mode, str) or not existing_mode.strip():
@@ -198,9 +217,22 @@ def planner_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         md["experience_mode_derived"] = True
         md["experience_mode_source"] = "structured_identity"
         md["experience_confidence"] = mode_result["experience_confidence"]
+        mc = state.get("memory_context") or {}
+        cross = mc.get("cross_run") if isinstance(mc, dict) else {}
+        ts = cross.get("taste_summary") if isinstance(cross, dict) else {}
+        ts_d = ts if isinstance(ts, dict) else {}
+        bias_mode, bias_reason = memory_bias_for_experience_mode(
+            structured_identity=si_payload if isinstance(si_payload, dict) else None,
+            taste_summary=ts_d,
+            settings=ctx.settings,
+        )
+        if bias_mode and bias_mode != derived_mode:
+            bs["experience_mode"] = bias_mode
+            md["experience_mode_source"] = "structured_identity_with_cross_run_memory_bias"
+            md["experience_mode_memory_bias"] = {"to": bias_mode, "reason": bias_reason}
         _log.info(
             "graph_run graph_run_id=%s experience_mode derived=%s confidence=%.2f archetype=%s",
-            gid, derived_mode, mode_result["experience_confidence"], bs.get("site_archetype"),
+            gid, bs.get("experience_mode"), mode_result["experience_confidence"], bs.get("site_archetype"),
         )
     try:
         validate_role_output_for_persistence("planner", raw)

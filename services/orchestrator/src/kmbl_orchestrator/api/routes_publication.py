@@ -8,9 +8,12 @@ from typing import Annotated, Any, Literal
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
 
 from kmbl_orchestrator.api.deps import get_repo
+from kmbl_orchestrator.config import Settings, get_settings
+from kmbl_orchestrator.memory.ops import append_memory_event, record_operator_memory_from_publication
+from pydantic import BaseModel, Field
+
 from kmbl_orchestrator.domain import PublicationSnapshotRecord
 from kmbl_orchestrator.persistence.repository import Repository
 from kmbl_orchestrator.publication.eligibility import (
@@ -187,6 +190,7 @@ def list_publications(
 def create_publication(
     body: Annotated[CreatePublicationBody, Body()],
     repo: Repository = Depends(get_repo),
+    settings: Settings = Depends(get_settings),
 ) -> CreatePublicationResponse:
     """Create immutable ``publication_snapshot`` from an **approved** staging row only."""
     staging = repo.get_staging_snapshot(body.staging_snapshot_id)
@@ -245,6 +249,26 @@ def create_publication(
                 "published_by": body.published_by,
             },
         )
+    if staging.identity_id is not None:
+        wt = record_operator_memory_from_publication(
+            repo,
+            identity_id=staging.identity_id,
+            graph_run_id=staging.graph_run_id,
+            staging_snapshot_id=staging.staging_snapshot_id,
+            settings=settings,
+        )
+        if wt is not None and staging.graph_run_id is not None:
+            append_memory_event(
+                repo,
+                graph_run_id=staging.graph_run_id,
+                thread_id=staging.thread_id,
+                kind="updated",
+                payload={
+                    "memory_keys_written": wt.memory_keys_written,
+                    "categories": wt.categories,
+                    "phase": "operator_publication",
+                },
+            )
     return CreatePublicationResponse(
         publication_snapshot_id=str(pub_id),
         source_staging_snapshot_id=str(staging.staging_snapshot_id),

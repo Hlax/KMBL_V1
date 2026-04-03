@@ -164,7 +164,28 @@ export default async function GraphRunDetailPage({
       </p>
 
       <h1 className="pub-page-title">Graph run</h1>
+      <p className="muted small" style={{ marginBottom: "0.25rem" }}>
+        <strong>graph_run_id</strong> — this run (API / debugging)
+      </p>
       <p className="pub-page-id mono">{s.graph_run_id}</p>
+      <p className="muted small" style={{ marginTop: "0.75rem", marginBottom: "0.25rem" }}>
+        <strong>thread_id</strong> — thread scope (live habitat, working staging, materialize snapshot)
+      </p>
+      <p className="pub-page-id mono">
+        {s.thread_id}
+        <span className="muted small" style={{ marginLeft: "0.5rem" }}>
+          ·{" "}
+          <Link href={`/habitat/live/${encodeURIComponent(s.thread_id)}`}>Open live habitat</Link>
+        </span>
+      </p>
+      {s.working_staging_present === false ? (
+        <p className="op-banner op-banner--warn" style={{ marginTop: "0.75rem", marginBottom: 0 }}>
+          <strong>No working staging row</strong> for this thread yet.{" "}
+          <Link href={`/habitat/live/${encodeURIComponent(s.thread_id)}`}>Live habitat</Link> will
+          404 until a run reaches the staging step and persists mutable staging (failed runs often
+          stop before that).
+        </p>
+      ) : null}
       {scen ? (
         <p className="muted small" style={{ marginTop: "-0.25rem", marginBottom: "0.5rem" }}>
           <span className={scen.className} title={data.scenario_tag ?? ""}>

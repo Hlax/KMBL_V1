@@ -21,8 +21,10 @@ from kmbl_orchestrator.domain import (
     GraphRunEventRecord,
     GraphRunRecord,
     GraphRunStatus,
+    IdentityCrossRunMemoryRecord,
     IdentityProfileRecord,
     IdentitySourceRecord,
+    MemoryCategory,
     PublicationSnapshotRecord,
     RoleInvocationRecord,
     StagingCheckpointRecord,
@@ -393,4 +395,25 @@ def _row_to_staging_checkpoint(row: dict[str, Any]) -> StagingCheckpointRecord:
         created_at=_ts_to_iso(row.get("created_at")) or "",
         reason_category=rc if isinstance(rc, str) else None,
         reason_explanation=re if isinstance(re, str) else None,
+    )
+
+
+def _row_to_identity_cross_run_memory(row: dict[str, Any]) -> IdentityCrossRunMemoryRecord:
+    sg = row.get("source_graph_run_id")
+    st = row.get("strength")
+    strength = float(st) if st is not None else 0.0
+    pj = row.get("payload_json")
+    cat = str(row.get("category", "run_outcome"))
+    return IdentityCrossRunMemoryRecord(
+        identity_cross_run_memory_id=UUID(row["identity_cross_run_memory_id"]),
+        identity_id=UUID(row["identity_id"]),
+        category=cast(MemoryCategory, cat),
+        memory_key=str(row.get("memory_key", "")),
+        payload_json=pj if isinstance(pj, dict) else {},
+        strength=strength,
+        provenance=str(row.get("provenance", "")),
+        source_graph_run_id=UUID(sg) if sg else None,
+        operator_signal=row.get("operator_signal") if isinstance(row.get("operator_signal"), str) else None,
+        created_at=_ts_to_iso(row.get("created_at")) or "",
+        updated_at=_ts_to_iso(row.get("updated_at")) or "",
     )

@@ -172,6 +172,14 @@ def _timeline_item_from_event(e: GraphRunEventRecord) -> dict[str, Any]:
         ),
         RunEventType.STAGING_SNAPSHOT_REJECTED: ("staging_rejected", "Staging snapshot rejected (operator)"),
         RunEventType.PUBLICATION_SNAPSHOT_CREATED: ("publication_created", "Publication snapshot created"),
+        RunEventType.CROSS_RUN_MEMORY_LOADED: (
+            "cross_run_memory_loaded",
+            "Cross-run memory loaded for planner",
+        ),
+        RunEventType.CROSS_RUN_MEMORY_UPDATED: (
+            "cross_run_memory_updated",
+            "Cross-run memory updated",
+        ),
     }
     if et in mapping:
         kind, label = mapping[et]

@@ -11,6 +11,11 @@ from kmbl_orchestrator.runtime.interrupt_checks import raise_if_interrupt_reques
 from kmbl_orchestrator.identity.brief import build_identity_brief_from_repo
 from kmbl_orchestrator.identity.hydrate import build_planner_identity_context
 from kmbl_orchestrator.identity.profile import extract_structured_identity
+from kmbl_orchestrator.memory.ops import (
+    append_memory_event,
+    load_cross_run_memory_context,
+    maybe_write_identity_derived_memory,
+)
 from kmbl_orchestrator.runtime.session_staging_links import (
     merge_session_staging_into_event_input,
 )
@@ -89,9 +94,59 @@ def context_hydrator(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         graph_run_id=str(gid) if gid else None,
         thread_id=str(tid) if tid else None,
     )
+    base_mc: dict[str, Any] = dict(state.get("memory_context") or {})
+    if iid_raw:
+        try:
+            iid_u = UUID(str(iid_raw))
+            gid_u = UUID(str(gid)) if gid else None
+            tid_u = UUID(str(tid)) if tid else None
+            cross, trace = load_cross_run_memory_context(
+                ctx.repo,
+                identity_id=iid_u,
+                settings=ctx.settings,
+                graph_run_id=gid_u,
+            )
+            base_mc["cross_run"] = cross
+            id_write = maybe_write_identity_derived_memory(
+                ctx.repo,
+                identity_id=iid_u,
+                structured_identity=structured_identity_payload,
+                settings=ctx.settings,
+                graph_run_id=gid_u,
+            )
+            if gid_u is not None:
+                append_memory_event(
+                    ctx.repo,
+                    graph_run_id=gid_u,
+                    thread_id=tid_u,
+                    kind="loaded",
+                    payload={
+                        "memory_keys_read": trace.memory_keys_read,
+                        "categories": trace.categories,
+                    },
+                )
+                if id_write is not None:
+                    append_memory_event(
+                        ctx.repo,
+                        graph_run_id=gid_u,
+                        thread_id=tid_u,
+                        kind="updated",
+                        payload={
+                            "memory_keys_written": id_write.memory_keys_written,
+                            "categories": id_write.categories,
+                            "phase": "identity_derived",
+                        },
+                    )
+        except Exception as exc:
+            _log.warning(
+                "cross_run_memory hydration failed identity_id=%s exc_type=%s exc=%s",
+                iid_raw,
+                type(exc).__name__,
+                str(exc)[:200],
+            )
     out: dict[str, Any] = {
         "identity_context": ic,
-        "memory_context": state.get("memory_context") or {},
+        "memory_context": base_mc,
         "current_state": state.get("current_state") or {},
         "compacted_context": state.get("compacted_context") or {},
         "event_input": ei,

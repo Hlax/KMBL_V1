@@ -90,6 +90,74 @@ class Settings(BaseSettings):
             "graph_max_iterations_default",
         ),
     )
+    # When true, decision "iterate" may route to planner (new build_spec) instead of generator-only.
+    graph_replan_on_iterate_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "KMBL_GRAPH_REPLAN_ON_ITERATE_ENABLED",
+            "graph_replan_on_iterate_enabled",
+        ),
+    )
+    # Refine + stagnation: replan when working-staging stagnation_count >= this (0 = stagnation-only replan off).
+    graph_replan_stagnation_threshold: int = Field(
+        default=0,
+        ge=0,
+        le=100,
+        validation_alias=AliasChoices(
+            "KMBL_GRAPH_REPLAN_STAGNATION_THRESHOLD",
+            "graph_replan_stagnation_threshold",
+        ),
+    )
+    # Cross-run memory: minimum structured-identity confidence to persist identity_derived rows.
+    memory_identity_derive_min_confidence: float = Field(
+        default=0.65,
+        ge=0.0,
+        le=1.0,
+        validation_alias=AliasChoices(
+            "KMBL_MEMORY_IDENTITY_DERIVE_MIN_CONFIDENCE",
+            "memory_identity_derive_min_confidence",
+        ),
+    )
+    # Nudge experience_mode from taste when identity confidence is below this (bias, not override).
+    memory_bias_max_identity_confidence: float = Field(
+        default=0.55,
+        ge=0.0,
+        le=1.0,
+        validation_alias=AliasChoices(
+            "KMBL_MEMORY_BIAS_MAX_IDENTITY_CONFIDENCE",
+            "memory_bias_max_identity_confidence",
+        ),
+    )
+    # Minimum effective taste strength (after freshness) to apply experience_mode bias.
+    memory_bias_min_taste_strength: float = Field(
+        default=0.45,
+        ge=0.0,
+        le=1.0,
+        validation_alias=AliasChoices(
+            "KMBL_MEMORY_BIAS_MIN_TASTE_STRENGTH",
+            "memory_bias_min_taste_strength",
+        ),
+    )
+    # Read-time: scale strength when memory is older than this many days (linear fade to ~0.5 at 2x).
+    memory_freshness_half_life_days: int = Field(
+        default=90,
+        ge=1,
+        le=3650,
+        validation_alias=AliasChoices(
+            "KMBL_MEMORY_FRESHNESS_HALF_LIFE_DAYS",
+            "memory_freshness_half_life_days",
+        ),
+    )
+    # Soft cap on distinct memory keys per identity (merge low-value keys when exceeded).
+    memory_max_keys_per_identity: int = Field(
+        default=48,
+        ge=8,
+        le=500,
+        validation_alias=AliasChoices(
+            "KMBL_MEMORY_MAX_KEYS_PER_IDENTITY",
+            "memory_max_keys_per_identity",
+        ),
+    )
     # Absolute URLs in kmbl_session_staging (optional). E.g. http://127.0.0.1:8010 for local agents fetching previews.
     orchestrator_public_base_url: str = Field(
         default="",

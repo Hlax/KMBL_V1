@@ -309,6 +309,13 @@ class GraphRunSummaryBlock(BaseModel):
         default_factory=dict,
         description="v1 pressure telemetry from persisted graph_run_event rows (extensible).",
     )
+    working_staging_present: bool = Field(
+        default=False,
+        description=(
+            "True when a working_staging row exists for summary.thread_id "
+            "(required for GET …/working-staging/{thread_id}/live / live habitat)."
+        ),
+    )
 
 
 class RoleInvocationDetailItem(BaseModel):
@@ -373,6 +380,27 @@ class OperatorActionItem(BaseModel):
     details: dict[str, Any] | None = None
 
 
+class MemoryInfluenceBlock(BaseModel):
+    """Cross-run memory read/write trace for this graph run (and optional taste snapshot)."""
+
+    loaded_payloads: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="CROSS_RUN_MEMORY_LOADED events for this run (payload_json + created_at).",
+    )
+    updated_payloads: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="CROSS_RUN_MEMORY_UPDATED events for this run.",
+    )
+    persisted_memory_keys_for_run: list[str] = Field(
+        default_factory=list,
+        description="identity_cross_run_memory rows with source_graph_run_id = this run.",
+    )
+    identity_taste_summary: dict[str, Any] | None = Field(
+        default=None,
+        description="Aggregated taste for thread.identity_id when available.",
+    )
+
+
 class IdentityTraceBlock(BaseModel):
     """Minimal visibility: thread vs graph_run ids and planner input identity_context."""
 
@@ -408,6 +436,10 @@ class GraphRunDetailResponse(BaseModel):
     session_staging: SessionStagingLinks | None = Field(
         default=None,
         description="Stable links to live working staging for this run (thread-scoped).",
+    )
+    memory_influence: MemoryInfluenceBlock | None = Field(
+        default=None,
+        description="Cross-run memory audit: events + persisted keys + optional taste summary.",
     )
 
 

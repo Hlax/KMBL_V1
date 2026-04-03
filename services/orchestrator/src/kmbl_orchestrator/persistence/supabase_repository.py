@@ -23,6 +23,7 @@ from kmbl_orchestrator.domain import (
     GraphRunEventRecord,
     GraphRunRecord,
     GraphRunStatus,
+    IdentityCrossRunMemoryRecord,
     IdentityProfileRecord,
     IdentitySourceRecord,
     PublicationSnapshotRecord,
@@ -40,6 +41,7 @@ from kmbl_orchestrator.persistence.supabase_deserializers import (
     _row_to_evaluation_report,
     _row_to_graph_run,
     _row_to_graph_run_event,
+    _row_to_identity_cross_run_memory,
     _row_to_identity_profile,
     _row_to_identity_source,
     _row_to_publication_snapshot,
@@ -1538,6 +1540,112 @@ class SupabaseRepository(SupabaseRepositoryAutonomousLoopMixin):
             .execute(),
             identity_id=str(record.identity_id),
         )
+
+    def get_identity_cross_run_memory(
+        self,
+        identity_id: UUID,
+        category: str,
+        memory_key: str,
+    ) -> IdentityCrossRunMemoryRecord | None:
+        res = self._run(
+            "get_identity_cross_run_memory",
+            "identity_cross_run_memory",
+            lambda: self._client.table("identity_cross_run_memory")
+            .select("*")
+            .eq("identity_id", str(identity_id))
+            .eq("category", category)
+            .eq("memory_key", memory_key)
+            .limit(1)
+            .execute(),
+            identity_id=str(identity_id),
+        )
+        if not res.data:
+            return None
+        return _row_to_identity_cross_run_memory(res.data[0])
+
+    def list_identity_cross_run_memory(
+        self,
+        identity_id: UUID,
+        *,
+        category: str | None = None,
+        limit: int = 200,
+    ) -> list[IdentityCrossRunMemoryRecord]:
+        q = self._client.table("identity_cross_run_memory").select("*").eq(
+            "identity_id", str(identity_id)
+        )
+        if category is not None:
+            q = q.eq("category", category)
+        res = self._run(
+            "list_identity_cross_run_memory",
+            "identity_cross_run_memory",
+            lambda: q.order("updated_at", desc=True).limit(limit).execute(),
+            identity_id=str(identity_id),
+        )
+        if not res.data:
+            return []
+        return [_row_to_identity_cross_run_memory(r) for r in res.data]
+
+    def list_identity_cross_run_memory_by_source_run(
+        self, graph_run_id: UUID
+    ) -> list[IdentityCrossRunMemoryRecord]:
+        res = self._run(
+            "list_identity_cross_run_memory_by_source_run",
+            "identity_cross_run_memory",
+            lambda: self._client.table("identity_cross_run_memory")
+            .select("*")
+            .eq("source_graph_run_id", str(graph_run_id))
+            .order("updated_at", desc=True)
+            .execute(),
+            graph_run_id=str(graph_run_id),
+        )
+        if not res.data:
+            return []
+        return [_row_to_identity_cross_run_memory(r) for r in res.data]
+
+    def upsert_identity_cross_run_memory(self, record: IdentityCrossRunMemoryRecord) -> None:
+        existing = self.get_identity_cross_run_memory(
+            record.identity_id, record.category, record.memory_key
+        )
+        row: dict[str, Any] = {
+            "identity_cross_run_memory_id": str(record.identity_cross_run_memory_id),
+            "identity_id": str(record.identity_id),
+            "category": record.category,
+            "memory_key": record.memory_key,
+            "payload_json": record.payload_json,
+            "strength": record.strength,
+            "provenance": record.provenance,
+            "updated_at": record.updated_at,
+        }
+        if record.source_graph_run_id is not None:
+            row["source_graph_run_id"] = str(record.source_graph_run_id)
+        else:
+            row["source_graph_run_id"] = None
+        if record.operator_signal is not None:
+            row["operator_signal"] = record.operator_signal
+        else:
+            row["operator_signal"] = None
+        if existing is None:
+            row["created_at"] = record.created_at
+            self._run(
+                "insert_identity_cross_run_memory",
+                "identity_cross_run_memory",
+                lambda: self._client.table("identity_cross_run_memory")
+                .insert(row)
+                .execute(),
+                identity_id=str(record.identity_id),
+            )
+        else:
+            row["identity_cross_run_memory_id"] = str(existing.identity_cross_run_memory_id)
+            row["created_at"] = existing.created_at
+            self._run(
+                "update_identity_cross_run_memory",
+                "identity_cross_run_memory",
+                lambda: self._client.table("identity_cross_run_memory")
+                .update(row)
+                .eq("identity_cross_run_memory_id", str(existing.identity_cross_run_memory_id))
+                .execute(),
+                identity_id=str(record.identity_id),
+            )
 
     # ---- Working staging ----
 

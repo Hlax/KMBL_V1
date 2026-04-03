@@ -58,7 +58,7 @@ A common execution flow:
 
 Based on evaluation:
 
-- iterate → return to generator
+- iterate → usually **generator** again; when replan routing applies, **planner** (new `build_spec`) then generator — see [OPERATOR_LOOP_AND_IDENTITY.md](OPERATOR_LOOP_AND_IDENTITY.md)
 - interrupt → wait for human input
 - finalize → mark ready for publication review
 - stop → no further action
@@ -87,7 +87,7 @@ The runtime supports iterative convergence.
 
 - generator produces candidate
 - evaluator reviews
-- feedback loops back into generator
+- feedback loops back into generator (or, on pivot/fresh_start/stagnation policy, back into **planner** for a new plan — [OPERATOR_LOOP_AND_IDENTITY.md](OPERATOR_LOOP_AND_IDENTITY.md))
 
 No context reset occurs between iterations.
 

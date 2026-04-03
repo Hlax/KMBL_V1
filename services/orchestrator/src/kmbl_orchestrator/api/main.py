@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 import time
+from datetime import datetime, timezone
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
@@ -40,6 +41,7 @@ from kmbl_orchestrator.runtime.kilo_model_routing import (
     ImageRouteConfigurationError,
     select_generator_provider_config,
 )
+from kmbl_orchestrator.memory.taste import build_taste_profile
 from kmbl_orchestrator.runtime.graph_run_detail_read_model import (
     build_graph_run_detail_read_model,
 )
@@ -142,6 +144,7 @@ from kmbl_orchestrator.api.models import (  # noqa: F401, E402
     GraphRunListResponse,
     GraphRunSummaryBlock,
     IdentityTraceBlock,
+    MemoryInfluenceBlock,
     InvokeRoleBody,
     OperatorActionItem,
     OperatorHomeCanonBlock,
@@ -410,6 +413,30 @@ def health(settings: Settings = Depends(get_settings)) -> dict[str, object]:
     }
 
 
+def _finalize_interrupt_requested_for_new_start(
+    repo: Repository,
+    *,
+    graph_run_id: UUID,
+    thread_id: UUID,
+) -> None:
+    """Mark ``interrupt_requested`` run as ``interrupted`` so the same thread can start again."""
+    ended = datetime.now(timezone.utc).isoformat()
+    repo.update_graph_run_status(graph_run_id, "interrupted", ended)
+    append_graph_run_event(
+        repo,
+        graph_run_id,
+        RunEventType.GRAPH_RUN_INTERRUPTED,
+        {
+            "reason": "superseded_by_new_start",
+            "note": (
+                "Prior run was interrupt_requested; marked interrupted so a new run "
+                "could start on the same thread."
+            ),
+        },
+        thread_id=thread_id,
+    )
+
+
 @app.post(
     "/orchestrator/runs/start",
     response_model=StartRunResponse,
@@ -558,18 +585,31 @@ async def start_run(
                 },
             ) from e
         if active is not None:
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "error_kind": "active_graph_run",
-                    "message": (
-                        "This thread already has an active graph run. "
-                        "Wait for it to finish, interrupt it, or use a different thread."
-                    ),
-                    "active_graph_run_id": str(active.graph_run_id),
-                    "active_status": active.status,
-                },
-            )
+            if active.status == "interrupt_requested":
+                await asyncio.to_thread(
+                    _finalize_interrupt_requested_for_new_start,
+                    repo,
+                    graph_run_id=active.graph_run_id,
+                    thread_id=active.thread_id,
+                )
+                _log.info(
+                    "run_start superseded interrupt_requested graph_run_id=%s thread_id=%s",
+                    active.graph_run_id,
+                    tid_u,
+                )
+            else:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "error_kind": "active_graph_run",
+                        "message": (
+                            "This thread already has an active graph run. "
+                            "Wait for it to finish, interrupt it, or use a different thread."
+                        ),
+                        "active_graph_run_id": str(active.graph_run_id),
+                        "active_status": active.status,
+                    },
+                )
 
     timeout_sec = float(settings.orchestrator_run_start_sync_timeout_sec or 0.0)
     persist_kw: dict[str, Any] = {
@@ -930,6 +970,9 @@ def graph_run_detail(
         bc=bc,
         ev=ev,
     )
+    raw["summary"]["working_staging_present"] = (
+        repo.get_working_staging_for_thread(gr.thread_id) is not None
+    )
     eligible, resume_expl = compute_resume_eligibility(repo, gid)
     snap_detail = repo.get_run_snapshot(gid)
     scen_tag = scenario_tag_from_run_state(snap_detail)
@@ -944,6 +987,28 @@ def graph_run_detail(
         thread_identity_id=str(thread.identity_id) if thread and thread.identity_id else None,
         graph_run_identity_id=str(gr.identity_id) if gr.identity_id else None,
         planner_identity_context=planner_ic,
+    )
+    mem_loaded = [
+        {"created_at": e.created_at, "payload": dict(e.payload_json or {})}
+        for e in events
+        if e.event_type == RunEventType.CROSS_RUN_MEMORY_LOADED
+    ]
+    mem_updated = [
+        {"created_at": e.created_at, "payload": dict(e.payload_json or {})}
+        for e in events
+        if e.event_type == RunEventType.CROSS_RUN_MEMORY_UPDATED
+    ]
+    rows_by_run = repo.list_identity_cross_run_memory_by_source_run(gid)
+    mem_keys = [r.memory_key for r in rows_by_run]
+    taste_summary: dict[str, Any] | None = None
+    if thread and thread.identity_id:
+        all_rows = repo.list_identity_cross_run_memory(thread.identity_id, limit=80)
+        taste_summary = build_taste_profile(all_rows, settings).model_dump()
+    mem_block = MemoryInfluenceBlock(
+        loaded_payloads=mem_loaded,
+        updated_payloads=mem_updated,
+        persisted_memory_keys_for_run=mem_keys,
+        identity_taste_summary=taste_summary,
     )
     return GraphRunDetailResponse(
         summary=GraphRunSummaryBlock(**raw["summary"]),
@@ -960,6 +1025,7 @@ def graph_run_detail(
         scenario_badge=scen_badge,
         identity_trace=id_trace,
         session_staging=_session_staging_model(settings, gr),
+        memory_influence=mem_block,
     )
 
 

@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 from uuid import UUID, uuid4
 
+from kmbl_orchestrator.config import Settings
 from kmbl_orchestrator.domain import (
     BuildCandidateRecord,
     CheckpointRecord,
@@ -255,6 +256,30 @@ def maybe_suppress_duplicate_staging(
     ):
         return "interrupt", "duplicate_output_after_max_iterations", True
     return decision, interrupt_reason, False
+
+
+def should_route_to_planner_on_iterate(
+    state: dict[str, Any],
+    settings: Settings,
+) -> bool:
+    """True when iterate should re-invoke planner (new build_spec) instead of generator-only retry.
+
+    - Pivot / fresh_start directions always replan when enabled.
+    - Refine + high stagnation replans when ``graph_replan_stagnation_threshold`` > 0.
+
+    See ``docs/OPERATOR_LOOP_AND_IDENTITY.md``.
+    """
+    if not settings.graph_replan_on_iterate_enabled:
+        return False
+    rd = str(state.get("retry_direction") or "").strip()
+    if rd in ("pivot_layout", "pivot_palette", "pivot_content", "fresh_start"):
+        return True
+    thr = int(settings.graph_replan_stagnation_threshold or 0)
+    if thr > 0 and rd == "refine":
+        stagnation = int((state.get("current_state") or {}).get("stagnation_count", 0))
+        if stagnation >= thr:
+            return True
+    return False
 
 
 def _iteration_plan_extras_from_ws_facts(

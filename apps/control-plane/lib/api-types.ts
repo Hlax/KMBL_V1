@@ -233,6 +233,8 @@ export type GraphRunSummaryBlock = {
   quality_metrics?: Record<string, unknown>;
   /** v1 pressure telemetry from persisted events */
   pressure_summary?: Record<string, unknown>;
+  /** True when orchestrator has a working_staging row for this thread (live habitat / …/live). */
+  working_staging_present?: boolean;
 };
 
 export type RoleInvocationDetailItem = {
@@ -305,6 +307,13 @@ export type GraphRunDetail = {
   scenario_tag?: string | null;
   scenario_badge?: string | null;
   session_staging?: SessionStagingLinks | null;
+  /** Cross-run memory audit (orchestrator GET …/detail). */
+  memory_influence?: {
+    loaded_payloads: { created_at: string; payload: Record<string, unknown> }[];
+    updated_payloads: { created_at: string; payload: Record<string, unknown> }[];
+    persisted_memory_keys_for_run: string[];
+    identity_taste_summary?: Record<string, unknown> | null;
+  } | null;
   error?: string;
   detail?: unknown;
 };

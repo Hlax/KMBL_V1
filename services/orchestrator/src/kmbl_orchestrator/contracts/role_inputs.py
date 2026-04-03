@@ -14,7 +14,13 @@ class PlannerRoleInput(BaseModel):
 
     thread_id: str
     identity_context: dict[str, Any] = Field(default_factory=dict)
-    memory_context: dict[str, Any] = Field(default_factory=dict)
+    memory_context: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "May include cross_run: { taste_summary, prompt_hints, items, read_trace } from "
+            "identity_cross_run_memory; API may inject other keys — bias only, not identity override."
+        ),
+    )
     event_input: dict[str, Any] = Field(default_factory=dict)
     current_state_summary: dict[str, Any] = Field(default_factory=dict)
     working_staging_facts: dict[str, Any] | None = Field(
@@ -42,6 +48,13 @@ class PlannerRoleInput(BaseModel):
             "Structured identity profile: themes, tone, visual_tendencies, content_types, "
             "complexity, notable_entities. Derived deterministically from identity signals. "
             "Use for experience_mode selection and identity-driven planning decisions."
+        ),
+    )
+    replan_context: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Mid-run replan when orchestrator routes iterate → planner (iteration_index > 0): "
+            "prior evaluation summary, prior build_spec, retry_context, prior_build_spec_id."
         ),
     )
 

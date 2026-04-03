@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const ORCHESTRATOR = process.env.ORCHESTRATOR_ORIGIN || "http://127.0.0.1:8010";
+import { getOrchestratorServerOrigin } from "@/lib/orchestrator-server-origin";
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    
-    const res = await fetch(`${ORCHESTRATOR}/orchestrator/runs/start`, {
+    const base = getOrchestratorServerOrigin();
+
+    const res = await fetch(`${base}/orchestrator/runs/start`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),

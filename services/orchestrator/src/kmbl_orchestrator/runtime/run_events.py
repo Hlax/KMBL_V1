@@ -60,6 +60,10 @@ class RunEventType:
     # Identity feedback loop
     IDENTITY_FEEDBACK_UPSERT = "identity_feedback_upsert"
 
+    # Cross-run memory (inspectable provenance)
+    CROSS_RUN_MEMORY_LOADED = "cross_run_memory_loaded"
+    CROSS_RUN_MEMORY_UPDATED = "cross_run_memory_updated"
+
     # Cooperative operator interrupt (persisted lifecycle)
     INTERRUPT_REQUESTED = "interrupt_requested"
     INTERRUPT_ACKNOWLEDGED = "interrupt_acknowledged"

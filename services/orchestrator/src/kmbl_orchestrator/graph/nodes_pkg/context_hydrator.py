@@ -16,6 +16,10 @@ from kmbl_orchestrator.memory.ops import (
     load_cross_run_memory_context,
     maybe_write_identity_derived_memory,
 )
+from kmbl_orchestrator.runtime.run_events import (
+    RunEventType,
+    append_graph_run_event,
+)
 from kmbl_orchestrator.runtime.session_staging_links import (
     merge_session_staging_into_event_input,
 )
@@ -80,6 +84,20 @@ def context_hydrator(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             structured_identity_payload = None
     else:
         ic = state.get("identity_context") or {}
+        # Emit visibility event when running without identity — the graph will proceed
+        # with empty identity context, but operators should see this explicitly.
+        _gid_raw = state.get("graph_run_id")
+        _tid_raw = state.get("thread_id")
+        if _gid_raw:
+            append_graph_run_event(
+                ctx.repo,
+                UUID(str(_gid_raw)),
+                RunEventType.CONTEXT_IDENTITY_ABSENT,
+                {
+                    "message": "No identity_id provided; identity_brief and structured_identity will be None",
+                },
+                thread_id=UUID(str(_tid_raw)) if _tid_raw else None,
+            )
     # If identity_brief was already set in state (e.g. resume), keep it
     if identity_brief_payload is None:
         identity_brief_payload = state.get("identity_brief")

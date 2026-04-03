@@ -64,6 +64,12 @@ class RunEventType:
     CROSS_RUN_MEMORY_LOADED = "cross_run_memory_loaded"
     CROSS_RUN_MEMORY_UPDATED = "cross_run_memory_updated"
 
+    # Context hydration observability
+    CONTEXT_IDENTITY_ABSENT = "context_identity_absent"
+
+    # Decision observability — degraded staging (fail/partial at max iterations)
+    DEGRADED_STAGING = "degraded_staging"
+
     # Cooperative operator interrupt (persisted lifecycle)
     INTERRUPT_REQUESTED = "interrupt_requested"
     INTERRUPT_ACKNOWLEDGED = "interrupt_acknowledged"

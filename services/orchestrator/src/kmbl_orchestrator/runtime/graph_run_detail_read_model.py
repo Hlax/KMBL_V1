@@ -24,6 +24,25 @@ from kmbl_orchestrator.runtime.operator_action_read_model import (
 )
 from kmbl_orchestrator.runtime.run_events import RunEventType
 
+# Events that represent meaningful graph-level milestones (used for last_meaningful_event).
+_MEANINGFUL_EVENT_TYPES: frozenset[str] = frozenset(
+    {
+        RunEventType.GRAPH_RUN_STARTED,
+        RunEventType.GRAPH_RUN_COMPLETED,
+        RunEventType.GRAPH_RUN_FAILED,
+        RunEventType.GRAPH_RUN_INTERRUPTED,
+        RunEventType.GRAPH_RUN_RESUMED,
+        RunEventType.DECISION_MADE,
+        RunEventType.STAGING_SNAPSHOT_CREATED,
+        RunEventType.STAGING_SNAPSHOT_BLOCKED,
+        RunEventType.WORKING_STAGING_UPDATED,
+        RunEventType.PUBLICATION_SNAPSHOT_CREATED,
+        RunEventType.DEGRADED_STAGING,
+        RunEventType.NORMALIZATION_RESCUE,
+        RunEventType.CONTEXT_IDENTITY_ABSENT,
+    }
+)
+
 # Subset of persisted role_invocation.routing_metadata_json (generator only) for operator UI.
 # KiloClaw transport trace (all roles) — from role_invocation.routing_metadata_json
 _TRANSPORT_TRACE_KEYS: tuple[str, ...] = (
@@ -180,6 +199,14 @@ def _timeline_item_from_event(e: GraphRunEventRecord) -> dict[str, Any]:
             "cross_run_memory_updated",
             "Cross-run memory updated",
         ),
+        RunEventType.CONTEXT_IDENTITY_ABSENT: (
+            "context_identity_absent",
+            "Identity context absent — running without identity signals",
+        ),
+        RunEventType.DEGRADED_STAGING: (
+            "degraded_staging",
+            "Staging with non-passing evaluation (max iterations reached)",
+        ),
     }
     if et in mapping:
         kind, label = mapping[et]
@@ -291,6 +318,57 @@ def build_graph_run_detail_read_model(
         ev=ev,
     )
 
+    # --- Failure info (mirrors status endpoint but on detail too) ---
+    failure_info: dict[str, Any] = {
+        "failure_phase": None,
+        "error_kind": None,
+        "error_message": None,
+    }
+    if gr.status == "failed":
+        # Check failed role invocations first (most specific)
+        failed_inv = next(
+            (r for r in reversed(inv_sorted) if r.status == "failed"),
+            None,
+        )
+        if failed_inv is not None:
+            fi_payload = dict(failed_inv.output_payload_json or {})
+            failure_info["failure_phase"] = failed_inv.role_type
+            failure_info["error_kind"] = fi_payload.get("error_kind", "role_invocation")
+            failure_info["error_message"] = str(
+                fi_payload.get("message", "Role invocation failed")
+            )[:500]
+        else:
+            # Fall back to GRAPH_RUN_FAILED event
+            failed_event = next(
+                (
+                    e
+                    for e in reversed(events_sorted)
+                    if e.event_type == RunEventType.GRAPH_RUN_FAILED
+                ),
+                None,
+            )
+            if failed_event is not None:
+                fp = dict(failed_event.payload_json or {})
+                failure_info["failure_phase"] = fp.get("phase")
+                failure_info["error_kind"] = fp.get("error_kind", "graph_error")
+                failure_info["error_message"] = str(
+                    fp.get("error_message", "Graph run failed")
+                )[:500]
+            else:
+                failure_info["error_kind"] = "graph_error"
+                failure_info["error_message"] = "Run failed; no structured error details recorded."
+
+    # --- Last meaningful event (for at-a-glance debugging) ---
+    last_meaningful: dict[str, Any] | None = None
+    for e in reversed(events_sorted):
+        if e.event_type in _MEANINGFUL_EVENT_TYPES:
+            last_meaningful = {
+                "event_type": e.event_type,
+                "timestamp": e.created_at,
+                "payload": dict(e.payload_json or {}),
+            }
+            break
+
     return {
         "summary": {
             "graph_run_id": str(gr.graph_run_id),
@@ -326,5 +404,7 @@ def build_graph_run_detail_read_model(
             if ev
             else {},
         },
+        "failure_info": failure_info,
+        "last_meaningful_event": last_meaningful,
         "timeline": timeline,
     }

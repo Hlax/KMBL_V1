@@ -191,6 +191,14 @@ def _timeline_item_from_event(e: GraphRunEventRecord) -> dict[str, Any]:
         ),
         RunEventType.STAGING_SNAPSHOT_REJECTED: ("staging_rejected", "Staging snapshot rejected (operator)"),
         RunEventType.PUBLICATION_SNAPSHOT_CREATED: ("publication_created", "Publication snapshot created"),
+        RunEventType.WORKING_STAGING_ROLLBACK: (
+            "working_staging_rollback",
+            "Working staging rollback (operator API)",
+        ),
+        RunEventType.OPERATOR_REVIEW_SNAPSHOT_MATERIALIZED: (
+            "operator_review_snapshot_materialized",
+            "Review snapshot materialized from live (operator)",
+        ),
         RunEventType.CROSS_RUN_MEMORY_LOADED: (
             "cross_run_memory_loaded",
             "Cross-run memory loaded for planner",
@@ -226,6 +234,10 @@ def _timeline_item_from_event(e: GraphRunEventRecord) -> dict[str, Any]:
         pid = payload.get("publication_snapshot_id")
         if isinstance(pid, str):
             related_id = pid
+    elif et == RunEventType.OPERATOR_REVIEW_SNAPSHOT_MATERIALIZED:
+        sid = payload.get("staging_snapshot_id")
+        if isinstance(sid, str):
+            related_id = sid
 
     return {
         "kind": kind,

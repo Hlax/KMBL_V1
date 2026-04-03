@@ -408,58 +408,58 @@ def _run_graph_inner(
         gid_u = UUID(gid)
         tid_u = UUID(tid_s) if tid_s else None
         try:
-            with repo.transaction():
-                if tid_s:
-                    post = CheckpointRecord(
-                        checkpoint_id=uuid4(),
-                        thread_id=UUID(tid_s),
-                        graph_run_id=gid_u,
-                        checkpoint_kind="post_role",
-                        state_json=dict(final),
-                        context_compaction_json=None,
-                    )
-                    _save_checkpoint_with_event(ctx.repo, post)
-                    repo.update_thread_current_checkpoint(UUID(tid_s), post.checkpoint_id)
-                ended = datetime.now(timezone.utc).isoformat()
-                # Validate status transition before applying
-                current_run = repo.get_graph_run(gid_u)
-                if current_run and not is_valid_status_transition(current_run.status, "completed"):
-                    _log.warning(
-                        "run_graph graph_run_id=%s invalid_transition current=%s target=completed",
-                        gid, current_run.status,
-                    )
-                repo.update_graph_run_status(gid_u, "completed", ended)
-                repo.attach_run_snapshot(gid_u, dict(final))
-                append_graph_run_event(
-                    repo,
-                    gid_u,
-                    RunEventType.GRAPH_RUN_COMPLETED,
-                    {
-                        "decision": final.get("decision"),
-                        "iteration_index": final.get("iteration_index"),
-                        "staging_snapshot_id": final.get("staging_snapshot_id"),
-                        "last_alignment_score": final.get("last_alignment_score"),
-                    },
-                    thread_id=tid_u,
+            # Sequential PostgREST persistence — no snapshot rollback on Supabase across these calls.
+            if tid_s:
+                post = CheckpointRecord(
+                    checkpoint_id=uuid4(),
+                    thread_id=UUID(tid_s),
+                    graph_run_id=gid_u,
+                    checkpoint_kind="post_role",
+                    state_json=dict(final),
+                    context_compaction_json=None,
                 )
-                wt = record_run_outcome_memory(
+                _save_checkpoint_with_event(ctx.repo, post)
+                repo.update_thread_current_checkpoint(UUID(tid_s), post.checkpoint_id)
+            ended = datetime.now(timezone.utc).isoformat()
+            # Validate status transition before applying
+            current_run = repo.get_graph_run(gid_u)
+            if current_run and not is_valid_status_transition(current_run.status, "completed"):
+                _log.warning(
+                    "run_graph graph_run_id=%s invalid_transition current=%s target=completed",
+                    gid, current_run.status,
+                )
+            repo.update_graph_run_status(gid_u, "completed", ended)
+            repo.attach_run_snapshot(gid_u, dict(final))
+            append_graph_run_event(
+                repo,
+                gid_u,
+                RunEventType.GRAPH_RUN_COMPLETED,
+                {
+                    "decision": final.get("decision"),
+                    "iteration_index": final.get("iteration_index"),
+                    "staging_snapshot_id": final.get("staging_snapshot_id"),
+                    "last_alignment_score": final.get("last_alignment_score"),
+                },
+                thread_id=tid_u,
+            )
+            wt = record_run_outcome_memory(
+                repo,
+                graph_run_id=gid_u,
+                settings=ctx.settings,
+                final_state=dict(final),
+            )
+            if wt is not None:
+                append_memory_event(
                     repo,
                     graph_run_id=gid_u,
-                    settings=ctx.settings,
-                    final_state=dict(final),
+                    thread_id=tid_u,
+                    kind="updated",
+                    payload={
+                        "memory_keys_written": wt.memory_keys_written,
+                        "categories": wt.categories,
+                        "phase": "run_outcome",
+                    },
                 )
-                if wt is not None:
-                    append_memory_event(
-                        repo,
-                        graph_run_id=gid_u,
-                        thread_id=tid_u,
-                        kind="updated",
-                        payload={
-                            "memory_keys_written": wt.memory_keys_written,
-                            "categories": wt.categories,
-                            "phase": "run_outcome",
-                        },
-                    )
         except Exception as post_exc:
             _log.exception(
                 "run_graph post-invoke persistence failed graph_run_id=%s exc=%s",

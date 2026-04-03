@@ -359,6 +359,8 @@ def _row_to_working_staging(row: dict[str, Any]) -> WorkingStagingRecord:
     pj = row.get("payload_json")
     lrr = row.get("last_rebuild_revision")
     lrsj = row.get("last_revision_summary_json")
+    las = row.get("last_alignment_score")
+    last_alignment: float | None = float(las) if las is not None else None
     return WorkingStagingRecord(
         working_staging_id=UUID(row["working_staging_id"]),
         thread_id=UUID(row["thread_id"]),
@@ -376,6 +378,7 @@ def _row_to_working_staging(row: dict[str, Any]) -> WorkingStagingRecord:
         stagnation_count=int(row.get("stagnation_count", 0)),
         last_evaluator_issue_count=int(row.get("last_evaluator_issue_count", 0)),
         last_revision_summary_json=lrsj if isinstance(lrsj, dict) else {},
+        last_alignment_score=last_alignment,
     )
 
 

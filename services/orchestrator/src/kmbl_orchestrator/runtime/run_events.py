@@ -41,6 +41,7 @@ class RunEventType:
     WORKING_STAGING_UPDATED = "working_staging_updated"
     WORKING_STAGING_CHECKPOINT_CREATED = "working_staging_checkpoint_created"
     WORKING_STAGING_ROLLBACK = "working_staging_rollback"
+    OPERATOR_REVIEW_SNAPSHOT_MATERIALIZED = "operator_review_snapshot_materialized"
 
     # Hardening events
     KILOCLAW_RETRY = "kiloclaw_retry"

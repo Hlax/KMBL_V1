@@ -343,25 +343,25 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         "alignment_score_history": alignment_history,
         "last_alignment_score": alignment_score,
     }
-    with ctx.repo.transaction():
-        ctx.repo.save_evaluation_report(report)
-        _save_checkpoint_with_event(
-            ctx.repo,
-            CheckpointRecord(
-                checkpoint_id=uuid4(),
-                thread_id=tid,
-                graph_run_id=gid,
-                checkpoint_kind="post_step",
-                state_json=step_state,
-                context_compaction_json=None,
-            ),
-        )
-        append_graph_run_event(
-            ctx.repo,
-            gid,
-            RunEventType.EVALUATOR_INVOCATION_COMPLETED,
-            {"evaluation_report_id": str(report.evaluation_report_id)},
-        )
+    # Sequential PostgREST writes — no cross-call rollback on Supabase (see RPC helpers for atomicity).
+    ctx.repo.save_evaluation_report(report)
+    _save_checkpoint_with_event(
+        ctx.repo,
+        CheckpointRecord(
+            checkpoint_id=uuid4(),
+            thread_id=tid,
+            graph_run_id=gid,
+            checkpoint_kind="post_step",
+            state_json=step_state,
+            context_compaction_json=None,
+        ),
+    )
+    append_graph_run_event(
+        ctx.repo,
+        gid,
+        RunEventType.EVALUATOR_INVOCATION_COMPLETED,
+        {"evaluation_report_id": str(report.evaluation_report_id)},
+    )
     return {
         "evaluation_report": step_state["evaluation_report"],
         "evaluation_report_id": str(report.evaluation_report_id),

@@ -25,6 +25,10 @@ dev = [
   "ruff==0.8.4",
   "pyright>=1.1.350",
 ]
+# Optional: pg_catalog checks in scripts/validate_supabase_rpc_live.py (repo root)
+live-validation = [
+  "psycopg[binary]>=3.1.0",
+]
 
 # Opt-in static analysis: run ``python -m pyright`` from services/orchestrator after ``pip install -e '.[dev]'``.
 # Tighten ``typeCheckingMode`` to "basic" / "standard" as annotations improve (GraphState TypedDict, etc.).

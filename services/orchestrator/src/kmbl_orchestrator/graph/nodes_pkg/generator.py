@@ -374,39 +374,39 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     # Apply html_block_v1 artifacts to the current working staging (if any)
     cand = _apply_html_blocks_to_candidate(ctx.repo, cand, tid)
 
-    with ctx.repo.transaction():
-        ctx.repo.save_build_candidate(cand)
-        block_anchors = (cand.working_state_patch_json or {}).get("block_preview_anchors") or []
-        step_state = {
-            **dict(state),
-            "build_candidate": {
-                "proposed_changes": raw.get("proposed_changes"),
-                "artifact_outputs": raw.get("artifact_outputs"),
-                "updated_state": raw.get("updated_state"),
-                "sandbox_ref": raw.get("sandbox_ref"),
-                "preview_url": raw.get("preview_url"),
-                "block_anchors": block_anchors if block_anchors else None,
-            },
-            "build_candidate_id": str(cand.build_candidate_id),
-            "current_state": raw.get("updated_state") or state.get("current_state") or {},
-        }
-        _save_checkpoint_with_event(
-            ctx.repo,
-            CheckpointRecord(
-                checkpoint_id=uuid4(),
-                thread_id=tid,
-                graph_run_id=gid,
-                checkpoint_kind="post_step",
-                state_json=step_state,
-                context_compaction_json=None,
-            ),
-        )
-        append_graph_run_event(
-            ctx.repo,
-            gid,
-            RunEventType.GENERATOR_INVOCATION_COMPLETED,
-            {"build_candidate_id": str(cand.build_candidate_id)},
-        )
+    # Sequential PostgREST writes — no cross-call rollback on Supabase (see RPC helpers for atomicity).
+    ctx.repo.save_build_candidate(cand)
+    block_anchors = (cand.working_state_patch_json or {}).get("block_preview_anchors") or []
+    step_state = {
+        **dict(state),
+        "build_candidate": {
+            "proposed_changes": raw.get("proposed_changes"),
+            "artifact_outputs": raw.get("artifact_outputs"),
+            "updated_state": raw.get("updated_state"),
+            "sandbox_ref": raw.get("sandbox_ref"),
+            "preview_url": raw.get("preview_url"),
+            "block_anchors": block_anchors if block_anchors else None,
+        },
+        "build_candidate_id": str(cand.build_candidate_id),
+        "current_state": raw.get("updated_state") or state.get("current_state") or {},
+    }
+    _save_checkpoint_with_event(
+        ctx.repo,
+        CheckpointRecord(
+            checkpoint_id=uuid4(),
+            thread_id=tid,
+            graph_run_id=gid,
+            checkpoint_kind="post_step",
+            state_json=step_state,
+            context_compaction_json=None,
+        ),
+    )
+    append_graph_run_event(
+        ctx.repo,
+        gid,
+        RunEventType.GENERATOR_INVOCATION_COMPLETED,
+        {"build_candidate_id": str(cand.build_candidate_id)},
+    )
     return {
         "build_candidate": step_state["build_candidate"],
         "build_candidate_id": str(cand.build_candidate_id),

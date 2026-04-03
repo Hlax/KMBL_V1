@@ -1,4 +1,4 @@
-"""Tests for InMemoryRepository transaction safety (snapshot/rollback)."""
+"""Tests for InMemoryRepository in_memory_write_snapshot() (process-local snapshot/rollback)."""
 
 from __future__ import annotations
 
@@ -59,8 +59,8 @@ def _make_role_invocation(gid, tid):
     )
 
 
-class TestTransactionRollback:
-    """transaction() must roll back all writes on exception."""
+class TestInMemoryWriteSnapshotRollback:
+    """in_memory_write_snapshot() must roll back all writes on exception (InMemoryRepository only)."""
 
     def test_rollback_on_exception(self):
         repo = InMemoryRepository()
@@ -74,7 +74,7 @@ class TestTransactionRollback:
         assert len(repo._checkpoints) == 0
 
         with pytest.raises(RuntimeError):
-            with repo.transaction():
+            with repo.in_memory_write_snapshot():
                 repo.save_checkpoint(_make_checkpoint(tid, gid))
                 repo.save_role_invocation(_make_role_invocation(gid, tid))
                 assert len(repo._checkpoints) == 1
@@ -93,7 +93,7 @@ class TestTransactionRollback:
         gid = uuid4()
         repo.ensure_thread(_make_thread(tid))
 
-        with repo.transaction():
+        with repo.in_memory_write_snapshot():
             repo.save_checkpoint(_make_checkpoint(tid, gid))
             repo.save_role_invocation(_make_role_invocation(gid, tid))
 
@@ -108,10 +108,10 @@ class TestTransactionRollback:
         gid = uuid4()
         repo.ensure_thread(_make_thread(tid))
 
-        with repo.transaction():
+        with repo.in_memory_write_snapshot():
             repo.save_checkpoint(_make_checkpoint(tid, gid))
             try:
-                with repo.transaction():
+                with repo.in_memory_write_snapshot():
                     repo.save_role_invocation(_make_role_invocation(gid, tid))
                     raise ValueError("inner failure")
             except ValueError:
@@ -134,7 +134,7 @@ class TestTransactionRollback:
         assert len(repo._checkpoints) == 1
 
         with pytest.raises(RuntimeError):
-            with repo.transaction():
+            with repo.in_memory_write_snapshot():
                 repo.save_checkpoint(_make_checkpoint(tid, gid))
                 assert len(repo._checkpoints) == 2
                 raise RuntimeError("boom")

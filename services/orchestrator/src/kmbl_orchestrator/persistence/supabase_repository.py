@@ -33,6 +33,13 @@ from kmbl_orchestrator.domain import (
     ThreadRecord,
     WorkingStagingRecord,
 )
+from kmbl_orchestrator.persistence.exceptions import WriteSnapshotNotSupportedError
+from kmbl_orchestrator.persistence.atomic_payloads import (
+    publication_snapshot_to_rpc_dict,
+    staging_checkpoint_to_rpc_dict,
+    staging_snapshot_to_rpc_dict,
+    working_staging_to_rpc_dict,
+)
 from kmbl_orchestrator.persistence.supabase_deserializers import (
     _is_retryable_supabase_transport,
     _row_to_build_candidate,
@@ -96,7 +103,8 @@ class SupabaseRepository(SupabaseRepositoryAutonomousLoopMixin):
             settings.supabase_url,
             settings.supabase_service_role_key,
         )
-        # Thread-level advisory locks (single-process; for multi-process use DB-level locks)
+        # Thread-level mutex (single worker). Cross-process staging serialization uses
+        # pg_advisory_xact_lock inside Postgres RPC functions.
         self._thread_locks: dict[str, threading.Lock] = {}
         self._thread_lock_guard = threading.Lock()
         self._thread_lock_holders: dict[str, str] = {}
@@ -1649,6 +1657,55 @@ class SupabaseRepository(SupabaseRepositoryAutonomousLoopMixin):
 
     # ---- Working staging ----
 
+    def _call_rpc(self, rpc_name: str, params: dict[str, Any]) -> None:
+        """Invoke a Supabase/PostgREST ``rpc`` (Postgres function in a single transaction)."""
+
+        def _fn() -> Any:
+            return self._client.rpc(rpc_name, params).execute()
+
+        self._run(f"rpc:{rpc_name}", "rpc", _fn, rpc=rpc_name)
+
+    def atomic_persist_staging_node_writes(
+        self,
+        *,
+        checkpoints: list[StagingCheckpointRecord],
+        working_staging: WorkingStagingRecord,
+        staging_snapshot: StagingSnapshotRecord | None,
+    ) -> None:
+        cp_json = [staging_checkpoint_to_rpc_dict(c) for c in checkpoints]
+        ws_json = working_staging_to_rpc_dict(working_staging)
+        snap_json: Any
+        if staging_snapshot is None:
+            snap_json = None
+        else:
+            snap_json = staging_snapshot_to_rpc_dict(staging_snapshot)
+        self._call_rpc(
+            "kmbl_atomic_staging_node_persist",
+            {
+                "p_thread_id": str(working_staging.thread_id),
+                "p_checkpoints": cp_json,
+                "p_working_staging": ws_json,
+                "p_staging_snapshot": snap_json,
+            },
+        )
+
+    def atomic_commit_working_staging_approval(
+        self,
+        *,
+        checkpoint: StagingCheckpointRecord,
+        publication: PublicationSnapshotRecord,
+        working_staging: WorkingStagingRecord,
+    ) -> None:
+        self._call_rpc(
+            "kmbl_atomic_working_staging_approve",
+            {
+                "p_thread_id": str(working_staging.thread_id),
+                "p_checkpoint": staging_checkpoint_to_rpc_dict(checkpoint),
+                "p_publication": publication_snapshot_to_rpc_dict(publication),
+                "p_working_staging": working_staging_to_rpc_dict(working_staging),
+            },
+        )
+
     def get_working_staging_for_thread(
         self, thread_id: UUID
     ) -> WorkingStagingRecord | None:
@@ -1667,36 +1724,13 @@ class SupabaseRepository(SupabaseRepositoryAutonomousLoopMixin):
         return _row_to_working_staging(res.data[0])
 
     def save_working_staging(self, record: WorkingStagingRecord) -> None:
-        row: dict[str, Any] = {
-            "working_staging_id": str(record.working_staging_id),
-            "thread_id": str(record.thread_id),
-            "payload_json": record.payload_json,
-            "last_update_mode": record.last_update_mode,
-            "revision": record.revision,
-            "status": record.status,
-            "created_at": record.created_at,
-            "updated_at": record.updated_at,
-            "stagnation_count": record.stagnation_count,
-            "last_evaluator_issue_count": record.last_evaluator_issue_count,
-            "last_revision_summary_json": record.last_revision_summary_json,
-        }
-        if record.identity_id is not None:
-            row["identity_id"] = str(record.identity_id)
-        if record.last_update_graph_run_id is not None:
-            row["last_update_graph_run_id"] = str(record.last_update_graph_run_id)
-        if record.last_update_build_candidate_id is not None:
-            row["last_update_build_candidate_id"] = str(record.last_update_build_candidate_id)
-        if record.current_checkpoint_id is not None:
-            row["current_checkpoint_id"] = str(record.current_checkpoint_id)
-        if record.last_rebuild_revision is not None:
-            row["last_rebuild_revision"] = record.last_rebuild_revision
-        self._run(
-            "save_working_staging",
-            "working_staging",
-            lambda: self._client.table("working_staging")
-            .upsert(row, on_conflict="working_staging_id")
-            .execute(),
-            working_staging_id=str(record.working_staging_id),
+        """Upsert working_staging under a thread-scoped DB advisory lock (single RPC transaction)."""
+        self._call_rpc(
+            "kmbl_atomic_upsert_working_staging",
+            {
+                "p_thread_id": str(record.thread_id),
+                "p_working_staging": working_staging_to_rpc_dict(record),
+            },
         )
 
     def save_staging_checkpoint(self, record: StagingCheckpointRecord) -> None:
@@ -1764,22 +1798,18 @@ class SupabaseRepository(SupabaseRepositoryAutonomousLoopMixin):
             return []
         return [_row_to_staging_checkpoint(r) for r in res.data]
 
-    # --- Transaction & Thread Locking ---
+    # --- Thread locking (process-local) & explicit RPC atomicity ---
 
     @contextmanager
-    def transaction(self) -> Iterator[None]:
-        """Best-effort atomicity for PostgREST (HTTP) writes.
+    def in_memory_write_snapshot(self) -> Iterator[None]:
+        """**Unsupported.** PostgREST cannot roll back a sequence of repository calls.
 
-        Since supabase-py uses PostgREST, true SQL transactions are unavailable.
-        Writes execute in call order within the block.  The existing
-        ``ignore_duplicates=True`` upsert pattern provides idempotent retry
-        safety: if the process crashes mid-sequence and the operation is retried,
-        previously-committed rows are silently skipped.
-
-        **This is NOT true ACID.**  It guarantees ordering and idempotent retry
-        but cannot roll back already-committed HTTP writes on failure.
+        Callers must use ``atomic_persist_staging_node_writes``,
+        ``atomic_commit_working_staging_approval``, or ``save_working_staging`` (RPC)
+        for thread-scoped atomic writes.
         """
-        yield
+        raise WriteSnapshotNotSupportedError()
+        yield  # pragma: no cover
 
     def _get_thread_lock(self, thread_id: UUID) -> threading.Lock:
         key = str(thread_id)

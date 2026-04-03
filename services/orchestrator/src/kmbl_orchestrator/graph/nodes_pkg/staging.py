@@ -10,12 +10,14 @@ from uuid import UUID, uuid4
 
 from kmbl_orchestrator.contracts.evaluator_nomination import extract_evaluator_nomination
 from kmbl_orchestrator.domain import (
+    StagingCheckpointRecord,
     StagingSnapshotRecord,
     WorkingStagingRecord,
 )
 from kmbl_orchestrator.errors import StagingIntegrityFailed
 from kmbl_orchestrator.graph.state import GraphState
 from kmbl_orchestrator.identity.hydrate import upsert_identity_evolution_signal
+from kmbl_orchestrator.persistence.persistence_labels import staging_atomic_persistence_label
 from kmbl_orchestrator.runtime.interrupt_checks import raise_if_interrupt_requested
 from kmbl_orchestrator.runtime.run_events import RunEventType, append_graph_run_event
 from kmbl_orchestrator.staging.build_snapshot import build_staging_snapshot_payload
@@ -51,7 +53,13 @@ def _should_create_staging_snapshot(policy: str, marked_for_review: bool) -> boo
 
 
 def staging_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
-    """Apply the build candidate to working staging and create a snapshot."""
+    """Apply the build candidate to working staging and create a snapshot.
+
+    Evaluator status ``pass``, ``partial``, and ``fail`` are all stageable here; nomination
+    and ``staging_snapshot_policy`` only affect whether an immutable ``staging_snapshot``
+    row is written (not whether working staging is updated). Blocked evaluations stop
+    before this node (see integrity checks above).
+    """
     gid = UUID(state["graph_run_id"])
     tid = UUID(state["thread_id"])
     raise_if_interrupt_requested(ctx.repo, gid, tid)
@@ -145,23 +153,16 @@ def staging_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
 
     before_snapshot = copy.deepcopy(ws)
 
+    checkpoints_to_persist: list[StagingCheckpointRecord] = []
+
     pressure_score = pressure_eval.pressure_score if pressure_eval else 0.0
     if mode == "rebuild" and ws.revision > 0:
         pre_cp = create_pre_rebuild_checkpoint(
             ws, source_graph_run_id=gid, pressure_score=pressure_score,
         )
         if pre_cp:
-            ctx.repo.save_staging_checkpoint(pre_cp)
+            checkpoints_to_persist.append(pre_cp)
             ws.current_checkpoint_id = pre_cp.staging_checkpoint_id
-            append_graph_run_event(
-                ctx.repo, gid,
-                RunEventType.WORKING_STAGING_CHECKPOINT_CREATED,
-                {
-                    "staging_checkpoint_id": str(pre_cp.staging_checkpoint_id),
-                    "trigger": pre_cp.trigger,
-                    "reason_category": pre_cp.reason_category,
-                },
-            )
 
     ws = apply_generator_to_working_staging(
         working_staging=ws,
@@ -180,55 +181,19 @@ def staging_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         post_cp = create_staging_checkpoint(
             ws, trigger=trigger, source_graph_run_id=gid, reason=reason,
         )
-        ctx.repo.save_staging_checkpoint(post_cp)
+        checkpoints_to_persist.append(post_cp)
         ws.current_checkpoint_id = post_cp.staging_checkpoint_id
-        append_graph_run_event(
-            ctx.repo, gid,
-            RunEventType.WORKING_STAGING_CHECKPOINT_CREATED,
-            {
-                "staging_checkpoint_id": str(post_cp.staging_checkpoint_id),
-                "trigger": trigger,
-                "reason_category": reason.category if reason else None,
-            },
-        )
 
     # Persist alignment score on working staging for trend detection
     alignment_score_for_ws: float | None = state.get("last_alignment_score")
     if alignment_score_for_ws is not None:
         ws.last_alignment_score = alignment_score_for_ws
 
-    # Wrap critical persistence writes in a transaction.  For InMemoryRepository this
-    # gives true rollback; for Supabase it provides ordering + idempotent-retry safety
-    # (see supabase_repository.transaction() docstring).
-    with ctx.repo.transaction():
-        ctx.repo.save_working_staging(ws)
-
-        event_payload: dict[str, Any] = {
-            "working_staging_id": str(ws.working_staging_id),
-            "mode": mode,
-            "mode_reason": mode_reason,
-            "revision": ws.revision,
-            "status": ws.status,
-            "thread_id": str(tid),
-            "build_candidate_id": str(bc.build_candidate_id),
-            "stagnation_count": ws.stagnation_count,
-        }
-        if pressure_eval:
-            event_payload["pressure"] = pressure_evaluation_to_event_payload(pressure_eval)
-        if ws.last_revision_summary_json:
-            event_payload["revision_summary"] = ws.last_revision_summary_json
-
-        append_graph_run_event(
-            ctx.repo, gid,
-            RunEventType.WORKING_STAGING_UPDATED,
-            event_payload,
-        )
-
-        # --- Review snapshot row (immutable staging_snapshot) ---
-        prior_on_thread = ctx.repo.list_staging_snapshots_for_thread(tid, limit=1)
-        prior_staging_id: UUID | None = (
-            prior_on_thread[0].staging_snapshot_id if prior_on_thread else None
-        )
+    # --- Review snapshot row (immutable staging_snapshot) ---
+    prior_on_thread = ctx.repo.list_staging_snapshots_for_thread(tid, limit=1)
+    prior_staging_id: UUID | None = (
+        prior_on_thread[0].staging_snapshot_id if prior_on_thread else None
+    )
 
         nom_state = state.get("evaluator_nomination")
         raw_ev = ev.raw_payload_json if isinstance(ev.raw_payload_json, dict) else None
@@ -244,63 +209,107 @@ def staging_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         policy = getattr(ctx.settings, "staging_snapshot_policy", "on_nomination")
         should_snapshot = _should_create_staging_snapshot(policy, marked)
 
-        ssid: UUID | None = None
-        if should_snapshot:
-            payload = build_staging_snapshot_payload(
-                build_candidate=bc,
-                evaluation_report=ev,
-                thread=thread,
-                build_spec=spec,
-                prior_staging_snapshot_id=prior_staging_id,
-            )
-            ssid = uuid4()
-            snap = StagingSnapshotRecord(
-                staging_snapshot_id=ssid,
-                thread_id=bc.thread_id,
-                build_candidate_id=bc.build_candidate_id,
-                graph_run_id=bc.graph_run_id,
-                identity_id=thread.identity_id,
-                prior_staging_snapshot_id=prior_staging_id,
-                snapshot_payload_json=payload,
-                preview_url=bc.preview_url,
-                status="review_ready",
-                marked_for_review=marked,
-                mark_reason=mark_reason,
-                review_tags=review_tags,
-            )
-            ctx.repo.save_staging_snapshot(snap)
-            append_graph_run_event(
-                ctx.repo,
-                gid,
-                RunEventType.STAGING_SNAPSHOT_CREATED,
-                {
-                    "staging_snapshot_id": str(ssid),
-                    "graph_run_id": str(gid),
-                    "thread_id": str(tid),
-                    "build_candidate_id": str(bc.build_candidate_id),
-                    "reason": "snapshot_persisted",
-                    "review_ready": True,
-                    "preview_url": bc.preview_url,
-                    "prior_staging_snapshot_id": str(prior_staging_id)
-                    if prior_staging_id is not None
-                    else None,
-                    "marked_for_review": marked,
-                    "staging_snapshot_policy": policy,
-                },
-            )
-        else:
-            append_graph_run_event(
-                ctx.repo,
-                gid,
-                RunEventType.STAGING_SNAPSHOT_SKIPPED,
-                {
-                    "thread_id": str(tid),
-                    "build_candidate_id": str(bc.build_candidate_id),
-                    "marked_for_review": marked,
-                    "staging_snapshot_policy": policy,
-                },
-                thread_id=tid,
-            )
+    ssid: UUID | None = None
+    snap: StagingSnapshotRecord | None = None
+    if should_snapshot:
+        payload = build_staging_snapshot_payload(
+            build_candidate=bc,
+            evaluation_report=ev,
+            thread=thread,
+            build_spec=spec,
+            prior_staging_snapshot_id=prior_staging_id,
+        )
+        ssid = uuid4()
+        snap = StagingSnapshotRecord(
+            staging_snapshot_id=ssid,
+            thread_id=bc.thread_id,
+            build_candidate_id=bc.build_candidate_id,
+            graph_run_id=bc.graph_run_id,
+            identity_id=thread.identity_id,
+            prior_staging_snapshot_id=prior_staging_id,
+            snapshot_payload_json=payload,
+            preview_url=bc.preview_url,
+            status="review_ready",
+            marked_for_review=marked,
+            mark_reason=mark_reason,
+            review_tags=review_tags,
+        )
+
+    ctx.repo.atomic_persist_staging_node_writes(
+        checkpoints=checkpoints_to_persist,
+        working_staging=ws,
+        staging_snapshot=snap,
+    )
+
+    for cp in checkpoints_to_persist:
+        append_graph_run_event(
+            ctx.repo,
+            gid,
+            RunEventType.WORKING_STAGING_CHECKPOINT_CREATED,
+            {
+                "staging_checkpoint_id": str(cp.staging_checkpoint_id),
+                "trigger": cp.trigger,
+                "reason_category": cp.reason_category,
+                "persistence": staging_atomic_persistence_label(ctx.repo),
+            },
+        )
+
+    event_payload: dict[str, Any] = {
+        "working_staging_id": str(ws.working_staging_id),
+        "mode": mode,
+        "mode_reason": mode_reason,
+        "revision": ws.revision,
+        "status": ws.status,
+        "thread_id": str(tid),
+        "build_candidate_id": str(bc.build_candidate_id),
+        "stagnation_count": ws.stagnation_count,
+        "persistence": staging_atomic_persistence_label(ctx.repo),
+    }
+    if pressure_eval:
+        event_payload["pressure"] = pressure_evaluation_to_event_payload(pressure_eval)
+    if ws.last_revision_summary_json:
+        event_payload["revision_summary"] = ws.last_revision_summary_json
+
+    append_graph_run_event(
+        ctx.repo, gid,
+        RunEventType.WORKING_STAGING_UPDATED,
+        event_payload,
+    )
+
+    if snap is not None:
+        append_graph_run_event(
+            ctx.repo,
+            gid,
+            RunEventType.STAGING_SNAPSHOT_CREATED,
+            {
+                "staging_snapshot_id": str(ssid),
+                "graph_run_id": str(gid),
+                "thread_id": str(tid),
+                "build_candidate_id": str(bc.build_candidate_id),
+                "reason": "snapshot_persisted",
+                "review_ready": True,
+                "preview_url": bc.preview_url,
+                "prior_staging_snapshot_id": str(prior_staging_id)
+                if prior_staging_id is not None
+                else None,
+                "marked_for_review": marked,
+                "staging_snapshot_policy": policy,
+                "persistence": staging_atomic_persistence_label(ctx.repo),
+            },
+        )
+    else:
+        append_graph_run_event(
+            ctx.repo,
+            gid,
+            RunEventType.STAGING_SNAPSHOT_SKIPPED,
+            {
+                "thread_id": str(tid),
+                "build_candidate_id": str(bc.build_candidate_id),
+                "marked_for_review": marked,
+                "staging_snapshot_policy": policy,
+            },
+            thread_id=tid,
+        )
 
     # --- Evaluator → identity feedback loop ---
     # Upsert evaluation signals back into identity_profile so future planner

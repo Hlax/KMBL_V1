@@ -6,7 +6,7 @@ import copy
 import logging
 import threading
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal, Protocol
 from uuid import UUID
@@ -402,24 +402,43 @@ class Repository(Protocol):
     ) -> list[StagingCheckpointRecord]:
         """Newest ``created_at`` first."""
 
-    # --- Transaction & Thread Locking ---
+    def atomic_persist_staging_node_writes(
+        self,
+        *,
+        checkpoints: list[StagingCheckpointRecord],
+        working_staging: WorkingStagingRecord,
+        staging_snapshot: StagingSnapshotRecord | None,
+    ) -> None:
+        """Atomically persist staging_node rows: checkpoints, working_staging, optional staging_snapshot."""
 
-    @contextmanager
-    def transaction(self) -> Iterator[None]:
-        """Context manager for atomic multi-write operations.
+    def atomic_commit_working_staging_approval(
+        self,
+        *,
+        checkpoint: StagingCheckpointRecord,
+        publication: PublicationSnapshotRecord,
+        working_staging: WorkingStagingRecord,
+    ) -> None:
+        """Atomically persist pre-approval checkpoint, publication_snapshot, and frozen working_staging."""
 
-        All writes within the context are committed together or rolled back.
-        Implementations may provide best-effort atomicity depending on backend
-        constraints (e.g. PostgREST has no true SQL transactions).
+    # --- In-memory test snapshot scope & thread locking ---
+
+    def in_memory_write_snapshot(self) -> AbstractContextManager[None]:
+        """**In-memory only:** copy-on-enter / restore-on-exception across multiple writes.
+
+        ``SupabaseRepository`` does **not** implement this: it raises
+        ``WriteSnapshotNotSupportedError`` on enter. Production graph code must not rely
+        on any cross-call rollback on PostgREST; use Postgres RPC helpers on
+        ``SupabaseRepository`` for real atomicity.
         """
-        yield  # default: no-op passthrough
+        ...
 
     @contextmanager
     def thread_lock(self, thread_id: UUID, timeout_seconds: int = 300) -> Iterator[None]:
-        """Advisory lock for thread-level concurrency control.
+        """Process-local mutex for thread-level concurrency (single worker).
 
-        Prevents concurrent graph runs on the same thread.  Acquires on entry,
-        releases on exit (including on exception).
+        Multi-process / multi-worker: graph staging and operator staging mutations that
+        touch ``working_staging`` also take a database transaction advisory lock inside
+        the Supabase RPC path; do not rely on this context manager alone.
         """
         acquired = self.try_acquire_thread_lock(
             thread_id, locked_by="thread_lock_ctx", timeout_seconds=timeout_seconds,
@@ -1231,6 +1250,32 @@ class InMemoryRepository:
         rows.sort(key=lambda r: r.created_at, reverse=True)
         return rows[:limit]
 
+    def atomic_persist_staging_node_writes(
+        self,
+        *,
+        checkpoints: list[StagingCheckpointRecord],
+        working_staging: WorkingStagingRecord,
+        staging_snapshot: StagingSnapshotRecord | None,
+    ) -> None:
+        with self.in_memory_write_snapshot():
+            for cp in checkpoints:
+                self.save_staging_checkpoint(cp)
+            self.save_working_staging(working_staging)
+            if staging_snapshot is not None:
+                self.save_staging_snapshot(staging_snapshot)
+
+    def atomic_commit_working_staging_approval(
+        self,
+        *,
+        checkpoint: StagingCheckpointRecord,
+        publication: PublicationSnapshotRecord,
+        working_staging: WorkingStagingRecord,
+    ) -> None:
+        with self.in_memory_write_snapshot():
+            self.save_staging_checkpoint(checkpoint)
+            self.save_publication_snapshot(publication)
+            self.save_working_staging(working_staging)
+
     # --- Transaction & Thread Locking ---
 
     _SNAPSHOT_ATTRS = (
@@ -1243,8 +1288,8 @@ class InMemoryRepository:
     )
 
     @contextmanager
-    def transaction(self) -> Iterator[None]:
-        """Snapshot/rollback: all writes within the block succeed or are reverted."""
+    def in_memory_write_snapshot(self) -> Iterator[None]:
+        """Snapshot in-memory stores; restore on any exception (tests / local dev only)."""
         snapshot: dict[str, Any] = {}
         for attr in self._SNAPSHOT_ATTRS:
             val = getattr(self, attr)

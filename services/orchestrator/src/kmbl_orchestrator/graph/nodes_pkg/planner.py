@@ -265,30 +265,30 @@ def planner_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         planner_invocation_id=inv.role_invocation_id,
     )
     spec = spec.model_copy(update={"raw_payload_json": raw})
-    with ctx.repo.transaction():
-        ctx.repo.save_build_spec(spec)
-        step_state = {
-            **dict(state),
-            "build_spec": raw.get("build_spec"),
-            "build_spec_id": str(spec.build_spec_id),
-        }
-        _save_checkpoint_with_event(
-            ctx.repo,
-            CheckpointRecord(
-                checkpoint_id=uuid4(),
-                thread_id=tid,
-                graph_run_id=gid,
-                checkpoint_kind="post_step",
-                state_json=step_state,
-                context_compaction_json=None,
-            ),
-        )
-        append_graph_run_event(
-            ctx.repo,
-            gid,
-            RunEventType.PLANNER_INVOCATION_COMPLETED,
-            {"build_spec_id": str(spec.build_spec_id)},
-        )
+    # Sequential PostgREST writes — no cross-call rollback on Supabase (see RPC helpers for atomicity).
+    ctx.repo.save_build_spec(spec)
+    step_state = {
+        **dict(state),
+        "build_spec": raw.get("build_spec"),
+        "build_spec_id": str(spec.build_spec_id),
+    }
+    _save_checkpoint_with_event(
+        ctx.repo,
+        CheckpointRecord(
+            checkpoint_id=uuid4(),
+            thread_id=tid,
+            graph_run_id=gid,
+            checkpoint_kind="post_step",
+            state_json=step_state,
+            context_compaction_json=None,
+        ),
+    )
+    append_graph_run_event(
+        ctx.repo,
+        gid,
+        RunEventType.PLANNER_INVOCATION_COMPLETED,
+        {"build_spec_id": str(spec.build_spec_id)},
+    )
     return {
         "build_spec": raw.get("build_spec"),
         "build_spec_id": str(spec.build_spec_id),

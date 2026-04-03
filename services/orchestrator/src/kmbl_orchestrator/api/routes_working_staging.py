@@ -11,7 +11,9 @@ from pydantic import BaseModel, Field
 
 from kmbl_orchestrator.api.deps import get_repo
 from kmbl_orchestrator.domain import WorkingStagingRecord
+from kmbl_orchestrator.persistence.persistence_labels import staging_atomic_persistence_label
 from kmbl_orchestrator.persistence.repository import Repository
+from kmbl_orchestrator.runtime.run_events import RunEventType, append_graph_run_event
 from kmbl_orchestrator.staging.read_model import working_staging_read_model
 from kmbl_orchestrator.staging.static_preview_assembly import (
     assemble_static_preview_html,
@@ -270,6 +272,26 @@ def rollback_working_staging(
         ws = ws_fresh_rebuild(ws)
 
     repo.save_working_staging(ws)
+    gid = ws.last_update_graph_run_id
+    if gid is not None:
+        append_graph_run_event(
+            repo,
+            gid,
+            RunEventType.WORKING_STAGING_ROLLBACK,
+            {
+                "thread_id": str(tid),
+                "source": body.source,
+                "staging_checkpoint_id": str(body.staging_checkpoint_id)
+                if body.staging_checkpoint_id
+                else None,
+                "publication_snapshot_id": str(body.publication_snapshot_id)
+                if body.publication_snapshot_id
+                else None,
+                "mutation_path": "operator_http_rollback",
+                "persistence": staging_atomic_persistence_label(repo),
+            },
+            thread_id=tid,
+        )
     return _ws_response(ws)
 
 
@@ -315,6 +337,19 @@ def materialize_review_snapshot_endpoint(
         raise HTTPException(status_code=400, detail={"error_kind": "materialize_failed", "message": code}) from e
 
     repo.save_staging_snapshot(snap)
+    if snap.graph_run_id is not None:
+        append_graph_run_event(
+            repo,
+            snap.graph_run_id,
+            RunEventType.OPERATOR_REVIEW_SNAPSHOT_MATERIALIZED,
+            {
+                "staging_snapshot_id": str(snap.staging_snapshot_id),
+                "thread_id": str(tid),
+                "mutation_path": "operator_http_materialize",
+                "persistence": staging_atomic_persistence_label(repo),
+            },
+            thread_id=tid,
+        )
     return MaterializeReviewSnapshotResponse(
         staging_snapshot_id=str(snap.staging_snapshot_id),
         thread_id=str(tid),
@@ -366,7 +401,26 @@ def approve_working_staging_endpoint(
         approved_by=body.approved_by or "operator",
         source_staging_snapshot_id=source_sid,
     )
-    repo.save_staging_checkpoint(cp)
-    repo.save_publication_snapshot(pub)
-    repo.save_working_staging(ws)
+    repo.atomic_commit_working_staging_approval(
+        checkpoint=cp, publication=pub, working_staging=ws,
+    )
+    gid = ws.last_update_graph_run_id
+    if gid is not None:
+        append_graph_run_event(
+            repo,
+            gid,
+            RunEventType.PUBLICATION_SNAPSHOT_CREATED,
+            {
+                "publication_snapshot_id": str(pub.publication_snapshot_id),
+                "source_staging_snapshot_id": str(source_sid),
+                "thread_id": str(tid),
+                "identity_id": str(ws.identity_id) if ws.identity_id else None,
+                "visibility": pub.visibility,
+                "published_by": pub.published_by,
+                "mutation_path": "operator_working_staging_approve",
+                "staging_checkpoint_id": str(cp.staging_checkpoint_id),
+                "persistence": staging_atomic_persistence_label(repo),
+            },
+            thread_id=tid,
+        )
     return _ws_response(ws)

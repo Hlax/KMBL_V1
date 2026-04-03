@@ -12,6 +12,9 @@ OPERATOR_TRIGGERED_EVENT_TYPES: frozenset[str] = frozenset(
     {
         RunEventType.GRAPH_RUN_RESUMED,
         RunEventType.INTERRUPT_REQUESTED,
+        RunEventType.WORKING_STAGING_ROLLBACK,
+        RunEventType.OPERATOR_REVIEW_SNAPSHOT_MATERIALIZED,
+        RunEventType.PUBLICATION_SNAPSHOT_CREATED,
     }
 )
 
@@ -21,6 +24,12 @@ def _action_label_and_kind(event_type: str) -> tuple[str, str]:
         return "graph_run_resumed", "Resume (operator)"
     if event_type == RunEventType.INTERRUPT_REQUESTED:
         return "interrupt_requested", "Interrupt requested (operator)"
+    if event_type == RunEventType.WORKING_STAGING_ROLLBACK:
+        return "working_staging_rollback", "Working staging rollback (operator API)"
+    if event_type == RunEventType.OPERATOR_REVIEW_SNAPSHOT_MATERIALIZED:
+        return "review_snapshot_materialized", "Review snapshot materialized from live (operator)"
+    if event_type == RunEventType.PUBLICATION_SNAPSHOT_CREATED:
+        return "publication_created", "Publication snapshot created"
     return event_type, event_type
 
 

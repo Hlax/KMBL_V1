@@ -267,21 +267,35 @@ class TestExternalInspiration:
         assert len(state.external_inspiration_urls) == 2
 
     def test_exhausted_crawl_returns_external_urls(self) -> None:
-        """When internal crawl is exhausted, next_urls returns external inspiration."""
+        """When in inspiration phase with no internal frontier left, next_urls returns external."""
         repo = self._make_repo()
         iid = uuid4()
 
         get_or_create_crawl_state(repo, iid, "https://example.com")
-        # Visit root (only URL), no new internal links → exhausted
         record_page_visit(repo, iid, "https://example.com")
 
-        # Seed external inspiration
-        state = seed_external_inspiration(
+        seed_external_inspiration(
             repo, iid,
             urls=["https://awwwards.com", "https://dribbble.com"],
         )
+        st = repo.get_crawl_state(iid)
+        assert st is not None
+        from kmbl_orchestrator.identity.url_normalize import normalize_url as nu
 
-        # Now next_urls should return external URLs
+        repo.upsert_crawl_state(
+            st.model_copy(
+                update={
+                    "crawl_phase": "inspiration_expansion",
+                    "external_inspiration_urls": [
+                        nu("https://awwwards.com"),
+                        nu("https://dribbble.com"),
+                    ],
+                }
+            )
+        )
+        state = repo.get_crawl_state(iid)
+        assert state is not None
+
         next_urls = get_next_urls_to_crawl(state, batch_size=5)
         assert len(next_urls) == 2
         assert any("awwwards" in u for u in next_urls)
@@ -298,8 +312,19 @@ class TestExternalInspiration:
             repo, iid,
             urls=["https://awwwards.com"],
         )
+        st = repo.get_crawl_state(iid)
+        assert st is not None
+        from kmbl_orchestrator.identity.url_normalize import normalize_url as nu
 
-        # Visit the external URL
+        repo.upsert_crawl_state(
+            st.model_copy(
+                update={
+                    "crawl_phase": "inspiration_expansion",
+                    "external_inspiration_urls": [nu("https://awwwards.com")],
+                }
+            )
+        )
+
         state = record_page_visit(repo, iid, "https://awwwards.com")
         next_urls = get_next_urls_to_crawl(state, batch_size=5)
         assert len(next_urls) == 0  # All exhausted
@@ -410,8 +435,8 @@ class TestGeneratorFlexibility:
         })
         assert art.language == "wgsl"
 
-    def test_webgl_experience_mode_not_clamped(self) -> None:
-        """WebGL modes are no longer clamped for static vertical."""
+    def test_webgl_experience_mode_clamped_on_static_vertical(self) -> None:
+        """Immersive/WebGL experience labels are clamped so OpenClaw static lane does not get webgl_experience surface."""
         from kmbl_orchestrator.runtime.static_vertical_invariants import (
             clamp_experience_mode_for_static_vertical,
         )
@@ -419,10 +444,10 @@ class TestGeneratorFlexibility:
         bs = {"type": "static_frontend_file_v1", "experience_mode": "webgl_3d_portfolio"}
         ei = {"constraints": {"canonical_vertical": "static_frontend_file_v1"}}
         fixes = clamp_experience_mode_for_static_vertical(bs, ei)
-        assert fixes == []
-        assert bs["experience_mode"] == "webgl_3d_portfolio"
+        assert fixes
+        assert bs["experience_mode"] == "flat_editorial_static"
 
-    def test_immersive_mode_not_clamped(self) -> None:
+    def test_immersive_mode_clamped_on_static_vertical(self) -> None:
         from kmbl_orchestrator.runtime.static_vertical_invariants import (
             clamp_experience_mode_for_static_vertical,
         )
@@ -430,8 +455,8 @@ class TestGeneratorFlexibility:
         bs = {"type": "static_frontend_file_v1", "experience_mode": "immersive_spatial_portfolio"}
         ei = {}
         fixes = clamp_experience_mode_for_static_vertical(bs, ei)
-        assert fixes == []
-        assert bs["experience_mode"] == "immersive_spatial_portfolio"
+        assert fixes
+        assert bs["experience_mode"] == "flat_editorial_static"
 
 
 # ──────────────────────────────────────────────

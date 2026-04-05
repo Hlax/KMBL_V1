@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from kmbl_orchestrator.runtime.static_vertical_invariants import is_static_frontend_vertical
+from kmbl_orchestrator.contracts.frontend_artifact_roles import is_frontend_file_artifact_role
+from kmbl_orchestrator.runtime.static_vertical_invariants import is_preview_assembly_vertical
 
 
 def should_skip_evaluator_llm(
@@ -15,9 +16,9 @@ def should_skip_evaluator_llm(
     """
     Return (True, reason) when OpenClaw evaluator should not run (deterministic report only).
 
-    Static vertical with no HTML artifacts and no live preview URL is unevaluable.
+    Static / interactive frontend vertical with no HTML artifacts and no live preview URL is unevaluable.
     """
-    if not is_static_frontend_vertical(build_spec, event_input):
+    if not is_preview_assembly_vertical(build_spec, event_input):
         return False, ""
 
     ao = build_candidate.get("artifact_outputs")
@@ -29,8 +30,8 @@ def should_skip_evaluator_llm(
         return False, ""
 
     if ao is None or (isinstance(ao, list) and len(ao) == 0):
-        return True, "no_artifact_outputs_for_static_vertical"
-    return True, "no_html_static_bundle_and_no_preview_url"
+        return True, "no_artifact_outputs_for_frontend_bundle_vertical"
+    return True, "no_html_frontend_bundle_and_no_preview_url"
 
 
 def _static_bundle_has_html(artifacts: list[Any]) -> bool:
@@ -40,7 +41,7 @@ def _static_bundle_has_html(artifacts: list[Any]) -> bool:
         role = str(a.get("role") or "").strip().lower()
         path = str(a.get("file_path") or a.get("path") or "").lower()
         content = str(a.get("content") or "")
-        if role != "static_frontend_file_v1":
+        if not is_frontend_file_artifact_role(role):
             continue
         if path.endswith((".html", ".htm")):
             return True

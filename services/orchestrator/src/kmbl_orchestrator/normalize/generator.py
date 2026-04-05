@@ -7,6 +7,10 @@ import re
 from typing import Any
 from uuid import UUID, uuid4
 
+from kmbl_orchestrator.contracts.frontend_artifact_roles import (
+    FRONTEND_FILE_ARTIFACT_ROLES,
+    is_frontend_file_artifact_role,
+)
 from kmbl_orchestrator.contracts.static_frontend_artifact_v1 import (
     normalize_combined_artifact_outputs_list,
 )
@@ -20,6 +24,14 @@ from kmbl_orchestrator.contracts.ui_gallery_strip_v1 import (
 from kmbl_orchestrator.domain import BuildCandidateRecord
 
 _log = logging.getLogger(__name__)
+
+
+def _default_promotion_role(raw: dict[str, Any]) -> str:
+    """Orchestrator may set ``_kmbl_frontend_artifact_role`` after workspace ingest."""
+    r = raw.get("_kmbl_frontend_artifact_role")
+    if isinstance(r, str) and r in FRONTEND_FILE_ARTIFACT_ROLES:
+        return r
+    return "static_frontend_file_v1"
 
 
 class HabitatAssemblyError(Exception):
@@ -176,6 +188,8 @@ def _is_valid_static_frontend_path(path: str) -> bool:
 def _recover_static_files_from_proposed_changes(
     proposed_changes: Any,
     existing_artifacts: list[Any],
+    *,
+    promotion_role: str = "static_frontend_file_v1",
 ) -> list[Any]:
     """
     Safety net: if artifact_outputs has no static_frontend_file_v1 rows but
@@ -187,11 +201,11 @@ def _recover_static_files_from_proposed_changes(
     
     Uses the same path validation as StaticFrontendFileArtifactV1 for consistency.
     """
-    has_static = any(
-        isinstance(a, dict) and a.get("role") == "static_frontend_file_v1"
+    has_frontend = any(
+        isinstance(a, dict) and is_frontend_file_artifact_role(a.get("role"))
         for a in existing_artifacts
     )
-    if has_static:
+    if has_frontend:
         return existing_artifacts
 
     if not isinstance(proposed_changes, (dict, list)):
@@ -232,7 +246,7 @@ def _recover_static_files_from_proposed_changes(
             continue
 
         files_to_promote.append({
-            "role": "static_frontend_file_v1",
+            "role": promotion_role,
             "path": path,
             "language": lang,
             "content": content.strip(),
@@ -252,6 +266,8 @@ def _recover_static_files_from_proposed_changes(
 def _recover_static_files_from_updated_state(
     updated_state: Any,
     existing_artifacts: list[Any],
+    *,
+    promotion_role: str = "static_frontend_file_v1",
 ) -> list[Any]:
     """
     Additional recovery: check ``updated_state`` for file-like entries with
@@ -259,11 +275,11 @@ def _recover_static_files_from_updated_state(
     
     Uses the same path validation as StaticFrontendFileArtifactV1 for consistency.
     """
-    has_static = any(
-        isinstance(a, dict) and a.get("role") == "static_frontend_file_v1"
+    has_frontend = any(
+        isinstance(a, dict) and is_frontend_file_artifact_role(a.get("role"))
         for a in existing_artifacts
     )
-    if has_static:
+    if has_frontend:
         return existing_artifacts
 
     if not isinstance(updated_state, dict):
@@ -299,7 +315,7 @@ def _recover_static_files_from_updated_state(
         if lang is None:
             continue
         files_to_promote.append({
-            "role": "static_frontend_file_v1",
+            "role": promotion_role,
             "path": path,
             "language": lang,
             "content": content.strip(),
@@ -382,7 +398,7 @@ def _enrich_artifacts_with_content(
             enriched.append(artifact)
             continue
         
-        if artifact.get("role") != "static_frontend_file_v1":
+        if not is_frontend_file_artifact_role(artifact.get("role")):
             enriched.append(artifact)
             continue
         
@@ -454,6 +470,7 @@ def normalize_generator_output(
 
     ao = raw.get("artifact_outputs")
     artifacts = list(ao) if isinstance(ao, list) else []
+    promotion_role = _default_promotion_role(raw)
 
     # Enrich artifacts missing content with content from files arrays.
     # This is normal enrichment — artifacts referencing files in proposed_changes
@@ -481,14 +498,18 @@ def normalize_generator_output(
     )
     if not has_blocks:
         artifacts = _recover_static_files_from_proposed_changes(
-            raw.get("proposed_changes"), artifacts
+            raw.get("proposed_changes"),
+            artifacts,
+            promotion_role=promotion_role,
         )
         if len(artifacts) > pre_count:
             rescue_paths.append(f"recover_from_proposed_changes:{len(artifacts) - pre_count}")
 
         pre_count = len(artifacts)
         artifacts = _recover_static_files_from_updated_state(
-            raw.get("updated_state"), artifacts
+            raw.get("updated_state"),
+            artifacts,
+            promotion_role=promotion_role,
         )
         if len(artifacts) > pre_count:
             rescue_paths.append(f"recover_from_updated_state:{len(artifacts) - pre_count}")

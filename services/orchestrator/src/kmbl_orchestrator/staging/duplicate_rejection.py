@@ -7,6 +7,7 @@ import re
 from typing import Any
 from uuid import UUID
 
+from kmbl_orchestrator.contracts.frontend_artifact_roles import is_frontend_file_artifact_role
 from kmbl_orchestrator.domain import BuildCandidateRecord, EvaluationReportRecord
 from kmbl_orchestrator.persistence.repository import Repository
 
@@ -23,14 +24,14 @@ def fingerprint_static_artifacts(
     working_state_patch: dict[str, Any],
 ) -> str | None:
     """
-    Stable fingerprint from static_frontend_file_v1 rows (path + language + content).
+    Stable fingerprint from static / interactive frontend file rows (path + language + content).
 
     Returns None when there are no static file artifacts to compare.
     """
     rows = [
         a
         for a in artifact_refs
-        if isinstance(a, dict) and a.get("role") == "static_frontend_file_v1"
+        if isinstance(a, dict) and is_frontend_file_artifact_role(a.get("role"))
     ]
     if not rows:
         return None
@@ -131,3 +132,52 @@ def apply_duplicate_staging_rejection(
             }
         )
     return report
+
+
+def apply_fresh_habitat_duplicate_output_gate(
+    report: EvaluationReportRecord,
+    *,
+    bc: BuildCandidateRecord,
+    prior_static_fingerprint: str | None,
+    iteration_index: int,
+    habitat_strategy_effective: str | None,
+) -> EvaluationReportRecord:
+    """After a cleared fresh-start surface, reject pass if the bundle matches the prior fingerprint."""
+    if report.status == "blocked":
+        return report
+    if prior_static_fingerprint is None:
+        return report
+    if iteration_index != 0:
+        return report
+    if habitat_strategy_effective not in ("fresh_start", "rebuild_informed"):
+        return report
+    fp = fingerprint_build_candidate(bc)
+    if fp is None or fp != prior_static_fingerprint:
+        return report
+    if report.status not in ("pass", "partial"):
+        return report
+    new_metrics = dict(report.metrics_json or {})
+    new_metrics["fresh_habitat_duplicate_bundle"] = True
+    issues = list(report.issues_json)
+    issues.append(
+        {
+            "code": "fresh_habitat_duplicate_output",
+            "message": (
+                "Static bundle fingerprint matches the working surface from before the "
+                "orchestrator reset — the generator likely reused prior workspace/HTML. "
+                "Regenerate with a materially different page."
+            ),
+        }
+    )
+    summary = (report.summary or "").strip()
+    suffix = "[Orchestrator: fresh habitat produced duplicate of prior surface]"
+    if suffix not in summary:
+        summary = f"{summary} {suffix}".strip() if summary else suffix
+    return report.model_copy(
+        update={
+            "status": "partial",
+            "summary": summary,
+            "issues_json": issues,
+            "metrics_json": new_metrics,
+        }
+    )

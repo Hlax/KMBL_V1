@@ -18,6 +18,7 @@ from kmbl_orchestrator.domain import (
     BuildSpecRecord,
     CheckpointRecord,
     CrawlStateRecord,
+    SiteCrawlStateRecord,
     EvaluationReportRecord,
     GraphRunEventRecord,
     GraphRunRecord,
@@ -25,6 +26,7 @@ from kmbl_orchestrator.domain import (
     IdentityCrossRunMemoryRecord,
     IdentityProfileRecord,
     IdentitySourceRecord,
+    PageVisitLogRecord,
     PublicationSnapshotRecord,
     RoleInvocationRecord,
     StagingCheckpointRecord,
@@ -426,12 +428,27 @@ class Repository(Protocol):
     # --- Crawl State ---
 
     def get_crawl_state(self, identity_id: UUID) -> CrawlStateRecord | None:
-        """Return the crawl state for an identity, or None if no crawl has started."""
+        """Return merged crawl view (identity link + site frontier when ``site_key`` is set)."""
         ...
+
+    def get_site_crawl_state(self, site_key: str) -> SiteCrawlStateRecord | None:
+        """Return shared site-level crawl row, or ``None``."""
+
+    def upsert_site_crawl_state(self, record: SiteCrawlStateRecord) -> None:
+        """Upsert ``site_crawl_state`` (canonical site frontier)."""
+
+    def ensure_site_backing_for_identity(self, identity_id: UUID) -> None:
+        """If the identity row still holds a legacy full frontier, copy it to ``site_crawl_state``."""
 
     def upsert_crawl_state(self, record: CrawlStateRecord) -> None:
         """Insert or replace crawl state for an identity (keyed by identity_id)."""
         ...
+
+    def append_page_visit_log(self, record: PageVisitLogRecord) -> UUID:
+        """Append a browser visit log row (Playwright wrapper); returns ``page_visit_id``."""
+
+    def prune_page_visit_logs_older_than(self, *, older_than_days: int) -> int:
+        """Delete operational visit logs older than the cutoff; returns removed count (best-effort)."""
 
     # --- In-memory test snapshot scope & thread locking ---
 
@@ -498,6 +515,8 @@ class InMemoryRepository:
         self._identity_cross_run_memory: dict[str, IdentityCrossRunMemoryRecord] = {}
         self._autonomous_loops: dict[str, AutonomousLoopRecord] = {}
         self._crawl_states: dict[str, CrawlStateRecord] = {}
+        self._site_crawl_states: dict[str, SiteCrawlStateRecord] = {}
+        self._page_visit_logs: list[PageVisitLogRecord] = []
         # Thread-level advisory locks
         self._thread_locks: dict[str, threading.Lock] = {}
         self._thread_lock_guard = threading.Lock()
@@ -1308,10 +1327,93 @@ class InMemoryRepository:
     # --- Crawl State ---
 
     def get_crawl_state(self, identity_id: UUID) -> CrawlStateRecord | None:
-        return self._crawl_states.get(str(identity_id))
+        from kmbl_orchestrator.identity.crawl_merge import merge_identity_with_site
+
+        row = self._crawl_states.get(str(identity_id))
+        if row is None:
+            return None
+        if row.site_key:
+            site = self._site_crawl_states.get(row.site_key)
+            if site is not None:
+                return merge_identity_with_site(row, site)
+            if row.visited_urls or row.unvisited_urls:
+                return row
+            return row
+        return row
+
+    def get_site_crawl_state(self, site_key: str) -> SiteCrawlStateRecord | None:
+        return self._site_crawl_states.get(site_key)
+
+    def upsert_site_crawl_state(self, record: SiteCrawlStateRecord) -> None:
+        self._site_crawl_states[record.site_key] = record
+
+    def ensure_site_backing_for_identity(self, identity_id: UUID) -> None:
+        from kmbl_orchestrator.identity.crawl_merge import (
+            site_record_from_merged_view,
+            slim_identity_row,
+        )
+        from kmbl_orchestrator.identity.site_key import canonical_site_key
+
+        row = self._crawl_states.get(str(identity_id))
+        if row is None or row.site_key:
+            return
+        if not row.visited_urls and not row.unvisited_urls and not row.page_summaries:
+            return
+        sk = canonical_site_key(row.root_url)
+        merged = row.model_copy(update={"site_key": sk})
+        site = site_record_from_merged_view(merged)
+        self._site_crawl_states[sk] = site
+        self._crawl_states[str(identity_id)] = slim_identity_row(
+            merged.model_copy(update={"has_reused_site_memory": False})
+        )
 
     def upsert_crawl_state(self, record: CrawlStateRecord) -> None:
-        self._crawl_states[str(record.identity_id)] = record
+        from kmbl_orchestrator.identity.crawl_merge import (
+            site_record_from_merged_view,
+            slim_identity_row,
+        )
+
+        has_frontier = bool(
+            record.visited_urls or record.unvisited_urls or record.page_summaries,
+        )
+        if record.site_key and has_frontier:
+            site = site_record_from_merged_view(record)
+            self._site_crawl_states[record.site_key] = site
+            self._crawl_states[str(record.identity_id)] = slim_identity_row(record)
+        elif record.site_key:
+            self._crawl_states[str(record.identity_id)] = record
+        else:
+            self._crawl_states[str(record.identity_id)] = record
+
+    def append_page_visit_log(self, record: PageVisitLogRecord) -> UUID:
+        from uuid import uuid4
+
+        vid = record.page_visit_id or uuid4()
+        row = record.model_copy(update={"page_visit_id": vid})
+        self._page_visit_logs.append(row)
+        return vid
+
+    def prune_page_visit_logs_older_than(self, *, older_than_days: int) -> int:
+        from datetime import datetime, timedelta, timezone
+
+        if older_than_days <= 0:
+            return 0
+        cutoff = datetime.now(timezone.utc) - timedelta(days=older_than_days)
+        kept: list[PageVisitLogRecord] = []
+        removed = 0
+        for row in self._page_visit_logs:
+            try:
+                raw = (row.created_at or "").replace("Z", "+00:00")
+                ts = datetime.fromisoformat(raw)
+            except Exception:
+                kept.append(row)
+                continue
+            if ts >= cutoff:
+                kept.append(row)
+            else:
+                removed += 1
+        self._page_visit_logs = kept
+        return removed
 
     # --- Transaction & Thread Locking ---
 
@@ -1321,7 +1423,7 @@ class InMemoryRepository:
         "_run_snapshots", "_graph_run_events", "_staging_snapshots",
         "_working_stagings", "_staging_checkpoints", "_publications",
         "_identity_sources", "_identity_profiles", "_identity_cross_run_memory",
-        "_autonomous_loops", "_crawl_states",
+        "_autonomous_loops", "_crawl_states", "_site_crawl_states", "_page_visit_logs",
     )
 
     @contextmanager

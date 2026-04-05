@@ -13,7 +13,9 @@ Each invocation: **one JSON object**, nothing else.
 
 **Preferred keys:** `proposed_changes`, `artifact_outputs`, `updated_state`, optional `sandbox_ref`, `preview_url`, optional **`execution_acknowledgment`** (required when **cool generation lane** is on and you emit artifacts).
 
-**Requirement (success path):** at least one **non-empty** primary field among `proposed_changes`, `updated_state`, `artifact_outputs` (non-empty dict/list with real content — not `[]` of empty objects), **or** structured **`contract_failure`** (see below).
+**Requirement (success path):** at least one **non-empty** primary field among `proposed_changes`, `updated_state`, `artifact_outputs` (non-empty dict/list with real content — not `[]` of empty objects), **`workspace_manifest_v1` + `sandbox_ref`** (local-build lane — orchestrator ingests files from disk before validation), **or** structured **`contract_failure`** (see below).
+
+**Local-build (when file bodies would be large):** Write **`component/…`** only under **`workspace_context.recommended_write_path`**, then return **`sandbox_ref`** + **`workspace_manifest_v1`** (and optional small **`artifact_outputs`** for non-file roles like gallery). Do **not** use **`git`**; do **not** modify KMBL app repo source. On the host machine, OpenClaw **`kmbl-generator.workspace`** and orchestrator **`KMBL_GENERATOR_WORKSPACE_ROOT`** must be the **same** absolute path (**USER.md** **`workspace_context`** table).
 
 **Do not** emit **`_kmbl_compliance`** — KMBL injects it server-side when acknowledgment is missing/invalid.
 
@@ -60,10 +62,27 @@ Align with **`iteration_plan`** when present:
 
 ## Static frontend lane (default)
 
-- Put real files in **`artifact_outputs`** as **`static_frontend_file_v1`**, paths under **`component/`** (e.g. `component/preview/index.html`).
-- **`proposed_changes`** is secondary traceability; KMBL may promote from it — **prefer** canonical **`artifact_outputs`**.
+- Put real files in **`artifact_outputs`** as **`static_frontend_file_v1`**, paths under **`component/`** (e.g. `component/preview/index.html`), **or** emit **`workspace_manifest_v1` + `sandbox_ref`** after writing those paths under the orchestrator workspace (ingest produces **`artifact_outputs`** server-side).
+- **`proposed_changes`** is secondary traceability; KMBL may promote from it — **prefer** canonical **`artifact_outputs`** or **manifest ingest**, not checklist-only plans.
 - **`gallery_strip_image_v1`**: honest **`source`** (`external` | `upload` | …). **Do not** set **`generated`** unless the payload proves that URL for this step.
 - **`kmbl-image-gen`** produces routed image pixels — **this** role does not fabricate OpenAI image URLs.
+
+## Interactive frontend lane: `interactive_frontend_app_v1` (bounded app bundle)
+
+When **`build_spec.type`** is **`interactive_frontend_app_v1`** and/or **`event_input.constraints.canonical_vertical`** / **`kmbl_interactive_frontend_vertical`** selects this lane:
+
+1. **Same ingest and preview pipeline as static** — KMBL assembles a **single HTML preview** from your bundle (entry HTML + sibling CSS/JS). Read orchestrator field **`kmbl_interactive_lane_context`** on every payload: it states what preview can and cannot do.
+2. **Role in `artifact_outputs`:** use **`interactive_frontend_app_v1`** for file rows (or rely on manifest ingest with the same logical role). Paths stay under **`component/`** (e.g. **`component/preview/index.html`**). **Do not** scatter entry assets at the run folder root.
+3. **One coherent concept** — a small interactive surface (tool, demo, panel, canvas scene, or narrative + controls), not a full product shell. Prefer **one primary interaction story** with visible state changes.
+4. **JS shapes that preview reliably:**
+   - **Classic scripts** wired from HTML (`<script src="…">`), IIFEs, or **one** entry script with **CDN** libraries (Three.js, GSAP, etc.).
+   - **Multi-file** is OK when HTML declares script order; optional explicit order via **`kmbl_preview_assembly_hints_v1.js_path_order`** when needed.
+   - **Avoid** cross-file **ES module** graphs (`import … from './other.js'` across several generated files) — the preview **does not** resolve those edges. Inline one bundle, use CDN, or concatenate logically into fewer files.
+5. **Separation of concerns:** HTML = structure and wiring; CSS = layout, theme, motion; JS = behavior and state. Avoid giant inline scripts when separate files improve clarity — but keep the graph preview-safe.
+6. **Motion and 3D:** use **bounded** motion (CSS + rAF) and **modest** Three.js/canvas when **`build_spec`** / **`execution_contract`** call for it. For **heavy** immersive/WebGL *product* modes, either ship a **working** minimal scene + honest **`execution_acknowledgment`**, or **`contract_failure` / `cannot_satisfy_spec`** — do not fake depth with a static page.
+7. **“Good” for this lane:** visible interactivity, stable preview, identity-aligned copy, no broken console from missing modules. **Not good:** static editorial page with a decorative click; npm-only layouts; unbounded scope.
+
+**Invalid:** the same checklist-only patterns as **`static_frontend_file_v1`** — no HTML/manifest without **`contract_failure`**.
 
 ## Static vertical: `static_frontend_file_v1` + identity URL (mandatory HTML)
 

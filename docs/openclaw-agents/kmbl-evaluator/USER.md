@@ -6,7 +6,7 @@
 
 ## Inputs
 
-**Orchestrator wire shape (`EvaluatorRoleInput`):** **`thread_id`**, **`build_candidate`**, **`success_criteria`**, **`evaluation_targets`**, **`iteration_hint`**, and optionally **`working_staging_facts`**, **`user_rating_context`**, **`identity_brief`**, **`preview_url`** (resolved: prefers orchestrator **staging-preview** when **`ORCHESTRATOR_PUBLIC_BASE_URL`** is set), **`iteration_context`**, **`previous_evaluation_report`** (prior evaluator JSON on this run when **`iteration_hint` > 0** — use for sameness / visual-delta).
+**Orchestrator wire shape (`EvaluatorRoleInput`):** **`thread_id`**, **`build_candidate`**, **`success_criteria`**, **`evaluation_targets`**, **`iteration_hint`**, and optionally **`working_staging_facts`**, **`user_rating_context`**, **`identity_brief`**, **`preview_url`** (resolved: prefers orchestrator **staging-preview** when **`ORCHESTRATOR_PUBLIC_BASE_URL`** is set), **`iteration_context`**, **`previous_evaluation_report`** (prior evaluator JSON on this run when **`iteration_hint` > 0** — use for sameness / visual-delta), **`kmbl_interactive_lane_expectations`** (when the graph is **`interactive_frontend_app_v1`** — same structured hints as the generator; use for **fair** scoring of bounded interactivity vs static editorial vs over-ambitious WebGL asks).
 
 **There is no `build_spec` key** on the JSON KMBL sends to this role. The planner’s **`build_spec`** row lives in KMBL’s database; the orchestrator forwards **`success_criteria`** and **`evaluation_targets`** sliced from that plan. Use those arrays (plus **`identity_brief`** when present) as the checklist—**do not invent** new success conditions.
 
@@ -18,7 +18,7 @@
 
 **`build_candidate`** is built by KMBL from the **persisted** `BuildCandidateRecord` — it is the normalized, canonical representation of what the generator produced. Key fields:
 
-- **`artifact_outputs`**: normalized artifact rows — the canonical list of built artifacts. Valid roles include `static_frontend_file_v1` (HTML/CSS/JS), composable `ui_section_v1` / `ui_text_block_v1` / `ui_image_v1`, `gallery_strip_image_v1`, and others. A candidate with composable `ui_*` rows but no standalone HTML file is **valid** — do not report it as "empty."
+- **`artifact_outputs`**: normalized artifact rows — the canonical list of built artifacts. Valid roles include `static_frontend_file_v1` (HTML/CSS/JS), **`interactive_frontend_app_v1`** (multi-file bounded interactive bundles — same preview assembly family as static), composable `ui_section_v1` / `ui_text_block_v1` / `ui_image_v1`, `gallery_strip_image_v1`, and others. A candidate with composable `ui_*` rows but no standalone HTML file is **valid** — do not report it as "empty."
 - **`working_state_patch`**: structured generator state (preview entries, `checklist_steps`, verification results, etc.). **Always check this field** for non-artifact deliverables.
 - **`proposed_changes`**: raw generator proposed changes (file operations, checklists, state patches). Provided for full visibility. For checklist / verification scenarios this carries the primary deliverables.
 - **`updated_state`**: raw generator state update (if any).

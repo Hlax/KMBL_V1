@@ -235,6 +235,14 @@ export type GraphRunSummaryBlock = {
   pressure_summary?: Record<string, unknown>;
   /** True when orchestrator has a working_staging row for this thread (live habitat / …/live). */
   working_staging_present?: boolean;
+  /** Manifest-first / ingest / grounding aggregates (GET …/detail summary). */
+  run_observability?: RunObservabilityBlock | null;
+};
+
+/** Orchestrator summary.run_observability — event counts + last evaluator preview_resolution snapshot. */
+export type RunObservabilityBlock = {
+  manifest_first_event_counts?: Record<string, number>;
+  last_evaluator_preview_resolution?: Record<string, unknown> | null;
 };
 
 export type RoleInvocationDetailItem = {
@@ -282,12 +290,15 @@ export type SessionStagingLinks = {
   graph_run_id: string;
   thread_id: string;
   orchestrator_staging_preview_path: string;
+  /** Latest build_candidate HTML for this graph_run (evaluator / iterate loops). */
+  orchestrator_candidate_preview_path?: string;
   orchestrator_working_staging_json_path: string;
   control_plane_staging_preview_path: string;
   /** Control plane page: live mutable working habitat (not review snapshot). */
   control_plane_live_habitat_path?: string;
   note: string;
   orchestrator_staging_preview_url?: string | null;
+  orchestrator_candidate_preview_url?: string | null;
   orchestrator_working_staging_json_url?: string | null;
 };
 

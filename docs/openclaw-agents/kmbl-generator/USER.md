@@ -8,9 +8,13 @@
 
 Trust the **payload**, not long workspace history.
 
+**OpenClaw note:** **`agentDir`** holds instructions (markdown); **`workspace`** is the build sandbox. Only **`workspace`** (and paths under it) may receive generated files. On the host, **`kmbl-generator.workspace`** (OpenClaw config) and the orchestrator’s **`KMBL_GENERATOR_WORKSPACE_ROOT`** must be the **same** absolute path — details are in the **`workspace_context`** fields below, not in external repo files.
+
 | Field | Use |
 |-------|-----|
 | **thread_id** | Session key; echoed in OpenClaw `user` by KMBL. |
+| **workspace_context** | **`workspace_root_resolved`**: must match orchestrator **`KMBL_GENERATOR_WORKSPACE_ROOT`** and OpenClaw **`kmbl-generator.workspace`** (same absolute path on the host). **`recommended_write_path`**: **only** directory you may **create/write files in** for this run (typically `{root}/{thread_id}/{graph_run_id}`). Use with **`sandbox_ref`** + **`workspace_manifest_v1`** for local-build. |
+| **kmbl_interactive_lane_context** | Present when the run is **`interactive_frontend_app_v1`**. Orchestrator-authored hints: preview pipeline limits, strengths, **avoid** patterns (e.g. cross-file ES module graphs), interactivity tiers. **Read it** before structuring JS. Omitted for other verticals. |
 | **build_spec** | **Binding scope** — title, **`steps`** (section intent — **implement as HTML**, do not re-emit as `checklist_steps`), `site_archetype`, design fields, `habitat_strategy`, **`creative_brief`**, **`execution_contract`**, **`literal_success_checks`**. |
 | **cool_generation_lane_active** | **`true`** when **`cool_generation_v1`** lane is on (see **`event_input.cool_generation_lane`** or **`build_spec.execution_contract.lane`**). |
 | **kmbl_execution_contract** | Compact summary: lane, patterns, **`pattern_rules`**, **`literal_success_checks_preview`**, counts — use with **`build_spec`**. |
@@ -47,4 +51,5 @@ When **cool generation lane** is active: also emit **`execution_acknowledgment`*
 
 - Do **not** evaluate, replan, or publish.
 - Do **not** widen **build_spec** scope.
+- Do **not** run **git** or edit KMBL **repo source**; writes belong only under **`workspace_context.recommended_write_path`** inside the configured generator workspace.
 - **Tight budgets / fast models:** prefer **one primary HTML surface**, **minimal copy**, **complete small HTML** over incomplete large bundles. Capable models may ship richer multi-file bundles when **`build_spec`** warrants it.

@@ -147,9 +147,19 @@ Set **`constraints.canonical_vertical`** to **`"static_frontend_file_v1"`** when
 
 When **`event_input.scenario`** is **`kmbl_static_frontend_pass_n_v1`**, this is the **acceptance-reference lane** for the static frontend vertical (stable hero/CTA copy and DOM markers — see that doc). You **must** return non-empty **`success_criteria`** and **`evaluation_targets`** with **visible-output** checks (e.g. **`text_present`**, **`selector_present`**) that match the stated page intent; empty arrays or variation-only filler are not acceptable for this scenario. **`build_spec.title`** must name the surface clearly.
 
+## Interactive bundle vs habitat vs static
+
+| Need | Vertical | Planner signal |
+|------|----------|----------------|
+| One landing / editorial page, light JS | **`static_frontend_file_v1`** | **`constraints.canonical_vertical`**: **`static_frontend_file_v1`** |
+| One **bounded** interactive app (tool, demo, canvas, motion, stateful UI) — **single preview surface** | **`interactive_frontend_app_v1`** | **`build_spec.type`**: **`interactive_frontend_app_v1`**, same **`canonical_vertical`**, optional **`kmbl_interactive_frontend_vertical`**: **`true`** |
+| **Multi-page** site, framework components, nav across pages | **`habitat_manifest_v2`** | **`constraints.canonical_vertical`**: **`habitat_manifest_v2`** |
+
+**Do not** route “full product WebGL shell” or deep SPA routing into **`interactive_frontend_app_v1`** — keep asks **previewable** and **bounded**; use **`execution_contract.required_interactions`** to spell out what “interactive” means (so the generator and evaluator align).
+
 ## Habitat manifest planning
 
-When the user intent involves **multi-page sites**, **interactive experiences**, or **rich front-ends beyond a single static page**, plan for the **`habitat_manifest_v2`** vertical.
+When the user intent involves **multi-page sites** or **rich front-ends** that need **habitat** scaffolding (frameworks, nav, multiple slugs), plan for the **`habitat_manifest_v2`** vertical — not every “interactive” need is a habitat; see the table above.
 
 **Key decisions for habitat planning:**
 

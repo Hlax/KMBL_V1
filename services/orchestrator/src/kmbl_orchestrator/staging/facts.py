@@ -10,6 +10,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from kmbl_orchestrator.contracts.frontend_artifact_roles import is_frontend_file_artifact_role
 from kmbl_orchestrator.domain import WorkingStagingRecord
 
 
@@ -134,7 +135,7 @@ def build_working_staging_facts(
         path = ref.get("path")
         if isinstance(path, str) and path.strip():
             file_paths.append(path.strip())
-        if role == "static_frontend_file_v1":
+        if is_frontend_file_artifact_role(role):
             has_static = True
             if ref.get("language") == "html":
                 has_html = True

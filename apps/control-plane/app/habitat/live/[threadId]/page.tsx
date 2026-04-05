@@ -67,9 +67,12 @@ export default async function LiveHabitatPage({
           <p className="pub-empty__title">Could not load live habitat</p>
           <p className="pub-empty__body mono small">{loadErr}</p>
           <p className="muted small">
-            Ensure the orchestrator is reachable. If the message is “no working staging for this
-            thread”, the thread id is valid but no mutable staging row exists yet — complete a run
-            that reaches the staging step, or check an earlier successful run on the same thread.
+            Ensure <code className="mono small">NEXT_PUBLIC_ORCHESTRATOR_URL</code> is set for the
+            control-plane (see <code className="mono small">apps/control-plane/.env.local</code>) and
+            the orchestrator is reachable. If the message is “no working staging for this thread”,
+            confirm the URL uses <strong>thread_id</strong> from the graph run page — not{" "}
+            <strong>graph_run_id</strong> (a common mistake). If the id is correct but staging is
+            missing, complete a run that reaches the staging step.
           </p>
         </div>
       ) : (

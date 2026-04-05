@@ -108,11 +108,18 @@ class StaticFrontendFileArtifactV1(BaseModel):
         return self.model_copy(update={"previewable": pv})
 
 
+class InteractiveFrontendAppArtifactV1(StaticFrontendFileArtifactV1):
+    """Same on-disk shape as static files; distinct role for interactive / richer JS (bounded, no bundler)."""
+
+    role: Literal["interactive_frontend_app_v1"]  # type: ignore[assignment]
+
+
 def normalize_static_frontend_artifact_outputs_list(seq: list[Any]) -> list[Any]:
     """
-    Validate ``static_frontend_file_v1`` dicts; pass through other entries unchanged.
+    Validate ``static_frontend_file_v1`` and ``interactive_frontend_app_v1`` dicts; pass
+    through other entries unchanged.
 
-    Skips malformed static rows with a warning rather than crashing the entire
+    Skips malformed rows with a warning rather than crashing the entire
     normalization pipeline.  Duplicate paths keep the first occurrence.
     Multiple ``entry_for_preview`` flags per bundle are resolved by keeping only
     the first.
@@ -122,7 +129,8 @@ def normalize_static_frontend_artifact_outputs_list(seq: list[Any]) -> list[Any]
     by_bundle: dict[str | None, list[tuple[str, bool]]] = {}
 
     for item in seq:
-        if isinstance(item, dict) and item.get("role") == "static_frontend_file_v1":
+        role = item.get("role") if isinstance(item, dict) else None
+        if isinstance(item, dict) and role == "static_frontend_file_v1":
             try:
                 model = StaticFrontendFileArtifactV1.model_validate(item)
             except Exception as exc:
@@ -144,6 +152,30 @@ def normalize_static_frontend_artifact_outputs_list(seq: list[Any]) -> list[Any]
             bkey: str | None = bid if isinstance(bid, str) else None
             by_bundle.setdefault(bkey, []).append((path, bool(dumped.get("entry_for_preview"))))
             out.append(dumped)
+        elif isinstance(item, dict) and role == "interactive_frontend_app_v1":
+            try:
+                imodel = InteractiveFrontendAppArtifactV1.model_validate(item)
+            except Exception as exc:
+                _log.warning(
+                    "interactive_frontend_app_v1 row skipped (validation): %s — %s",
+                    item.get("path", "<no path>"),
+                    exc,
+                )
+                continue
+            dumped_i = imodel.model_dump(mode="json")
+            path_i = str(dumped_i["path"])
+            if path_i in static_paths:
+                _log.warning(
+                    "interactive_frontend_app_v1 duplicate path skipped: %s", path_i,
+                )
+                continue
+            static_paths.add(path_i)
+            bid_i = dumped_i.get("bundle_id")
+            bkey_i: str | None = bid_i if isinstance(bid_i, str) else None
+            by_bundle.setdefault(bkey_i, []).append(
+                (path_i, bool(dumped_i.get("entry_for_preview")))
+            )
+            out.append(dumped_i)
         else:
             out.append(item)
 

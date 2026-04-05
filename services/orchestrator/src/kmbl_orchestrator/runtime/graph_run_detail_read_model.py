@@ -45,6 +45,11 @@ _MEANINGFUL_EVENT_TYPES: frozenset[str] = frozenset(
         RunEventType.STATIC_VERTICAL_EXPERIENCE_MODE_CLAMPED,
         RunEventType.GENERATOR_STATIC_BUNDLE_REJECTED,
         RunEventType.EVALUATOR_SKIPPED_NO_ARTIFACTS,
+        RunEventType.WORKSPACE_INGEST_NOT_ATTEMPTED,
+        RunEventType.WORKSPACE_INGEST_COMPLETED,
+        RunEventType.WORKSPACE_INGEST_SKIPPED_INLINE_HTML,
+        RunEventType.MANIFEST_FIRST_VIOLATION,
+        RunEventType.EVALUATOR_GROUNDING_UNAVAILABLE,
     }
 )
 
@@ -84,6 +89,36 @@ _ROUTING_HINT_KEYS: tuple[str, ...] = (
     "budget_cap_tokens",
     "budget_remaining_tokens",
 )
+
+
+def _run_observability_block(
+    events: list[GraphRunEventRecord],
+    invocations: list[RoleInvocationRecord],
+) -> dict[str, Any]:
+    """Counts for manifest-first / ingest / grounding events + last evaluator preview_resolution."""
+    mf_types = (
+        RunEventType.WORKSPACE_INGEST_NOT_ATTEMPTED,
+        RunEventType.WORKSPACE_INGEST_STARTED,
+        RunEventType.WORKSPACE_INGEST_COMPLETED,
+        RunEventType.WORKSPACE_INGEST_FAILED,
+        RunEventType.WORKSPACE_INGEST_SKIPPED_INLINE_HTML,
+        RunEventType.MANIFEST_FIRST_VIOLATION,
+        RunEventType.EVALUATOR_GROUNDING_UNAVAILABLE,
+    )
+    counts = {t: sum(1 for e in events if e.event_type == t) for t in mf_types}
+    last_prev: dict[str, Any] | None = None
+    for r in reversed(invocations):
+        if r.role_type != "evaluator":
+            continue
+        inp = r.input_payload_json or {}
+        pr = inp.get("preview_resolution")
+        if isinstance(pr, dict):
+            last_prev = dict(pr)
+        break
+    return {
+        "manifest_first_event_counts": counts,
+        "last_evaluator_preview_resolution": last_prev,
+    }
 
 
 def _routing_hints_payload(
@@ -344,6 +379,7 @@ def build_graph_run_detail_read_model(
         invocations=inv_sorted,
         ev=ev,
     )
+    obs = _run_observability_block(events_sorted, inv_sorted)
 
     # --- Failure info (mirrors status endpoint but on detail too) ---
     failure_info: dict[str, Any] = {
@@ -417,6 +453,7 @@ def build_graph_run_detail_read_model(
             **summary_extra,
             "quality_metrics": qp["durable_normalization_rescue"],
             "pressure_summary": qp["v1_pressure_telemetry"],
+            "run_observability": obs,
         },
         "operator_actions": operator_actions,
         "role_invocations": inv_out,

@@ -21,6 +21,30 @@ def test_planner_requires_build_spec() -> None:
 def test_generator_requires_at_least_one_primary_key() -> None:
     with pytest.raises(ValidationError):
         GeneratorRoleOutput.model_validate({"sandbox_ref": "x"})
+    with pytest.raises(ValidationError):
+        GeneratorRoleOutput.model_validate(
+            {
+                "workspace_manifest_v1": {"version": 1, "files": [{"path": "component/x.html"}]},
+                "sandbox_ref": "   ",
+                "artifact_outputs": None,
+                "updated_state": None,
+                "proposed_changes": None,
+            }
+        )
+
+
+def test_generator_accepts_workspace_manifest_with_sandbox() -> None:
+    raw = {
+        "workspace_manifest_v1": {
+            "version": 1,
+            "files": [{"path": "component/preview/index.html"}],
+        },
+        "sandbox_ref": "C:/tmp/kmbl-ws",
+        "artifact_outputs": None,
+        "updated_state": None,
+        "proposed_changes": None,
+    }
+    GeneratorRoleOutput.model_validate(raw)
 
 
 def test_evaluator_validates_status() -> None:

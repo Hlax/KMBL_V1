@@ -18,7 +18,15 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+from kmbl_orchestrator.config import get_settings
 from kmbl_orchestrator.domain import CrawlStateRecord
+from kmbl_orchestrator.identity.crawl_ranking import (
+    internal_coverage_ready_for_inspiration,
+    rank_summaries_for_planner,
+    sort_internal_frontier,
+)
+from kmbl_orchestrator.identity.crawl_url_policy import filter_frontier_candidate_urls
+from kmbl_orchestrator.identity.site_key import canonical_site_key
 from kmbl_orchestrator.identity.url_normalize import (
     is_same_domain,
     normalize_url,
@@ -57,16 +65,14 @@ def get_or_create_crawl_state(
     identity_id: UUID,
     root_url: str,
 ) -> CrawlStateRecord:
-    """Load existing crawl state or create a fresh one seeded with the root URL.
+    """Load merged crawl state, or link to existing site memory, or create fresh site + identity rows."""
+    repo.ensure_site_backing_for_identity(identity_id)
+    nu = normalize_url(root_url)
+    sk = canonical_site_key(nu)
 
-    If a crawl state already exists for this identity, it is returned as-is
-    (enabling cross-session resumption). Otherwise a new record is created
-    with the root URL as the first unvisited entry.
-    """
     existing = repo.get_crawl_state(identity_id)
     if existing is not None:
-        # If root URL changed (user updated identity source), re-seed
-        if normalize_url(existing.root_url) != normalize_url(root_url):
+        if normalize_url(existing.root_url) != nu:
             _log.info(
                 "crawl_state root_url changed for identity_id=%s: %s → %s, re-seeding",
                 identity_id,
@@ -76,6 +82,35 @@ def get_or_create_crawl_state(
             return _create_fresh_state(repo, identity_id, root_url)
         return existing
 
+    site = repo.get_site_crawl_state(sk)
+    if site is not None:
+        link = CrawlStateRecord(
+            identity_id=identity_id,
+            root_url=nu,
+            site_key=sk,
+            crawl_phase="identity_grounding",
+            has_reused_site_memory=True,
+            visited_urls=[],
+            unvisited_urls=[],
+            page_summaries={},
+            visit_provenance={},
+            crawl_status="in_progress",
+            external_inspiration_urls=[],
+            total_pages_crawled=0,
+            last_crawled_at=None,
+            created_at=datetime.now(timezone.utc).isoformat(),
+            updated_at=datetime.now(timezone.utc).isoformat(),
+        )
+        repo.upsert_crawl_state(link)
+        _log.info(
+            "crawl_state linked identity_id=%s to existing site_key=%s",
+            identity_id,
+            sk,
+        )
+        merged = repo.get_crawl_state(identity_id)
+        assert merged is not None
+        return merged
+
     return _create_fresh_state(repo, identity_id, root_url)
 
 
@@ -84,15 +119,20 @@ def _create_fresh_state(
     identity_id: UUID,
     root_url: str,
 ) -> CrawlStateRecord:
-    """Create and persist a fresh crawl state."""
+    """Create site frontier + identity link (merged view)."""
     normalized_root = normalize_url(root_url)
+    sk = canonical_site_key(normalized_root)
     now = datetime.now(timezone.utc).isoformat()
     state = CrawlStateRecord(
         identity_id=identity_id,
         root_url=normalized_root,
+        site_key=sk,
+        crawl_phase="identity_grounding",
+        has_reused_site_memory=False,
         visited_urls=[],
         unvisited_urls=[normalized_root],
         page_summaries={},
+        visit_provenance={},
         crawl_status="in_progress",
         external_inspiration_urls=[],
         total_pages_crawled=0,
@@ -101,8 +141,10 @@ def _create_fresh_state(
         updated_at=now,
     )
     repo.upsert_crawl_state(state)
-    _log.info("crawl_state created for identity_id=%s root=%s", identity_id, normalized_root)
-    return state
+    out = repo.get_crawl_state(identity_id)
+    assert out is not None
+    _log.info("crawl_state created for identity_id=%s site_key=%s", identity_id, sk)
+    return out
 
 
 def record_page_visit(
@@ -147,14 +189,16 @@ def record_page_visit(
     if normalized in unvisited:
         unvisited.remove(normalized)
 
-    # Store page summary
+    # Store page summary (origin distinguishes portfolio vs inspiration for planner shaping)
     summaries = dict(state.page_summaries)
+    origin: str = "portfolio" if is_same_domain(normalized, state.root_url) else "inspiration"
     if len(summaries) < _MAX_PAGE_SUMMARIES:
         summaries[normalized] = {
             "summary": (summary or "")[:_MAX_SUMMARY_LENGTH],
             "design_signals": (design_signals or [])[:_MAX_DESIGN_SIGNALS_PER_PAGE],
             "tone_keywords": (tone_keywords or [])[:_MAX_TONE_KEYWORDS_PER_PAGE],
             "crawled_at": now,
+            "origin": origin,
         }
 
     # Store visit provenance (why was this URL marked visited?)
@@ -167,21 +211,26 @@ def record_page_visit(
             "recorded_at": now,
         }
 
-    # Process discovered links: resolve, normalize, filter internal, add to unvisited
+    # Process discovered links: resolve, drop low-value paths, then enqueue internal frontier
     if discovered_links:
         visited_set = set(visited)
         unvisited_set = set(unvisited)
+        resolved_list: list[str] = []
         for href in discovered_links:
             resolved = resolve_url(href, normalized)
             if resolved is None:
                 continue
+            resolved_list.append(resolved)
+        filtered_internal = filter_frontier_candidate_urls(
+            resolved_list,
+            root_url=state.root_url,
+        )
+        for resolved in filtered_internal:
             if resolved in visited_set or resolved in unvisited_set:
                 continue
-            # Internal links are added to unvisited for future crawling
-            if is_same_domain(resolved, state.root_url):
-                if len(unvisited) < _MAX_UNVISITED:
-                    unvisited.append(resolved)
-                    unvisited_set.add(resolved)
+            if len(unvisited) < _MAX_UNVISITED:
+                unvisited.append(resolved)
+                unvisited_set.add(resolved)
 
     # Trim visited list (keep most recent)
     if len(visited) > _MAX_VISITED:
@@ -210,7 +259,35 @@ def record_page_visit(
         }
     )
     repo.upsert_crawl_state(updated)
-    return updated
+    _maybe_promote_to_inspiration_phase(repo, identity_id)
+    merged = repo.get_crawl_state(identity_id)
+    return merged if merged is not None else updated
+
+
+def _maybe_promote_to_inspiration_phase(repo: "Repository", identity_id: UUID) -> None:
+    """When internal coverage is sufficient, advance phase and seed allowlisted inspiration URLs."""
+    settings = get_settings()
+    st = repo.get_crawl_state(identity_id)
+    if st is None or st.crawl_phase != "identity_grounding":
+        return
+    if not internal_coverage_ready_for_inspiration(
+        root_url=st.root_url,
+        unvisited_urls=st.unvisited_urls,
+        page_summaries=st.page_summaries,
+        min_strong_internal_pages=settings.kmbl_crawl_min_strong_internal_pages,
+    ):
+        return
+    seed_external_inspiration(repo, identity_id, urls=None)
+    fresh = repo.get_crawl_state(identity_id)
+    if fresh is None:
+        return
+    promoted = fresh.model_copy(
+        update={
+            "crawl_phase": "inspiration_expansion",
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+    repo.upsert_crawl_state(promoted)
 
 
 def get_next_urls_to_crawl(
@@ -220,13 +297,19 @@ def get_next_urls_to_crawl(
 ) -> list[str]:
     """Return the next batch of URLs to crawl from the frontier.
 
-    Prioritizes internal unvisited URLs. When internal crawl is exhausted,
-    returns external inspiration URLs that haven't been visited yet.
+    Identity grounding phase: same-domain URLs only, ranked by heuristic score.
+    Inspiration phase: remaining internal URLs first, then allowlisted external seeds.
     """
-    if state.unvisited_urls:
-        return state.unvisited_urls[:batch_size]
+    if state.crawl_phase == "identity_grounding":
+        internal = [u for u in state.unvisited_urls if is_same_domain(u, state.root_url)]
+        ranked = sort_internal_frontier(internal, root_url=state.root_url)
+        return ranked[:batch_size]
 
-    # Internal crawl exhausted — try external inspiration
+    internal = [u for u in state.unvisited_urls if is_same_domain(u, state.root_url)]
+    if internal:
+        ranked = sort_internal_frontier(internal, root_url=state.root_url)
+        return ranked[:batch_size]
+
     if state.external_inspiration_urls:
         visited_set = set(state.visited_urls)
         external = [u for u in state.external_inspiration_urls if u not in visited_set]
@@ -339,40 +422,125 @@ def build_crawl_context_for_planner(
 
     This gives the planner enough information to decide what to crawl next
     and whether to expand to external inspiration sites.
+
+    **Separation of concerns (planner-facing):**
+    - Identity *seed* truth lives in ``identity_brief`` / ``structured_identity`` (not repeated here).
+    - This payload carries **working crawl memory** only: frontier, counts, and short summaries
+      split into portfolio vs inspiration. Operational visit logs are never included.
     """
     if state is None:
         return {"crawl_available": False}
 
     next_urls = get_next_urls_to_crawl(state, batch_size=5)
-    recent_summaries: list[dict[str, Any]] = []
-    # Show the 5 most recently crawled page summaries
     all_summaries = list(state.page_summaries.items())
-    for url, data in all_summaries[-5:]:
-        recent_summaries.append({
+
+    def _item(url: str, data: dict[str, Any]) -> dict[str, Any]:
+        origin = data.get("origin")
+        if origin not in ("portfolio", "inspiration"):
+            origin = (
+                "portfolio" if is_same_domain(url, state.root_url) else "inspiration"
+            )
+        return {
             "url": url,
             "summary": data.get("summary", ""),
             "design_signals": data.get("design_signals", []),
-        })
+            "tone_keywords": data.get("tone_keywords", []),
+            "origin": origin,
+        }
+
+    portfolio_items: list[dict[str, Any]] = []
+    inspiration_items: list[dict[str, Any]] = []
+    for url, data in all_summaries:
+        item = _item(url, data)
+        if item["origin"] == "portfolio":
+            portfolio_items.append(item)
+        else:
+            inspiration_items.append(item)
+
+    # Most recent first within each bucket (page_summaries insertion order ≈ crawl order)
+    recent_portfolio = portfolio_items[-3:]
+    recent_inspiration = inspiration_items[-3:]
+
+    # Back-compat: short combined list for older prompts (capped, tagged)
+    recent_combined: list[dict[str, Any]] = (recent_portfolio + recent_inspiration)[-5:]
 
     # Detect whether any page summaries contain real fetched data
-    # (real summaries have design_signals or tone_keywords from actual HTML)
     has_real_data = any(
         bool(data.get("design_signals")) or bool(data.get("tone_keywords"))
         for data in state.page_summaries.values()
     )
 
+    has_prior = (state.total_pages_crawled or 0) > 0 or len(state.visited_urls) > 0
+
+    settings = get_settings()
+    top_identity_pages = rank_summaries_for_planner(
+        portfolio_items,
+        root_url=state.root_url,
+        origin="portfolio",
+        limit=5,
+    )
+    top_inspiration_pages: list[dict[str, Any]] = []
+    if state.crawl_phase == "inspiration_expansion":
+        top_inspiration_pages = rank_summaries_for_planner(
+            inspiration_items,
+            root_url=state.root_url,
+            origin="inspiration",
+            limit=5,
+        )
+
+    stale = False
+    days_since_site_update: int | None = None
+    if state.site_memory_updated_at:
+        try:
+            raw_ts = state.site_memory_updated_at.replace("Z", "+00:00")
+            ts = datetime.fromisoformat(raw_ts)
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            delta = datetime.now(timezone.utc) - ts
+            days_since_site_update = max(0, delta.days)
+            stale = days_since_site_update >= settings.kmbl_site_memory_stale_days
+        except Exception:
+            stale = False
+
     return {
         "crawl_available": True,
+        "crawl_phase": state.crawl_phase,
         "crawl_status": state.crawl_status,
         "root_url": state.root_url,
+        "has_site_memory": bool(state.site_key),
+        "has_reused_shared_site_crawl": state.has_reused_site_memory,
         "total_pages_crawled": state.total_pages_crawled,
         "visited_count": len(state.visited_urls),
         "unvisited_count": len(state.unvisited_urls),
         "next_urls_to_crawl": next_urls,
-        "recent_page_summaries": recent_summaries,
+        "recent_page_summaries": recent_combined,
+        "recent_portfolio_summaries": recent_portfolio,
+        "recent_inspiration_summaries": recent_inspiration,
+        "top_identity_pages": top_identity_pages,
+        "top_inspiration_pages": top_inspiration_pages,
         "external_inspiration_available": bool(state.external_inspiration_urls),
         "is_exhausted": state.crawl_status == "exhausted",
         "grounding_available": has_real_data,
+        "resume": {
+            "has_prior_crawl_memory": has_prior,
+            "frontier_internal_urls_remaining": len(
+                [u for u in state.unvisited_urls if is_same_domain(u, state.root_url)]
+            ),
+        },
+        "freshness": {
+            "site_memory_stale": stale,
+            "days_since_site_memory_update": days_since_site_update,
+            "stale_after_days": settings.kmbl_site_memory_stale_days,
+        },
+        "memory_contract": (
+            "identity_seed: use identity_brief + structured_identity for durable profile; "
+            "working_crawl: frontier + summaries below; operational visit logs are not shown here."
+        ),
+        "evidence_contract": (
+            "Identity pages (portfolio / same-domain) are truth-bearing for this brand. "
+            "Inspiration pages are reference-only and must not override identity truth. "
+            f"Current phase: {state.crawl_phase}."
+        ),
         # Planner instructions for selected_urls contract:
         "selected_urls_contract": _SELECTED_URLS_CONTRACT,
     }

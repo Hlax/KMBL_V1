@@ -175,6 +175,60 @@ class Settings(BaseSettings):
             "orchestrator_public_base_url",
         ),
     )
+    # Absolute root for on-disk generator workspaces (local builds). Empty = default under
+    # %LOCALAPPDATA%/KMBL/generator_workspaces (Windows) or temp dir/kmb_generator_workspaces.
+    kmbl_generator_workspace_root: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "KMBL_GENERATOR_WORKSPACE_ROOT",
+            "kmbl_generator_workspace_root",
+        ),
+    )
+    # Hard cap for total bytes read during workspace_manifest_v1 ingest (defense in depth).
+    kmbl_workspace_ingest_max_bytes_total: int = Field(
+        default=2_000_000,
+        ge=64_000,
+        le=50_000_000,
+        validation_alias=AliasChoices(
+            "KMBL_WORKSPACE_INGEST_MAX_BYTES_TOTAL",
+            "kmbl_workspace_ingest_max_bytes_total",
+        ),
+    )
+    # Static frontend vertical: require workspace_manifest_v1 + sandbox_ref + successful disk ingest
+    # (no silent inline-HTML fallback). Default off for legacy runs.
+    kmbl_manifest_first_static_vertical: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "KMBL_MANIFEST_FIRST_STATIC_VERTICAL",
+            "kmbl_manifest_first_static_vertical",
+        ),
+    )
+    # Optional: prune old per-run dirs under kmbl_generator_workspace_root (disabled by default).
+    kmbl_generator_workspace_retention_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "KMBL_GENERATOR_WORKSPACE_RETENTION_ENABLED",
+            "kmbl_generator_workspace_retention_enabled",
+        ),
+    )
+    # Only delete workspace dirs older than this many days (mtime). Ignored when retention disabled.
+    kmbl_generator_workspace_retention_min_age_days: float = Field(
+        default=14.0,
+        ge=0.5,
+        le=3650.0,
+        validation_alias=AliasChoices(
+            "KMBL_GENERATOR_WORKSPACE_RETENTION_MIN_AGE_DAYS",
+            "kmbl_generator_workspace_retention_min_age_days",
+        ),
+    )
+    # When true, POST /orchestrator/maintenance/prune-generator-workspaces is allowed (still needs API key if set).
+    kmbl_maintenance_prune_http_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "KMBL_MAINTENANCE_PRUNE_HTTP_ENABLED",
+            "kmbl_maintenance_prune_http_enabled",
+        ),
+    )
 
     # Local OpenClaw gateway (OpenAI-compatible). KILOCLAW_* env names remain accepted aliases.
     openclaw_base_url: str = Field(
@@ -349,6 +403,68 @@ class Settings(BaseSettings):
     allow_stub_transport: bool | None = Field(
         default=None,
         validation_alias=AliasChoices("ALLOW_STUB_TRANSPORT", "allow_stub_transport"),
+    )
+
+    # Local Playwright wrapper (``tools/playwright_wrapper``) — HTTP base URL, e.g. http://127.0.0.1:3847
+    kmbl_playwright_wrapper_url: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "KMBL_PLAYWRIGHT_WRAPPER_URL",
+            "kmbl_playwright_wrapper_url",
+        ),
+    )
+    kmbl_playwright_max_pages_per_loop: int = Field(
+        default=3,
+        ge=0,
+        le=20,
+        validation_alias=AliasChoices(
+            "KMBL_PLAYWRIGHT_MAX_PAGES_PER_LOOP",
+            "kmbl_playwright_max_pages_per_loop",
+        ),
+    )
+    kmbl_playwright_inspiration_domains: str = Field(
+        default="www.awwwards.com,www.siteinspire.com,dribbble.com",
+        validation_alias=AliasChoices(
+            "KMBL_PLAYWRIGHT_INSPIRATION_DOMAINS",
+            "kmbl_playwright_inspiration_domains",
+        ),
+    )
+    kmbl_playwright_http_timeout_sec: float = Field(
+        default=45.0,
+        ge=5.0,
+        le=300.0,
+        validation_alias=AliasChoices(
+            "KMBL_PLAYWRIGHT_HTTP_TIMEOUT_SEC",
+            "kmbl_playwright_http_timeout_sec",
+        ),
+    )
+    # 0 = never prune operational page_visit_log rows from Supabase (orchestrator-side cleanup).
+    kmbl_page_visit_log_retention_days: int = Field(
+        default=0,
+        ge=0,
+        le=3650,
+        validation_alias=AliasChoices(
+            "KMBL_PAGE_VISIT_LOG_RETENTION_DAYS",
+            "kmbl_page_visit_log_retention_days",
+        ),
+    )
+    kmbl_crawl_min_strong_internal_pages: int = Field(
+        default=2,
+        ge=1,
+        le=20,
+        validation_alias=AliasChoices(
+            "KMBL_CRAWL_MIN_STRONG_INTERNAL_PAGES",
+            "kmbl_crawl_min_strong_internal_pages",
+        ),
+    )
+    kmbl_site_memory_stale_days: int = Field(
+        default=30,
+        ge=1,
+        le=3650,
+        validation_alias=AliasChoices(
+            "KMBL_SITE_MEMORY_STALE_DAYS",
+            "kmbl_site_memory_stale_days",
+        ),
     )
 
     @model_validator(mode="after")

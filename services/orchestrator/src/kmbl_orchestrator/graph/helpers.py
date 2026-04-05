@@ -11,6 +11,7 @@ from typing import Any, Literal
 from uuid import UUID, uuid4
 
 from kmbl_orchestrator.config import Settings
+from kmbl_orchestrator.contracts.frontend_artifact_roles import is_frontend_file_artifact_role
 from kmbl_orchestrator.domain import (
     BuildCandidateRecord,
     CheckpointRecord,
@@ -44,7 +45,7 @@ def _extract_html_file_map_from_working_staging(
     for ref in refs:
         if not isinstance(ref, dict):
             continue
-        if ref.get("role") != "static_frontend_file_v1":
+        if not is_frontend_file_artifact_role(ref.get("role")):
             continue
         if ref.get("language") != "html":
             continue
@@ -98,6 +99,13 @@ def _apply_html_blocks_to_candidate(
     if not blocks:
         return cand
 
+    out_role = "static_frontend_file_v1"
+    if any(
+        isinstance(r, dict) and r.get("role") == "interactive_frontend_app_v1"
+        for r in raw_refs
+    ):
+        out_role = "interactive_frontend_app_v1"
+
     # Get the current working staging HTML for block targets
     ws = repo.get_working_staging_for_thread(tid)
     file_map = _extract_html_file_map_from_working_staging(ws)
@@ -136,7 +144,7 @@ def _apply_html_blocks_to_candidate(
                     break
 
         existing_by_path[path] = {
-            "role": "static_frontend_file_v1",
+            "role": out_role,
             "path": path,
             "language": "html",
             "content": html_content,

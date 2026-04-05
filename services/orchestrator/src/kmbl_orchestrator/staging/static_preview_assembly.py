@@ -1,8 +1,20 @@
 """
-Assemble a single HTML document for operator preview of ``static_frontend_file_v1`` artifacts.
+Assemble a single HTML document for operator preview of static / interactive frontend file artifacts.
 
 Uses only normalized rows from persisted staging ``snapshot_payload_json`` — no filesystem,
 no raw KiloClaw blobs. Entry path resolution matches :func:`derive_frontend_static_v1`.
+
+**Interactive / multi-file JS:** Sibling ``.js`` files are merged into one document by stripping
+``<script src=...>`` tags and injecting sources. Injection order is:
+
+1. Optional explicit ``kmbl_preview_assembly_hints_v1.js_path_order`` in ``working_state_patch``
+   (full ``component/...`` paths, subset of same-bundle JS).
+2. Otherwise, DOM order of ``<script src=...>`` in the entry HTML (basename match).
+3. Any remaining same-bundle JS paths, sorted by path for stability.
+
+``type="module"`` on a ``<script src=...>`` tag is preserved on the injected block for that file.
+Cross-file ``import`` between separate artifact JS files is **not** resolved — prefer a single
+bundled script or a CDN for complex module graphs.
 """
 
 from __future__ import annotations
@@ -10,6 +22,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from kmbl_orchestrator.contracts.frontend_artifact_roles import is_frontend_file_artifact_role
 from kmbl_orchestrator.staging.build_snapshot import derive_frontend_static_v1
 
 # Stable machine-readable reasons for HTTP 404 JSON bodies
@@ -20,6 +33,76 @@ BUNDLE_NOT_FOUND = "bundle_not_found"
 BUNDLE_NO_ENTRY = "bundle_has_no_entry"
 ENTRY_NOT_HTML = "entry_not_html"
 ENTRY_CONTENT_MISSING = "entry_content_missing"
+
+_SCRIPT_OPEN_RE = re.compile(r"<script\b([^>]*)>", re.IGNORECASE | re.DOTALL)
+
+
+def _basename_from_url(src: str) -> str:
+    s = src.strip().split("#", 1)[0].split("?", 1)[0]
+    return s.rsplit("/", 1)[-1].lower() if s else ""
+
+
+def _hints_js_path_order(wsp: dict[str, Any]) -> list[str]:
+    h = wsp.get("kmbl_preview_assembly_hints_v1")
+    if not isinstance(h, dict):
+        return []
+    raw = h.get("js_path_order")
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    for x in raw:
+        if isinstance(x, str) and x.strip():
+            out.append(x.strip().replace("\\", "/"))
+    return out
+
+
+def _dom_js_order_and_module_flags(
+    entry_html: str,
+    js_paths: list[str],
+) -> tuple[list[str], dict[str, bool]]:
+    """Order ``js_paths`` by first matching ``<script src=`` in entry HTML; module flag per path."""
+    path_by_base: dict[str, str] = {}
+    for p in js_paths:
+        path_by_base[p.rsplit("/", 1)[-1].lower()] = p
+
+    bases_order: list[str] = []
+    mod_by_base: dict[str, bool] = {}
+    for m in _SCRIPT_OPEN_RE.finditer(entry_html):
+        tag_inner = m.group(1)
+        src_m = re.search(r"\bsrc\s*=\s*[\"']([^\"']+)[\"']", tag_inner, re.I)
+        if not src_m:
+            continue
+        base = _basename_from_url(src_m.group(1))
+        full = path_by_base.get(base)
+        if not full:
+            continue
+        if base not in bases_order:
+            bases_order.append(base)
+        is_mod = bool(re.search(r"type\s*=\s*[\"']?\s*module", tag_inner, re.I))
+        mod_by_base[base] = mod_by_base.get(base, False) or is_mod
+
+    ordered_paths = [path_by_base[b] for b in bases_order]
+    mod_by_path: dict[str, bool] = {}
+    for p in js_paths:
+        b = p.rsplit("/", 1)[-1].lower()
+        mod_by_path[p] = mod_by_base.get(b, False)
+    return ordered_paths, mod_by_path
+
+
+def _merge_js_path_order(
+    js_paths: list[str],
+    explicit: list[str],
+    dom_paths: list[str],
+) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for p in explicit + dom_paths:
+        if p in js_paths and p not in seen:
+            out.append(p)
+            seen.add(p)
+    for p in sorted(set(js_paths) - seen):
+        out.append(p)
+    return out
 
 
 def _artifact_refs_from_payload(payload: dict[str, Any]) -> list[Any]:
@@ -40,11 +123,11 @@ def _working_state_patch_from_payload(payload: dict[str, Any]) -> dict[str, Any]
 
 def static_file_map_from_payload(payload: dict[str, Any]) -> dict[str, str]:
     """
-    ``path`` -> ``content`` for ``static_frontend_file_v1`` rows only (validated shape).
+    ``path`` -> ``content`` for static / interactive frontend file rows (validated shape).
     """
     out: dict[str, str] = {}
     for a in _artifact_refs_from_payload(payload):
-        if not isinstance(a, dict) or a.get("role") != "static_frontend_file_v1":
+        if not isinstance(a, dict) or not is_frontend_file_artifact_role(a.get("role")):
             continue
         path = a.get("path")
         content = a.get("content")
@@ -63,10 +146,10 @@ def static_file_map_from_payload(payload: dict[str, Any]) -> dict[str, str]:
 
 
 def static_artifact_meta_by_path(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    """path -> raw artifact dict for static_frontend_file_v1 rows."""
+    """path -> raw artifact dict for static / interactive frontend file rows."""
     out: dict[str, dict[str, Any]] = {}
     for a in _artifact_refs_from_payload(payload):
-        if not isinstance(a, dict) or a.get("role") != "static_frontend_file_v1":
+        if not isinstance(a, dict) or not is_frontend_file_artifact_role(a.get("role")):
             continue
         path = a.get("path")
         if isinstance(path, str) and path.strip():
@@ -113,17 +196,24 @@ def resolve_static_preview_entry_path(
     return None, NO_PREVIEW_ENTRY
 
 
-def _inject_css_and_js(html: str, css_chunks: list[str], js_chunks: list[str]) -> str:
+def _inject_css_and_js(
+    html: str,
+    css_chunks: list[str],
+    js_chunks: list[tuple[str, bool]],
+) -> str:
+    """``js_chunks`` items are ``(content, use_module_type)`` — module flag from entry HTML."""
     style_tags = "".join(
         f'<style type="text/css" data-kmbl-injected="true">\n{c}\n</style>\n'
         for c in css_chunks
         if c.strip()
     )
-    script_tags = "".join(
-        f'<script data-kmbl-injected="true">\n{c}\n</script>\n'
-        for c in js_chunks
-        if c.strip()
-    )
+    script_parts: list[str] = []
+    for c, is_module in js_chunks:
+        if not c.strip():
+            continue
+        mod = ' type="module"' if is_module else ""
+        script_parts.append(f"<script{mod} data-kmbl-injected=\"true\">\n{c}\n</script>\n")
+    script_tags = "".join(script_parts)
     if style_tags:
         low = html.lower()
         if "</head>" in low:
@@ -163,6 +253,7 @@ def assemble_static_preview_html(
     entry_html = files[ep]
     bid = entry_art.get("bundle_id")
     bundle_key: str | None = bid if isinstance(bid, str) else None
+    wsp = _working_state_patch_from_payload(payload)
 
     def same_bundle(p: str) -> bool:
         a = meta_by_path.get(p) or {}
@@ -171,7 +262,6 @@ def assemble_static_preview_html(
         return other == bundle_key
 
     css_chunks: list[str] = []
-    js_chunks: list[str] = []
     for path in sorted(files.keys()):
         if path == ep:
             continue
@@ -180,8 +270,21 @@ def assemble_static_preview_html(
         lang = (meta_by_path.get(path) or {}).get("language")
         if lang == "css":
             css_chunks.append(f"/* {path} */\n{files[path]}")
-        elif lang == "js":
-            js_chunks.append(f"/* {path} */\n{files[path]}")
+
+    js_only_paths = [
+        p
+        for p in files
+        if p != ep
+        and same_bundle(p)
+        and (meta_by_path.get(p) or {}).get("language") == "js"
+    ]
+    explicit = _hints_js_path_order(wsp)
+    dom_paths, mod_by_path = _dom_js_order_and_module_flags(entry_html, js_only_paths)
+    merged_js = _merge_js_path_order(js_only_paths, explicit, dom_paths)
+    js_chunks: list[tuple[str, bool]] = [
+        (f"/* {path} */\n{files[path]}", bool(mod_by_path.get(path, False)))
+        for path in merged_js
+    ]
 
     # Strip same-bundle link/script tags that point to known artifact paths (avoid double load)
     cleaned = entry_html

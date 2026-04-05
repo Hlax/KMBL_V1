@@ -13,6 +13,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from kmbl_orchestrator.contracts.frontend_artifact_roles import is_frontend_file_artifact_role
+
 _KEY_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$")
 _PATH_RE = re.compile(
     r"^component/(?:[a-zA-Z0-9][a-zA-Z0-9_-]*/)*[a-zA-Z0-9][a-zA-Z0-9_-]*\.html$"
@@ -65,7 +67,7 @@ def normalize_static_frontend_preview_in_patch(
 ) -> dict[str, Any]:
     """
     Validate ``static_frontend_preview_v1`` if present and ensure ``entry_path`` exists
-    on a ``static_frontend_file_v1`` artifact (and ``bundle_id`` matches when set).
+    on a static or interactive frontend file artifact (and ``bundle_id`` matches when set).
     """
     raw = patch.get("static_frontend_preview_v1")
     if raw is None:
@@ -78,7 +80,7 @@ def normalize_static_frontend_preview_in_patch(
     for a in normalized_artifacts:
         if not isinstance(a, dict):
             continue
-        if a.get("role") != "static_frontend_file_v1":
+        if not is_frontend_file_artifact_role(a.get("role")):
             continue
         p = a.get("path")
         if isinstance(p, str) and p.strip():
@@ -87,7 +89,7 @@ def normalize_static_frontend_preview_in_patch(
     ep = model.entry_path
     if ep not in by_path:
         raise ValueError(
-            f"static_frontend_preview_v1 entry_path {ep!r} has no matching static_frontend_file_v1"
+            f"static_frontend_preview_v1 entry_path {ep!r} has no matching frontend file artifact"
         )
     art = by_path[ep]
     if str(art.get("language")) != "html":

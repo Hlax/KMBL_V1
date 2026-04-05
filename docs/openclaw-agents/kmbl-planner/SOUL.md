@@ -23,7 +23,7 @@ Put **explicit, generator-usable** controls in **`constraints.variation_levers`*
 | **section_rhythm** | Section order label | `hero_proof_story_cta`, `minimal_single_surface` |
 | **cta_style** | CTA shape | `understated`, `primary_button`, `text_link` |
 | **motion_appetite** | Motion budget | `none`, `low`, `medium` |
-| **surface_bias** | Delivery shape | `static_bundle`, `habitat_manifest`, `composable_ui` |
+| **surface_bias** | Delivery shape | `static_bundle`, `interactive_bundle`, `habitat_manifest`, `composable_ui` |
 
 The **generator** must be able to implement these **without guessing**. If you use a creative phrase in **`design_direction`**, mirror it with a **matching** `variation_levers` entry.
 
@@ -53,7 +53,7 @@ If **`user_interrupts`** present: merge into **`design_direction`** / **`constra
 | Key | Content |
 |-----|---------|
 | **build_spec** | **title**, **type**, **steps**, archetype, optional design fields, optional **habitat_strategy**; optionally **`creative_brief`**, **`execution_contract`**, **`literal_success_checks`**. |
-| **constraints** | Scope caps, **variation_levers**, **canonical_vertical** when static (`static_frontend_file_v1`) or habitat (`habitat_manifest_v2`). |
+| **constraints** | Scope caps, **variation_levers**, **canonical_vertical** when static (`static_frontend_file_v1`), interactive bundle (`interactive_frontend_app_v1`), or habitat (`habitat_manifest_v2`). |
 | **success_criteria** | 2–4 **testable** strings where possible. |
 | **evaluation_targets** | Checklist items **`kmbl-evaluator`** can verify (selectors, text_present, artifact roles). |
 
@@ -72,7 +72,9 @@ Split **taste** from **enforceable execution** inside **`build_spec`**:
 
 **Literal enforcement:** Set **`build_spec.literal_success_checks`** to an array of **substrings** (or `{"needle": "..."}` objects) that **must** appear in the generated static files — e.g. a real **`https://...` image URL** from identity, a **`data-kmbl-*` marker**, or a **font family** you require. The orchestrator verifies these against artifact text; weak or generic pages cannot pass if needles are missing.
 
-**Ambition:** If you set **`experience_mode`** to `webgl_3d_portfolio` / **`immersive_spatial_portfolio`**, the generator must ship real Three/WebGL tokens **or** document a structured downgrade (see kmbl-generator SOUL). Do not rely on vague success criteria alone.
+**Interactive bundle (`interactive_frontend_app_v1`):** Use when the user wants **one previewable interactive surface** (tools, demos, modest canvas/Three.js, motion, stateful UI) **without** multi-page habitat scaffolding. Set **`build_spec.type`**: **`interactive_frontend_app_v1`** and **`constraints.canonical_vertical`**: **`interactive_frontend_app_v1`** (or **`constraints.kmbl_interactive_frontend_vertical`**: **`true`**). In **`execution_contract`**, name **`required_interactions`** (e.g. toggle, scrubber, cursor trail) and **`allowed_libraries`** (e.g. `three`, `gsap`) — keep scope **bounded**; **cross-file ES module app graphs** are a poor fit for the current preview pipeline (prefer classic scripts + CDN). Reserve **habitat_manifest_v2** for **multi-page** / framework-first sites; reserve **future heavy WebGL product lanes** for immersive experiences that need asset pipelines beyond this bundle.
+
+**Ambition:** If you set **`experience_mode`** to `webgl_3d_portfolio` / **`immersive_spatial_portfolio`**, the generator must ship real Three/WebGL tokens **or** document a structured downgrade (see kmbl-generator SOUL). Do not rely on vague success criteria alone. On **`interactive_frontend_app_v1`**, that same mode implies **visible** 3D/interaction — not a static hero with a 3D keyword in the title only.
 
 **Cool generation lane (`cool_generation_v1`):** Set **`build_spec.execution_contract.lane`** to **`cool_generation_v1`** *or* rely on **`event_input.cool_generation_lane`: `true`** — the orchestrator merges default **selected_reference_patterns**, **pattern_rules**, and **literal_success_checks** (including the first **`identity_brief.image_refs`** URL when available). Each chosen **`selected_reference_patterns`** label becomes a **stable grep token** in literals (`kmbl-pattern-…`) so pattern choice is not only prose. You may still override or extend **`pattern_rules`** and **`literal_success_checks`** before persistence.
 

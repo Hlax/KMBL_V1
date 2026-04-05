@@ -62,6 +62,8 @@ class GeneratorRoleOutput(BaseModel):
     artifact_outputs: Any | None = None
     sandbox_ref: str | None = None
     preview_url: str | None = None
+    # Local-build lane: orchestrator expands files into artifact_outputs before normalize.
+    workspace_manifest_v1: dict[str, Any] | None = None
     # Machine-readable failure when the model cannot produce artifacts (no prose fallback).
     # When present with non-empty ``code`` and ``message``, primary fields may be empty.
     contract_failure: dict[str, Any] | None = None
@@ -81,11 +83,20 @@ class GeneratorRoleOutput(BaseModel):
         has_proposed = _is_non_empty(self.proposed_changes)
         has_state = _is_non_empty(self.updated_state)
         has_artifacts = _is_non_empty(self.artifact_outputs)
+        wm = self.workspace_manifest_v1
+        has_workspace_manifest = (
+            isinstance(wm, dict)
+            and isinstance(wm.get("files"), list)
+            and len(wm["files"]) > 0
+            and isinstance(self.sandbox_ref, str)
+            and self.sandbox_ref.strip()
+        )
 
-        if not (has_proposed or has_state or has_artifacts):
+        if not (has_proposed or has_state or has_artifacts or has_workspace_manifest):
             raise ValueError(
                 "generator output must include at least one non-empty field: "
-                "proposed_changes, updated_state, or artifact_outputs "
+                "proposed_changes, updated_state, artifact_outputs, "
+                "or workspace_manifest_v1 with files and sandbox_ref "
                 "(empty dict/list or list of empty dicts not accepted), "
                 "or contract_failure with string code and message"
             )

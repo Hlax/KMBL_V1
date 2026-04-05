@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any, Literal, TypeAlias
+
+CrawlPhase: TypeAlias = Literal["identity_grounding", "inspiration_expansion"]
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -432,11 +434,60 @@ class AutonomousLoopRecord(BaseModel):
     best_rating: int | None = None
 
 
+class PageVisitLogRecord(BaseModel):
+    """Append-only row: one browser visit via the local Playwright wrapper (Supabase ``page_visit_log``)."""
+
+    page_visit_id: UUID | None = None
+    identity_id: UUID
+    thread_id: UUID | None = None
+    run_id: str = ""
+    graph_run_id: UUID | None = None
+    role_invocation_id: UUID | None = None
+    requested_url: str
+    resolved_url: str | None = None
+    source_kind: str = "portfolio_internal"
+    status: str = "pending"
+    http_status: int | None = None
+    page_title: str | None = None
+    meta_description: str | None = None
+    summary: str | None = None
+    discovered_links: list[str] = Field(default_factory=list)
+    same_domain_links: list[str] = Field(default_factory=list)
+    traits_json: dict[str, Any] = Field(default_factory=dict)
+    evidence_source: str = "playwright_wrapper"
+    timing_ms: int | None = None
+    error: str | None = None
+    snapshot_path: str | None = None
+    created_at: str = Field(default_factory=_utc_now_iso)
+
+
+class SiteCrawlStateRecord(BaseModel):
+    """Shared crawl frontier + summaries for a canonical site (``site_key``)."""
+
+    site_key: str
+    root_url: str
+    visited_urls: list[str] = Field(default_factory=list)
+    unvisited_urls: list[str] = Field(default_factory=list)
+    page_summaries: dict[str, Any] = Field(default_factory=dict)
+    visit_provenance: dict[str, Any] = Field(default_factory=dict)
+    crawl_status: Literal["in_progress", "exhausted"] = "in_progress"
+    external_inspiration_urls: list[str] = Field(default_factory=list)
+    total_pages_crawled: int = 0
+    last_crawled_at: str | None = None
+    site_memory_updated_at: str = Field(default_factory=_utc_now_iso)
+    created_at: str = Field(default_factory=_utc_now_iso)
+    updated_at: str = Field(default_factory=_utc_now_iso)
+
+
 class CrawlStateRecord(BaseModel):
     """Durable crawl state for an identity — tracks visited/unvisited URLs + page signals across sessions."""
 
     identity_id: UUID
     root_url: str
+    site_key: str | None = None
+    crawl_phase: CrawlPhase = "identity_grounding"
+    has_reused_site_memory: bool = False
+    site_memory_updated_at: str | None = None
     visited_urls: list[str] = Field(default_factory=list)
     unvisited_urls: list[str] = Field(default_factory=list)
     page_summaries: dict[str, Any] = Field(

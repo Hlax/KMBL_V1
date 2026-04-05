@@ -18,6 +18,7 @@ from kmbl_orchestrator.domain import (
     BuildSpecRecord,
     CheckpointRecord,
     CrawlStateRecord,
+    SiteCrawlStateRecord,
     EvaluationReportRecord,
     GraphRunEventRecord,
     GraphRunRecord,
@@ -411,8 +412,37 @@ def _row_to_crawl_state(row: dict[str, Any]) -> CrawlStateRecord:
     ps = row.get("page_summaries")
     vp = row.get("visit_provenance")
     ei = row.get("external_inspiration_urls")
+    sk = row.get("site_key")
+    cp = row.get("crawl_phase") or "identity_grounding"
+    hrs = row.get("has_reused_site_memory")
     return CrawlStateRecord(
         identity_id=UUID(row["identity_id"]),
+        root_url=str(row["root_url"]),
+        site_key=str(sk) if sk else None,
+        crawl_phase=cp if cp in ("identity_grounding", "inspiration_expansion") else "identity_grounding",
+        has_reused_site_memory=bool(hrs) if hrs is not None else False,
+        site_memory_updated_at=None,
+        visited_urls=list(vu) if isinstance(vu, list) else [],
+        unvisited_urls=list(uu) if isinstance(uu, list) else [],
+        page_summaries=dict(ps) if isinstance(ps, dict) else {},
+        visit_provenance=dict(vp) if isinstance(vp, dict) else {},
+        crawl_status=str(row.get("crawl_status", "in_progress")),  # type: ignore[arg-type]
+        external_inspiration_urls=list(ei) if isinstance(ei, list) else [],
+        total_pages_crawled=int(row.get("total_pages_crawled", 0)),
+        last_crawled_at=_ts_to_iso(row.get("last_crawled_at")),
+        created_at=_ts_to_iso(row.get("created_at")) or "",
+        updated_at=_ts_to_iso(row.get("updated_at")) or "",
+    )
+
+
+def _row_to_site_crawl_state(row: dict[str, Any]) -> SiteCrawlStateRecord:
+    vu = row.get("visited_urls")
+    uu = row.get("unvisited_urls")
+    ps = row.get("page_summaries")
+    vp = row.get("visit_provenance")
+    ei = row.get("external_inspiration_urls")
+    return SiteCrawlStateRecord(
+        site_key=str(row["site_key"]),
         root_url=str(row["root_url"]),
         visited_urls=list(vu) if isinstance(vu, list) else [],
         unvisited_urls=list(uu) if isinstance(uu, list) else [],
@@ -422,6 +452,7 @@ def _row_to_crawl_state(row: dict[str, Any]) -> CrawlStateRecord:
         external_inspiration_urls=list(ei) if isinstance(ei, list) else [],
         total_pages_crawled=int(row.get("total_pages_crawled", 0)),
         last_crawled_at=_ts_to_iso(row.get("last_crawled_at")),
+        site_memory_updated_at=_ts_to_iso(row.get("site_memory_updated_at")) or "",
         created_at=_ts_to_iso(row.get("created_at")) or "",
         updated_at=_ts_to_iso(row.get("updated_at")) or "",
     )

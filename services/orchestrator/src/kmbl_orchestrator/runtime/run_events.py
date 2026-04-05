@@ -25,6 +25,7 @@ class RunEventType:
     PLANNER_INVOCATION_COMPLETED = "planner_invocation_completed"
     PLANNER_WIRE_CANONICALIZED = "planner_wire_canonicalized"
     STATIC_VERTICAL_EXPERIENCE_MODE_CLAMPED = "static_vertical_experience_mode_clamped"
+    INTERACTIVE_BUILD_SPEC_NORMALIZED = "interactive_build_spec_normalized"
     GENERATOR_INVOCATION_STARTED = "generator_invocation_started"
     GENERATOR_INVOCATION_COMPLETED = "generator_invocation_completed"
     GENERATOR_STATIC_BUNDLE_REJECTED = "generator_static_bundle_rejected"
@@ -84,6 +85,19 @@ class RunEventType:
     # Crawl frontier observability
     CRAWL_FRONTIER_ADVANCED = "crawl_frontier_advanced"
     PLANNER_CRAWL_COMPLIANCE = "planner_crawl_compliance"
+
+    # Habitat session / working surface
+    HABITAT_SURFACE_CLEARED = "habitat_surface_cleared"
+    HABITAT_STRATEGY_ENFORCED = "habitat_strategy_enforced"
+
+    # Local workspace ingest (workspace_manifest_v1 + sandbox_ref → artifact_outputs)
+    WORKSPACE_INGEST_STARTED = "workspace_ingest_started"
+    WORKSPACE_INGEST_COMPLETED = "workspace_ingest_completed"
+    WORKSPACE_INGEST_FAILED = "workspace_ingest_failed"
+    WORKSPACE_INGEST_NOT_ATTEMPTED = "workspace_ingest_not_attempted"
+    WORKSPACE_INGEST_SKIPPED_INLINE_HTML = "workspace_ingest_skipped_inline_html"
+    MANIFEST_FIRST_VIOLATION = "manifest_first_violation"
+    EVALUATOR_GROUNDING_UNAVAILABLE = "evaluator_grounding_unavailable"
 
 
 def append_graph_run_event(

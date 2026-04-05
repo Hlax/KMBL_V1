@@ -27,7 +27,11 @@ def normalize_url(url: str) -> str:
     - Strip known tracking query params (utm_*, fbclid, gclid, etc.).
     - Collapse consecutive slashes in path.
     """
-    parsed = urlparse(url.strip())
+    raw = url.strip()
+    # Odd forms like "://example.com/path" (missing scheme name)
+    if raw.startswith("://"):
+        raw = "https" + raw
+    parsed = urlparse(raw)
     scheme = (parsed.scheme or "https").lower()
     host = (parsed.hostname or "").lower()
 

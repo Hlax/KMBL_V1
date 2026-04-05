@@ -13,6 +13,7 @@ function isHttpUrl(s: string): boolean {
 export function artifactRoleDisplayLabel(role: string): string {
   if (role === "gallery_strip_image_v1") return "Gallery image";
   if (role === "static_frontend_file_v1") return "Static front-end file";
+  if (role === "interactive_frontend_app_v1") return "Interactive front-end app";
   return role;
 }
 

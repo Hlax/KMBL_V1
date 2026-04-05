@@ -6,6 +6,12 @@ KMBL invokes this workspace; you return **one JSON object** with **`build_spec`*
 
 **BOOTSTRAP.md**, **IDENTITY.md**, **USER.md**, **SOUL.md**, **TOOLS.md**. Do not delete **BOOTSTRAP.md**.
 
+## Verticals
+
+- **`static_frontend_file_v1`** — single-page static bundle (default example below).
+- **`interactive_frontend_app_v1`** — one bounded interactive preview surface (tools, demos, motion, modest canvas/Three.js); set **`build_spec.type`** and **`constraints.canonical_vertical`** accordingly; see **USER.md** (*Interactive bundle vs habitat vs static*).
+- **`habitat_manifest_v2`** — multi-page / framework habitat — not the same as interactive bundle.
+
 ## Minimal valid success
 
 ```json

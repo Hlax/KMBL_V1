@@ -496,3 +496,20 @@ class TestSurfaceType:
 
         inp = GeneratorRoleInput(thread_id="t1", build_spec={})
         assert inp.surface_type == "static_html"
+
+    def test_kmbl_habitat_runtime_accepted_by_validate_role_input(self):
+        from kmbl_orchestrator.contracts.role_inputs import validate_role_input
+
+        out = validate_role_input(
+            "generator",
+            {
+                "thread_id": "t1",
+                "build_spec": {},
+                "kmbl_habitat_runtime": {
+                    "effective_strategy": "fresh_start",
+                    "suppress_prior_working_surface": True,
+                },
+            },
+        )
+        assert out["kmbl_habitat_runtime"]["effective_strategy"] == "fresh_start"
+        assert out["kmbl_habitat_runtime"]["suppress_prior_working_surface"] is True

@@ -14,7 +14,7 @@ from urllib.parse import urlencode
 from uuid import UUID
 
 from fastapi import BackgroundTasks, Body, Depends, FastAPI, HTTPException, Query
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel  # noqa: F401 — kept for backward compat (tests may import)
 
 from kmbl_orchestrator.api.middleware_api_key import optional_api_key_middleware
@@ -79,6 +79,11 @@ from kmbl_orchestrator.runtime.session_staging_links import (
     merge_session_staging_into_event_input,
 )
 from kmbl_orchestrator.runtime.stale_run import reconcile_stale_running_graph_run
+from kmbl_orchestrator.staging.candidate_preview import preview_payload_from_build_candidate
+from kmbl_orchestrator.staging.static_preview_assembly import (
+    assemble_static_preview_html,
+    resolve_static_preview_entry_path,
+)
 from kmbl_orchestrator.identity import (
     extract_identity_from_url,
     persist_identity_from_seed,
@@ -120,11 +125,13 @@ app.middleware("http")(optional_api_key_middleware)
 # Register extracted route modules
 from kmbl_orchestrator.api.loops import router as _loops_router  # noqa: E402
 from kmbl_orchestrator.api.routes_identity import router as _identity_router  # noqa: E402
+from kmbl_orchestrator.api.routes_maintenance import router as _maintenance_router  # noqa: E402
 from kmbl_orchestrator.api.routes_publication import router as _publication_router  # noqa: E402
 from kmbl_orchestrator.api.routes_staging import router as _staging_router  # noqa: E402
 from kmbl_orchestrator.api.routes_working_staging import router as _ws_router  # noqa: E402
 app.include_router(_loops_router)
 app.include_router(_identity_router)
+app.include_router(_maintenance_router)
 app.include_router(_publication_router)
 app.include_router(_staging_router)
 app.include_router(_ws_router)
@@ -582,12 +589,30 @@ async def start_run(
         body.identity_url
         and body.identity_id is not None
         and body.thread_id is not None
+        and body.habitat_session != "fresh"
     )
     if body.identity_url and continuation:
         identity_id_str = str(body.identity_id)
         _log.info(
             "run_start stage=identity_url_reuse thread_id=%s identity_id=%s url=%s (skip extract)",
             body.thread_id,
+            identity_id_str,
+            body.identity_url,
+        )
+        try:
+            prof = repo.get_identity_profile(UUID(identity_id_str))
+            if prof and prof.profile_summary:
+                identity_seed_summary = prof.profile_summary
+        except Exception:
+            pass
+    elif (
+        body.identity_url
+        and body.identity_id is not None
+        and body.habitat_session == "fresh"
+    ):
+        identity_id_str = str(body.identity_id)
+        _log.info(
+            "run_start stage=identity_reuse_new_habitat identity_id=%s url=%s (new thread, same identity)",
             identity_id_str,
             body.identity_url,
         )
@@ -619,6 +644,12 @@ async def start_run(
     effective_event_input, preset_applied = _resolve_start_event_input(
         body, identity_seed_summary=identity_seed_summary
     )
+    effective_event_input = {
+        **effective_event_input,
+        "kmbl_habitat_session": (
+            "fresh" if body.habitat_session == "fresh" else "continue"
+        ),
+    }
     if body.user_instructions and str(body.user_instructions).strip():
         effective_event_input = {
             **effective_event_input,
@@ -628,7 +659,7 @@ async def start_run(
         "run_start stage=event_input_resolved elapsed_ms=%.1f",
         (time.perf_counter() - t_req) * 1000,
     )
-    if body.thread_id is not None:
+    if body.thread_id is not None and body.habitat_session != "fresh":
         tid_u = UUID(str(body.thread_id))
         try:
             active = await asyncio.to_thread(
@@ -675,7 +706,11 @@ async def start_run(
     timeout_sec = float(settings.orchestrator_run_start_sync_timeout_sec or 0.0)
     persist_kw: dict[str, Any] = {
         "repo": repo,
-        "thread_id": str(body.thread_id) if body.thread_id is not None else None,
+        "thread_id": (
+            None
+            if body.habitat_session == "fresh"
+            else (str(body.thread_id) if body.thread_id is not None else None)
+        ),
         "graph_run_id": None,
         "identity_id": identity_id_str,
         "trigger_type": body.trigger_type,
@@ -1028,6 +1063,70 @@ def graph_run_session_staging_preview_redirect(
     if q:
         target += "?" + urlencode(q)
     return RedirectResponse(url=target, status_code=307)
+
+
+@app.get("/orchestrator/runs/{graph_run_id}/candidate-preview")
+def graph_run_candidate_preview(
+    graph_run_id: str,
+    bundle_id: str | None = Query(None),
+    repo: Repository = Depends(get_repo),
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    """
+    Serve assembled HTML from the **latest** persisted ``build_candidate`` for this graph run.
+
+    Use for evaluator / MCP / Playwright during iterate loops: ``working_staging`` preview may
+    lag until ``staging_node`` runs; this URL tracks the most recent generator output for the run.
+    """
+    try:
+        gid = UUID(graph_run_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="invalid graph_run_id") from e
+    gr = repo.get_graph_run(gid)
+    if gr is None:
+        raise HTTPException(status_code=404, detail="graph_run not found")
+    reconcile_stale_running_graph_run(repo, settings, gid)
+    gr = repo.get_graph_run(gid)
+    if gr is None:
+        raise HTTPException(status_code=404, detail="graph_run not found")
+
+    bc = repo.get_latest_build_candidate_for_graph_run(gid)
+    if bc is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_kind": "candidate_preview_unavailable", "reason": "no_build_candidate"},
+        )
+    p = preview_payload_from_build_candidate(bc)
+    entry, err = resolve_static_preview_entry_path(p, bundle_id=bundle_id)
+    if err or not entry:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error_kind": "candidate_preview_unavailable",
+                "reason": err or "unknown",
+            },
+        )
+    html, aerr = assemble_static_preview_html(p, entry_path=entry)
+    if aerr or not html:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error_kind": "candidate_preview_unavailable",
+                "reason": aerr or "unknown",
+            },
+        )
+    return Response(
+        content=html.encode("utf-8"),
+        media_type="text/html; charset=utf-8",
+        headers={
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": (
+                "default-src 'none'; img-src data: https:; font-src data:; "
+                "style-src 'unsafe-inline'; script-src 'unsafe-inline'"
+            ),
+            "Cache-Control": "private, no-store",
+        },
+    )
 
 
 @app.get("/orchestrator/runs/{graph_run_id}/detail", response_model=GraphRunDetailResponse)

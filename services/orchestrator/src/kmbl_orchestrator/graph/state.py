@@ -65,3 +65,7 @@ class GraphState(TypedDict, total=False):
 
     staging_snapshot_id: str | None
     working_staging_id: str | None
+
+    # Orchestrator habitat session (fresh surface vs continue); set by planner_node
+    habitat_prior_static_fingerprint: str | None
+    orchestrator_habitat_strategy_effective: str | None

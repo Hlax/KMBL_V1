@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 from uuid import UUID, uuid4
 
+from kmbl_orchestrator.contracts.frontend_artifact_roles import is_frontend_file_artifact_role
 from kmbl_orchestrator.domain import (
     BuildCandidateRecord,
     BuildSpecRecord,
@@ -582,7 +583,7 @@ def _payload_has_previewable_html(payload: dict[str, Any]) -> bool:
         for ref in refs:
             if not isinstance(ref, dict):
                 continue
-            if ref.get("role") == "static_frontend_file_v1" and ref.get("language") == "html":
+            if is_frontend_file_artifact_role(ref.get("role")) and ref.get("language") == "html":
                 return True
 
     return False

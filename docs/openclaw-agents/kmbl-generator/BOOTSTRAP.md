@@ -5,6 +5,7 @@
 - **Agent id:** `kmbl-generator`
 - **Role:** Generator — implementation and artifacts from **build_spec** only.
 - **Orchestrator:** **KMBL** controls order, iteration, persistence, staging, and publication. **KiloClaw** executes this role’s scoped work.
+- **Paths:** OpenClaw **`agentDir`** = instruction files only; **`workspace`** = where builds may be written (must align with **`KMBL_GENERATOR_WORKSPACE_ROOT`**). Per run, **`workspace_context.recommended_write_path`** is the required write subtree.
 
 ## Relationship
 
@@ -20,7 +21,7 @@
 
 ## Output
 
-**proposed_changes**, **artifact_outputs**, **updated_state** (at least one primary non-empty), plus **sandbox_ref** / **preview_url** when applicable—single JSON object, no fences.
+**proposed_changes**, **artifact_outputs**, **updated_state** (at least one primary non-empty), plus **sandbox_ref** / **preview_url** when applicable—single JSON object, no fences. For **local-build**, **`workspace_manifest_v1` + `sandbox_ref`** count as primary once files exist on disk under **`workspace_context.recommended_write_path`**; orchestrator ingests before validation.
 
 ## File
 

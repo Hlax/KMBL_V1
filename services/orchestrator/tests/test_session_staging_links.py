@@ -19,9 +19,11 @@ def test_build_paths_and_optional_urls() -> None:
     assert d["graph_run_id"] == "g1"
     assert d["thread_id"] == "t1"
     assert d["orchestrator_staging_preview_path"] == "/orchestrator/runs/g1/staging-preview"
+    assert d["orchestrator_candidate_preview_path"] == "/orchestrator/runs/g1/candidate-preview"
     assert d["orchestrator_working_staging_json_path"] == "/orchestrator/working-staging/t1"
     assert d["control_plane_staging_preview_path"] == "/api/runs/g1/staging-preview"
     assert d["control_plane_live_habitat_path"] == "/habitat/live/t1"
+    assert d["orchestrator_candidate_preview_url"] == "http://127.0.0.1:8010/orchestrator/runs/g1/candidate-preview"
     assert d["orchestrator_staging_preview_url"] == "http://127.0.0.1:8010/orchestrator/runs/g1/staging-preview"
 
 

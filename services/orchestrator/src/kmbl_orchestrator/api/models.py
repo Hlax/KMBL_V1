@@ -93,6 +93,15 @@ class StartRunBody(BaseModel):
             "(orchestrator settings; default 10)."
         ),
     )
+    habitat_session: Literal["continue", "fresh"] = Field(
+        default="continue",
+        description=(
+            "continue: reuse thread_id + working staging when identity_url + identity_id + thread_id "
+            "are sent together. fresh: start a new thread (new live habitat surface) while reusing "
+            "the same identity_id when provided — site/crawl memory remains identity-scoped. "
+            "Ignores body.thread_id when set to fresh."
+        ),
+    )
 
 
 class SessionStagingLinks(BaseModel):
@@ -101,11 +110,13 @@ class SessionStagingLinks(BaseModel):
     graph_run_id: str
     thread_id: str
     orchestrator_staging_preview_path: str
+    orchestrator_candidate_preview_path: str
     orchestrator_working_staging_json_path: str
     control_plane_staging_preview_path: str
     control_plane_live_habitat_path: str
     note: str
     orchestrator_staging_preview_url: str | None = None
+    orchestrator_candidate_preview_url: str | None = None
     orchestrator_working_staging_json_url: str | None = None
 
 
@@ -314,6 +325,13 @@ class GraphRunSummaryBlock(BaseModel):
         description=(
             "True when a working_staging row exists for summary.thread_id "
             "(required for GET …/working-staging/{thread_id}/live / live habitat)."
+        ),
+    )
+    run_observability: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Manifest-first / workspace-ingest / evaluator-grounding event counts (by event_type) "
+            "and last_evaluator_preview_resolution from persisted evaluator input_payload_json."
         ),
     )
 

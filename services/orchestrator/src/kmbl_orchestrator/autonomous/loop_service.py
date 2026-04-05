@@ -473,6 +473,39 @@ async def _tick_idle(
 # Crawl feedback helpers (FIX 2 + FIX 3)
 # ---------------------------------------------------------------------------
 
+def _latest_planner_invocation_id(
+    repo: "Repository",
+    graph_run_id: UUID | None,
+) -> UUID | None:
+    if graph_run_id is None:
+        return None
+    rows = repo.list_role_invocations_for_graph_run(graph_run_id)
+    planners = [r for r in rows if r.role_type == "planner"]
+    if not planners:
+        return None
+    return planners[-1].role_invocation_id
+
+
+def _safe_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _build_page_summary_from_wrapper_parts(parts: dict[str, Any]) -> str:
+    summ = (parts.get("summary") or "").strip()
+    if summ:
+        return summ[:300]
+    title = parts.get("title") or ""
+    desc = parts.get("description") or ""
+    if title and desc:
+        return f"{title} — {desc}"[:300]
+    return (title or desc or "Page fetched")[:300]
+
+
 def _advance_crawl_frontier(
     repo: "Repository",
     loop: AutonomousLoopRecord,
@@ -495,8 +528,10 @@ def _advance_crawl_frontier(
     CRAWL_FRONTIER_ADVANCED event for full observability.
     """
     from kmbl_orchestrator.identity.crawl_evidence import (
+        EvidenceTier,
         compute_planner_compliance,
         extract_planner_selected_urls,
+        match_planner_selections_to_offered,
         resolve_evidence,
         try_upgrade_to_verified,
     )
@@ -577,15 +612,172 @@ def _advance_crawl_frontier(
                 report.evidence_tier_used,
             )
 
-        # --- FIX 2: attempt verified fetch for each resolved URL ---
-        upgraded_visited: list[tuple] = []
-        for ev in report.final_visited:
-            upgraded_ev, vf = try_upgrade_to_verified(ev, report, timeout=5.0)
-            upgraded_visited.append((upgraded_ev, vf))
+        settings = get_settings()
+        from kmbl_orchestrator.browser.crawl_guardrails import (
+            cap_planner_urls_for_playwright,
+            classify_source_kind,
+            url_passes_grounded_visit,
+        )
+        from kmbl_orchestrator.browser.playwright_client import (
+            visit_page_via_wrapper,
+            wrapper_payload_to_fetch_parts,
+        )
+        from kmbl_orchestrator.domain import PageVisitLogRecord
+
+        planner_matched = match_planner_selections_to_offered(
+            planner_selected,
+            offered_urls,
+        )
+        use_playwright = (
+            bool(settings.kmbl_playwright_wrapper_url.strip())
+            and bool(planner_matched)
+            and settings.kmbl_playwright_max_pages_per_loop > 0
+        )
+
+        if use_playwright:
+            urls_batch = cap_planner_urls_for_playwright(
+                planner_matched,
+                max_pages=settings.kmbl_playwright_max_pages_per_loop,
+            )
+            gid_u: UUID | None = None
+            try:
+                gid_u = _to_uuid(graph_result.get("graph_run_id"))
+            except Exception:
+                gid_u = None
+            thread_id_raw = graph_result.get("thread_id")
+            try:
+                tid_u = UUID(str(thread_id_raw)) if thread_id_raw else loop.current_thread_id
+            except Exception:
+                tid_u = loop.current_thread_id
+            rid = _latest_planner_invocation_id(repo, gid_u)
+
+            for visit_url in urls_batch:
+                sk = classify_source_kind(state, visit_url)
+                ok_policy, block_reason = url_passes_grounded_visit(
+                    state,
+                    visit_url,
+                    source_kind=sk,
+                    settings=settings,
+                )
+                if not ok_policy:
+                    repo.append_page_visit_log(
+                        PageVisitLogRecord(
+                            identity_id=loop.identity_id,
+                            thread_id=tid_u,
+                            run_id=run_id,
+                            graph_run_id=gid_u,
+                            role_invocation_id=rid,
+                            requested_url=visit_url,
+                            resolved_url=None,
+                            source_kind=sk,
+                            status="blocked",
+                            error=block_reason,
+                            evidence_source="playwright_wrapper",
+                        )
+                    )
+                    continue
+
+                payload = {
+                    "identity_id": str(loop.identity_id),
+                    "thread_id": str(tid_u) if tid_u else "",
+                    "run_id": run_id,
+                    "role_invocation_id": str(rid) if rid else "",
+                    "graph_run_id": str(gid_u) if gid_u else "",
+                    "url": visit_url,
+                    "source_kind": sk,
+                }
+                data = visit_page_via_wrapper(payload, settings=settings)
+                ok, parts = wrapper_payload_to_fetch_parts(data)
+                same_dom = data.get("same_domain_links")
+                if not isinstance(same_dom, list):
+                    same_dom = []
+                dl = data.get("discovered_links")
+                if not isinstance(dl, list):
+                    dl = []
+                traits = data.get("traits") if isinstance(data.get("traits"), dict) else {}
+
+                st = "ok" if ok else "error"
+                err = None if ok else (data.get("error") or "visit_failed")
+
+                repo.append_page_visit_log(
+                    PageVisitLogRecord(
+                        identity_id=loop.identity_id,
+                        thread_id=tid_u,
+                        run_id=run_id,
+                        graph_run_id=gid_u,
+                        role_invocation_id=rid,
+                        requested_url=str(data.get("requested_url") or visit_url),
+                        resolved_url=data.get("resolved_url") if isinstance(data.get("resolved_url"), str) else None,
+                        source_kind=sk,
+                        status=st,
+                        http_status=_safe_int(data.get("http_status")),
+                        page_title=data.get("page_title") if isinstance(data.get("page_title"), str) else None,
+                        meta_description=data.get("meta_description")
+                        if isinstance(data.get("meta_description"), str)
+                        else None,
+                        summary=data.get("summary") if isinstance(data.get("summary"), str) else None,
+                        discovered_links=[str(x) for x in dl if isinstance(x, str)],
+                        same_domain_links=[str(x) for x in same_dom if isinstance(x, str)],
+                        traits_json=dict(traits),
+                        evidence_source="playwright_wrapper",
+                        timing_ms=_safe_int(data.get("timing_ms")),
+                        error=err,
+                        snapshot_path=data.get("snapshot_path")
+                        if isinstance(data.get("snapshot_path"), str)
+                        else None,
+                    )
+                )
+
+                if ok:
+                    report.verified_urls.append(visit_url)
+                    state = record_page_visit(
+                        repo,
+                        loop.identity_id,
+                        visit_url,
+                        summary=_build_page_summary_from_wrapper_parts(parts),
+                        design_signals=parts.get("design_signals") or None,
+                        tone_keywords=parts.get("tone_keywords") or None,
+                        discovered_links=parts.get("discovered_links") or None,
+                        provenance_source="playwright_wrapper",
+                        provenance_tier=EvidenceTier.VERIFIED_FETCH,
+                        run_id=run_id,
+                    )
+        else:
+            # --- FIX 2: attempt verified fetch for each resolved URL ---
+            upgraded_visited: list[tuple] = []
+            for ev in report.final_visited:
+                upgraded_ev, vf = try_upgrade_to_verified(ev, report, timeout=5.0)
+                upgraded_visited.append((upgraded_ev, vf))
+
+            # --- Visit each URL with provenance ---
+            for upgraded_ev, vf in upgraded_visited:
+                if vf.success:
+                    state = record_page_visit(
+                        repo,
+                        loop.identity_id,
+                        upgraded_ev.url,
+                        summary=_build_page_summary_from_verification(vf),
+                        design_signals=vf.design_signals or None,
+                        tone_keywords=vf.tone_keywords or None,
+                        discovered_links=vf.discovered_links or None,
+                        provenance_source=upgraded_ev.source,
+                        provenance_tier=upgraded_ev.tier,
+                        run_id=run_id,
+                    )
+                else:
+                    state = record_page_visit(
+                        repo,
+                        loop.identity_id,
+                        upgraded_ev.url,
+                        summary=f"Referenced in build_spec (run_id={run_id})",
+                        provenance_source=upgraded_ev.source,
+                        provenance_tier=upgraded_ev.tier,
+                        run_id=run_id,
+                    )
 
         _log.info(
             "Loop %s: crawl advance — offered=%d, planner_selected=%d, "
-            "mentioned=%d, final=%d, verified=%d, tier=%s",
+            "mentioned=%d, final=%d, verified=%d, tier=%s, playwright=%s",
             loop.loop_id,
             len(report.offered_urls),
             len(report.planner_selected_urls),
@@ -593,33 +785,8 @@ def _advance_crawl_frontier(
             len(report.final_visited),
             len(report.verified_urls),
             report.evidence_tier_used,
+            use_playwright,
         )
-
-        # --- Visit each URL with provenance ---
-        for upgraded_ev, vf in upgraded_visited:
-            if vf.success:
-                state = record_page_visit(
-                    repo,
-                    loop.identity_id,
-                    upgraded_ev.url,
-                    summary=_build_page_summary_from_verification(vf),
-                    design_signals=vf.design_signals or None,
-                    tone_keywords=vf.tone_keywords or None,
-                    discovered_links=vf.discovered_links or None,
-                    provenance_source=upgraded_ev.source,
-                    provenance_tier=upgraded_ev.tier,
-                    run_id=run_id,
-                )
-            else:
-                state = record_page_visit(
-                    repo,
-                    loop.identity_id,
-                    upgraded_ev.url,
-                    summary=f"Referenced in build_spec (run_id={run_id})",
-                    provenance_source=upgraded_ev.source,
-                    provenance_tier=upgraded_ev.tier,
-                    run_id=run_id,
-                )
 
         # Update evidence_tier_used to reflect any upgrades
         if report.verified_urls:
@@ -645,6 +812,14 @@ def _advance_crawl_frontier(
                 )
             except Exception as exc:
                 _log.debug("crawl frontier event emit failed: %s", str(exc)[:200])
+
+        # Operational visit-log retention (0 = disabled). Keeps Supabase from growing unbounded.
+        rd = settings.kmbl_page_visit_log_retention_days
+        if rd > 0:
+            try:
+                repo.prune_page_visit_logs_older_than(older_than_days=rd)
+            except Exception as exc:
+                _log.debug("page_visit_log prune failed: %s", str(exc)[:160])
 
         # Activate external inspiration when internal crawl is exhausted
         if state.crawl_status == "exhausted":
@@ -727,10 +902,14 @@ def _maybe_seed_external(
 
     try:
         state = repo.get_crawl_state(loop.identity_id)
-        if state is None or state.crawl_status != "exhausted":
+        if state is None:
             return
-        # Already seeded?
+        # Inspiration URLs are only seeded after internal grounding completes (phase gate).
+        if state.crawl_phase != "inspiration_expansion":
+            return
         if state.external_inspiration_urls:
+            return
+        if state.crawl_status != "exhausted":
             return
 
         # Try to derive identity-aware inspiration URLs

@@ -23,6 +23,7 @@ from kmbl_orchestrator.runtime.run_events import RunEventType, append_graph_run_
 from kmbl_orchestrator.staging.build_snapshot import build_staging_snapshot_payload
 from kmbl_orchestrator.staging.integrity import validate_preview_integrity
 from kmbl_orchestrator.staging.pressure import pressure_evaluation_to_event_payload
+from kmbl_orchestrator.runtime.habitat_strategy import normalize_habitat_strategy_token
 from kmbl_orchestrator.staging.working_staging_ops import (
     apply_generator_to_working_staging,
     choose_update_mode_with_pressure,
@@ -143,6 +144,12 @@ def staging_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     mode, pressure_eval, mode_reason = choose_update_mode_with_pressure(
         ws, ev.status, evaluation_issue_count=len(ev.issues_json)
     )
+    spec_js = spec.spec_json if isinstance(spec.spec_json, dict) else {}
+    raw_hs = spec_js.get("habitat_strategy")
+    h_eff = normalize_habitat_strategy_token(raw_hs if isinstance(raw_hs, str) else None)
+    if h_eff in ("fresh_start", "rebuild_informed"):
+        mode = "rebuild"
+        mode_reason = "habitat_strategy_requires_full_replace"
 
     if ws is None:
         ws = WorkingStagingRecord(

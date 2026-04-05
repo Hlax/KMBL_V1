@@ -12,6 +12,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from kmbl_orchestrator.contracts.frontend_artifact_roles import is_frontend_file_artifact_role
+
 
 class RevisionModeReason(BaseModel):
     """Explains why patch vs rebuild was chosen for a revision."""
@@ -20,6 +22,7 @@ class RevisionModeReason(BaseModel):
         "initial_build",
         "incremental_improvement",
         "destructive_replace",
+        "habitat_strategy_requires_full_replace",
         "pressure_threshold_exceeded",
         "stagnation_detected",
         "preview_missing",
@@ -166,7 +169,7 @@ def compute_artifact_delta(
             path = ref.get("path", "")
             if path:
                 after_paths.add(path)
-            if ref.get("role") == "static_frontend_file_v1" and ref.get("language") == "html":
+            if is_frontend_file_artifact_role(ref.get("role")) and ref.get("language") == "html":
                 has_html = True
 
     added = after_paths - before_paths

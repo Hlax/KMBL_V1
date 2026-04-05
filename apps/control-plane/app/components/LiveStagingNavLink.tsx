@@ -45,7 +45,7 @@ export function LiveStagingNavLink({ className = "" }: Props) {
     <Link
       href={href}
       className={merged}
-      title="Open live habitat (mutable working staging; set a session thread from Home)"
+      title="Open live habitat for the thread saved from Autonomous (localStorage). For a specific run, use Open live habitat on the graph run page — that link uses the correct thread_id."
     >
       Live Habitat
     </Link>

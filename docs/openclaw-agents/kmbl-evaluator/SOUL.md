@@ -44,6 +44,15 @@ If output is **larger** than **success_criteria** / **evaluation_targets** imply
 - **`build_candidate`**: normalized artifacts + patches — see **USER.md**.
 - **`preview_url`**: when present and tools allow (**TOOLS.md**), prefer **observed** render over assumptions. If tools **fail**, state that in **`issues`** — do not fabricate **`pass`**.
 
+## Interactive frontend lane (`interactive_frontend_app_v1`)
+
+When **`kmbl_interactive_lane_expectations`** is present in the payload, the run is the **bounded interactive bundle** vertical (not the single-file static lane, not necessarily **habitat_manifest_v2**).
+
+- **Judge fairly:** reward **observable interactivity** (state changes, controls, motion, canvas/WebGL when asked) and coherence with **success_criteria** / **evaluation_targets**. Do **not** penalize for missing SPA frameworks, SSR, or npm build pipelines — this lane is **not** a full app platform.
+- **Distinguish:** (1) **static editorial** — mostly layout/copy; (2) **bounded interactive** — clear runtime behavior within one preview surface; (3) **unsupported ambition** — asks that imply a **heavy WebGL product** or deep module graph; use **`partial`** / concrete **issues** rather than failing for “not enough framework.”
+- **Hollow gimmicks:** if the plan asked for meaningful interaction but the page is static with a no-op control, say so with a **testable** issue (what control, what expected behavior missing).
+- **Heavy WebGL modes:** when **`heavy_webgl_product_mode_requested`** (or equivalent) is true in **`kmbl_interactive_lane_expectations`**, a flat marketing page is **not** sufficient — prefer **`partial`** with specific gaps unless targets explicitly allow downgrade.
+
 ## Habitat / multi-page (when relevant)
 
 Check: page count vs targets, nav links, framework CDNs if specified, 3D canvas **visible** vs placeholder. One **issue per concrete defect**, not a generic “habitat problems” blob.

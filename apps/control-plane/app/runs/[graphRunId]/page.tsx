@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { StagingFactsCard } from "@/app/components/StagingFactsCard";
 import { IdentityContextLinks, IdentityNavExtras } from "@/app/components/IdentityNavExtras";
-import type { GraphRunDetail, StagingDetail } from "@/lib/api-types";
+import type { GraphRunDetail, GraphRunSummaryBlock, StagingDetail } from "@/lib/api-types";
 import { identityOverviewPath } from "@/lib/identity-nav";
 import { scenarioBadgeLabel } from "@/lib/gallery-strip-visibility";
 import { buildGeneratorRoutingView } from "@/lib/operator-routing-hints";
@@ -25,6 +25,127 @@ function formatWhen(iso: string | null | undefined) {
 function shortId(id: string) {
   const s = id.replace(/-/g, "");
   return s.length >= 8 ? `${s.slice(0, 8)}…` : id;
+}
+
+function yn(v: unknown): string {
+  if (v === true) return "yes";
+  if (v === false) return "no";
+  return "—";
+}
+
+function countKey(
+  counts: Record<string, number> | undefined,
+  key: string,
+): number {
+  const n = counts?.[key];
+  return typeof n === "number" && Number.isFinite(n) ? n : 0;
+}
+
+/**
+ * Manifest-first / workspace ingest / evaluator preview grounding (orchestrator summary.run_observability).
+ */
+function RuntimeObservabilityCard({
+  summary,
+  lastMeaningful,
+}: {
+  summary: GraphRunSummaryBlock;
+  lastMeaningful: GraphRunDetail["last_meaningful_event"];
+}) {
+  const obs = summary.run_observability;
+  const counts = obs?.manifest_first_event_counts;
+  const pr = obs?.last_evaluator_preview_resolution ?? null;
+  const metType = lastMeaningful?.event_type ?? null;
+  const signalBanner =
+    metType === "manifest_first_violation" ||
+    metType === "evaluator_grounding_unavailable";
+
+  const src =
+    typeof pr?.preview_url_source === "string" && pr.preview_url_source.trim()
+      ? pr.preview_url_source
+      : "—";
+
+  return (
+    <div className="op-card op-card--compact" style={{ marginBottom: "1rem" }}>
+      <h2 className="op-section-title" style={{ marginBottom: "0.35rem" }}>
+        Runtime observability
+      </h2>
+      <p className="muted small" style={{ marginTop: 0 }}>
+        Manifest-first policy, workspace ingest, and evaluator preview grounding (from persisted{" "}
+        <code className="mono small">graph_run_event</code> counts + last evaluator input snapshot).
+      </p>
+
+      {signalBanner ? (
+        <div className="op-banner op-banner--warn" style={{ marginBottom: "0.65rem", marginTop: "0.5rem" }}>
+          <strong>Operator signal</strong> — last meaningful event:{" "}
+          <code className="mono small">{metType}</code>
+          {metType === "manifest_first_violation" ? (
+            <span className="small">
+              {" "}
+              — manifest-first policy conflict; see runtime path counts below.
+            </span>
+          ) : (
+            <span className="small">
+              {" "}
+              — set <code className="mono small">KMBL_ORCHESTRATOR_PUBLIC_BASE_URL</code> or an absolute{" "}
+              <code className="mono small">preview_url</code> on the candidate.
+            </span>
+          )}
+        </div>
+      ) : null}
+
+      {!obs ? (
+        <p className="muted small" style={{ marginBottom: 0 }}>
+          No <code className="mono small">run_observability</code> on this summary (older orchestrator or empty read model).
+        </p>
+      ) : (
+        <>
+          <h3 className="op-subtitle" style={{ marginBottom: "0.35rem", marginTop: "0.35rem" }}>
+            Runtime path
+          </h3>
+          <p className="muted small" style={{ marginBottom: "0.5rem" }}>
+            <strong>Manifest-first activity</strong> —{" "}
+            {countKey(counts, "manifest_first_violation") > 0 ||
+            countKey(counts, "workspace_ingest_not_attempted") > 0 ||
+            countKey(counts, "workspace_ingest_skipped_inline_html") > 0 ||
+            countKey(counts, "workspace_ingest_started") > 0 ||
+            countKey(counts, "workspace_ingest_completed") > 0
+              ? "yes (see counts below)"
+              : "no matching events in this run"}
+          </p>
+          <dl className="pub-lineage-dl" style={{ marginBottom: "0.65rem" }}>
+            <dt>Workspace ingest not attempted</dt>
+            <dd>{countKey(counts, "workspace_ingest_not_attempted")}</dd>
+            <dt>Workspace ingest started</dt>
+            <dd>{countKey(counts, "workspace_ingest_started")}</dd>
+            <dt>Workspace ingest completed</dt>
+            <dd>{countKey(counts, "workspace_ingest_completed")}</dd>
+            <dt>Workspace ingest skipped (inline HTML)</dt>
+            <dd>{countKey(counts, "workspace_ingest_skipped_inline_html")}</dd>
+            <dt>Manifest-first violation</dt>
+            <dd>{countKey(counts, "manifest_first_violation")}</dd>
+          </dl>
+
+          <h3 className="op-subtitle" style={{ marginBottom: "0.35rem" }}>
+            Evaluator grounding
+          </h3>
+          {pr && typeof pr === "object" ? (
+            <dl className="pub-lineage-dl" style={{ marginBottom: 0 }}>
+              <dt>Preview URL source</dt>
+              <dd className="mono small">{src}</dd>
+              <dt>Preview URL is absolute</dt>
+              <dd>{yn(pr.preview_url_is_absolute)}</dd>
+              <dt>Orchestrator public base URL configured</dt>
+              <dd>{yn(pr.orchestrator_public_base_url_configured)}</dd>
+            </dl>
+          ) : (
+            <p className="muted small" style={{ marginBottom: 0 }}>
+              No persisted evaluator <code className="mono small">preview_resolution</code> on this run (evaluator may not have run or input not stored).
+            </p>
+          )}
+        </>
+      )}
+    </div>
+  );
 }
 
 export default async function GraphRunDetailPage({
@@ -242,6 +363,8 @@ export default async function GraphRunDetailPage({
           </p>
         </div>
       ) : null}
+
+      <RuntimeObservabilityCard summary={s} lastMeaningful={data.last_meaningful_event} />
 
       <section className="pub-hero">
         <div className="pub-hero__head">

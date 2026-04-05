@@ -20,6 +20,7 @@ from kmbl_orchestrator.domain import (
     BuildSpecRecord,
     CheckpointRecord,
     CrawlStateRecord,
+    SiteCrawlStateRecord,
     EvaluationReportRecord,
     GraphRunEventRecord,
     GraphRunRecord,
@@ -27,6 +28,7 @@ from kmbl_orchestrator.domain import (
     IdentityCrossRunMemoryRecord,
     IdentityProfileRecord,
     IdentitySourceRecord,
+    PageVisitLogRecord,
     PublicationSnapshotRecord,
     RoleInvocationRecord,
     StagingCheckpointRecord,
@@ -50,6 +52,7 @@ from kmbl_orchestrator.persistence.supabase_deserializers import (
     _row_to_build_spec,
     _row_to_checkpoint,
     _row_to_crawl_state,
+    _row_to_site_crawl_state,
     _row_to_evaluation_report,
     _row_to_graph_run,
     _row_to_graph_run_event,
@@ -1705,6 +1708,8 @@ class SupabaseRepository(SupabaseRepositoryAutonomousLoopMixin):
     # ---- Crawl State ----
 
     def get_crawl_state(self, identity_id: UUID) -> CrawlStateRecord | None:
+        from kmbl_orchestrator.identity.crawl_merge import merge_identity_with_site
+
         res = self._run(
             "get_crawl_state",
             "crawl_state",
@@ -1717,12 +1722,114 @@ class SupabaseRepository(SupabaseRepositoryAutonomousLoopMixin):
         )
         if not res.data:
             return None
-        return _row_to_crawl_state(res.data[0])
+        ident = _row_to_crawl_state(res.data[0])
+        if ident.site_key:
+            sres = self._run(
+                "get_site_crawl_state",
+                "site_crawl_state",
+                lambda: self._client.table("site_crawl_state")
+                .select("*")
+                .eq("site_key", ident.site_key)
+                .limit(1)
+                .execute(),
+                site_key=ident.site_key,
+            )
+            if sres.data:
+                site = _row_to_site_crawl_state(sres.data[0])
+                return merge_identity_with_site(ident, site)
+        return ident
+
+    def get_site_crawl_state(self, site_key: str) -> SiteCrawlStateRecord | None:
+        res = self._run(
+            "get_site_crawl_state",
+            "site_crawl_state",
+            lambda: self._client.table("site_crawl_state")
+            .select("*")
+            .eq("site_key", site_key)
+            .limit(1)
+            .execute(),
+            site_key=site_key,
+        )
+        if not res.data:
+            return None
+        return _row_to_site_crawl_state(res.data[0])
+
+    def upsert_site_crawl_state(self, record: SiteCrawlStateRecord) -> None:
+        row: dict[str, Any] = {
+            "site_key": record.site_key,
+            "root_url": record.root_url,
+            "visited_urls": record.visited_urls,
+            "unvisited_urls": record.unvisited_urls,
+            "page_summaries": record.page_summaries,
+            "visit_provenance": record.visit_provenance,
+            "crawl_status": record.crawl_status,
+            "external_inspiration_urls": record.external_inspiration_urls,
+            "total_pages_crawled": record.total_pages_crawled,
+            "last_crawled_at": record.last_crawled_at,
+            "site_memory_updated_at": record.site_memory_updated_at,
+            "created_at": record.created_at,
+            "updated_at": record.updated_at,
+        }
+        self._run(
+            "upsert_site_crawl_state",
+            "site_crawl_state",
+            lambda: self._client.table("site_crawl_state")
+            .upsert(row, on_conflict="site_key")
+            .execute(),
+            site_key=record.site_key,
+        )
+
+    def ensure_site_backing_for_identity(self, identity_id: UUID) -> None:
+        from kmbl_orchestrator.identity.crawl_merge import (
+            site_record_from_merged_view,
+            slim_identity_row,
+        )
+        from kmbl_orchestrator.identity.site_key import canonical_site_key
+
+        res = self._run(
+            "get_crawl_state_raw",
+            "crawl_state",
+            lambda: self._client.table("crawl_state")
+            .select("*")
+            .eq("identity_id", str(identity_id))
+            .limit(1)
+            .execute(),
+            identity_id=str(identity_id),
+        )
+        if not res.data:
+            return
+        row = res.data[0]
+        if row.get("site_key"):
+            return
+        vu, uu, ps = row.get("visited_urls"), row.get("unvisited_urls"), row.get("page_summaries")
+        if not vu and not uu and not ps:
+            return
+        ident = _row_to_crawl_state(row)
+        sk = canonical_site_key(ident.root_url)
+        site = site_record_from_merged_view(ident.model_copy(update={"site_key": sk}))
+        self.upsert_site_crawl_state(site)
+        self.upsert_crawl_state(
+            slim_identity_row(ident.model_copy(update={"site_key": sk, "has_reused_site_memory": False}))
+        )
 
     def upsert_crawl_state(self, record: CrawlStateRecord) -> None:
+        from kmbl_orchestrator.identity.crawl_merge import (
+            site_record_from_merged_view,
+            slim_identity_row,
+        )
+
+        has_frontier = bool(
+            record.visited_urls or record.unvisited_urls or record.page_summaries,
+        )
+        if record.site_key and has_frontier:
+            self.upsert_site_crawl_state(site_record_from_merged_view(record))
+            record = slim_identity_row(record)
         row: dict[str, Any] = {
             "identity_id": str(record.identity_id),
             "root_url": record.root_url,
+            "site_key": record.site_key,
+            "crawl_phase": record.crawl_phase,
+            "has_reused_site_memory": record.has_reused_site_memory,
             "visited_urls": record.visited_urls,
             "unvisited_urls": record.unvisited_urls,
             "page_summaries": record.page_summaries,
@@ -1742,6 +1849,59 @@ class SupabaseRepository(SupabaseRepositoryAutonomousLoopMixin):
             .execute(),
             identity_id=str(record.identity_id),
         )
+
+    def append_page_visit_log(self, record: PageVisitLogRecord) -> UUID:
+        from uuid import uuid4
+
+        vid = record.page_visit_id or uuid4()
+        row: dict[str, Any] = {
+            "page_visit_id": str(vid),
+            "identity_id": str(record.identity_id),
+            "thread_id": str(record.thread_id) if record.thread_id else None,
+            "run_id": record.run_id,
+            "graph_run_id": str(record.graph_run_id) if record.graph_run_id else None,
+            "role_invocation_id": str(record.role_invocation_id)
+            if record.role_invocation_id
+            else None,
+            "requested_url": record.requested_url,
+            "resolved_url": record.resolved_url,
+            "source_kind": record.source_kind,
+            "status": record.status,
+            "http_status": record.http_status,
+            "page_title": record.page_title,
+            "meta_description": record.meta_description,
+            "summary": record.summary,
+            "discovered_links": record.discovered_links,
+            "same_domain_links": record.same_domain_links,
+            "traits_json": record.traits_json,
+            "evidence_source": record.evidence_source,
+            "timing_ms": record.timing_ms,
+            "error": record.error,
+            "snapshot_path": record.snapshot_path,
+            "created_at": record.created_at,
+        }
+        self._run(
+            "append_page_visit_log",
+            "page_visit_log",
+            lambda: self._client.table("page_visit_log").insert(row).execute(),
+            identity_id=str(record.identity_id),
+            page_visit_id=str(vid),
+        )
+        return vid
+
+    def prune_page_visit_logs_older_than(self, *, older_than_days: int) -> int:
+        if older_than_days <= 0:
+            return 0
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=older_than_days)).isoformat()
+        self._run(
+            "prune_page_visit_log",
+            "page_visit_log",
+            lambda: self._client.table("page_visit_log")
+            .delete()
+            .lt("created_at", cutoff)
+            .execute(),
+        )
+        return -1
 
     # ---- Working staging ----
 

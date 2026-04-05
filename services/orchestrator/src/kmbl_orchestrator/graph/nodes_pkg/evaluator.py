@@ -38,9 +38,21 @@ from kmbl_orchestrator.runtime.evaluator_preflight import (
     should_skip_evaluator_llm,
     synthetic_skipped_evaluator_raw,
 )
+from kmbl_orchestrator.runtime.interactive_lane_context import build_interactive_lane_context
+from kmbl_orchestrator.runtime.interactive_lane_evaluator_gate import (
+    apply_interactive_lane_evaluator_gate,
+)
 from kmbl_orchestrator.runtime.run_events import RunEventType, append_graph_run_event
-from kmbl_orchestrator.runtime.session_staging_links import resolve_evaluator_preview_url
-from kmbl_orchestrator.staging.duplicate_rejection import apply_duplicate_staging_rejection
+from kmbl_orchestrator.runtime.session_staging_links import resolve_evaluator_preview_resolution
+from kmbl_orchestrator.runtime.static_vertical_invariants import (
+    is_interactive_frontend_vertical,
+    is_manifest_first_bundle_vertical,
+    is_preview_assembly_vertical,
+)
+from kmbl_orchestrator.staging.duplicate_rejection import (
+    apply_duplicate_staging_rejection,
+    apply_fresh_habitat_duplicate_output_gate,
+)
 from kmbl_orchestrator.staging.facts import (
     build_working_staging_facts,
     working_staging_facts_to_payload,
@@ -119,13 +131,21 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             break
 
     bc = state.get("build_candidate") if isinstance(state.get("build_candidate"), dict) else {}
+    bs_for_skip = state.get("build_spec") if isinstance(state.get("build_spec"), dict) else {}
+    ei_for_skip = state.get("event_input") if isinstance(state.get("event_input"), dict) else {}
     iter_hint = int(state.get("iteration_index", 0))
     prev_ev = state.get("evaluation_report") if iter_hint > 0 else None
-    preview_url = resolve_evaluator_preview_url(
+    preview_resolution: dict[str, Any] = resolve_evaluator_preview_resolution(
         ctx.settings,
         graph_run_id=str(gid),
         thread_id=str(tid),
         build_candidate=bc,
+    )
+    pu_raw = preview_resolution.get("preview_url")
+    preview_url = (
+        pu_raw.strip()
+        if isinstance(pu_raw, str) and pu_raw.strip()
+        else None
     )
     if getattr(ctx.settings, "orchestrator_smoke_contract_evaluator", False):
         _log.info(
@@ -134,6 +154,42 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             gid,
         )
         preview_url = None
+        preview_resolution = {
+            **preview_resolution,
+            "preview_url": None,
+            "preview_url_is_absolute": False,
+        }
+    skip_llm, skip_reason = should_skip_evaluator_llm(bc, bs_for_skip, ei_for_skip)
+    mf_ground = (
+        bool(getattr(ctx.settings, "kmbl_manifest_first_static_vertical", False))
+        and is_manifest_first_bundle_vertical(bs_for_skip, ei_for_skip)
+        and not getattr(ctx.settings, "orchestrator_smoke_contract_evaluator", False)
+    )
+    if (not skip_llm) and mf_ground:
+        pr_ok = bool(
+            preview_resolution.get("preview_url")
+            and preview_resolution.get("preview_url_is_absolute"),
+        )
+        if not pr_ok:
+            append_graph_run_event(
+                ctx.repo,
+                gid,
+                RunEventType.EVALUATOR_GROUNDING_UNAVAILABLE,
+                {
+                    "error_kind": "evaluator_grounding_unavailable",
+                    "preview_resolution": preview_resolution,
+                },
+                thread_id=tid,
+            )
+            raise RoleInvocationFailed(
+                phase="evaluator",
+                graph_run_id=gid,
+                thread_id=tid,
+                detail={
+                    "error_kind": "evaluator_grounding_unavailable",
+                    "preview_resolution": preview_resolution,
+                },
+            )
     payload = {
         "graph_run_id": str(gid),
         "thread_id": state["thread_id"],
@@ -150,6 +206,7 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         "structured_identity": state.get("structured_identity"),
         # Prefer live assembled staging preview for Playwright / visual grounding
         "preview_url": preview_url,
+        "preview_resolution": preview_resolution,
         "iteration_context": {
             "iteration_index": iter_hint,
             "has_previous_evaluation_report": bool(prev_ev),
@@ -157,9 +214,10 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         # Prior evaluator JSON (same thread run) for visual-delta / sameness checks
         "previous_evaluation_report": prev_ev if iter_hint > 0 else None,
     }
-    bs_for_skip = state.get("build_spec") if isinstance(state.get("build_spec"), dict) else {}
-    ei_for_skip = state.get("event_input") if isinstance(state.get("event_input"), dict) else {}
-    skip_llm, skip_reason = should_skip_evaluator_llm(bc, bs_for_skip, ei_for_skip)
+    bs_lane = state.get("build_spec") if isinstance(state.get("build_spec"), dict) else {}
+    ei_lane = state.get("event_input") if isinstance(state.get("event_input"), dict) else {}
+    if is_interactive_frontend_vertical(bs_lane, ei_lane):
+        payload["kmbl_interactive_lane_expectations"] = build_interactive_lane_context(bs_lane, ei_lane)
     t_ev = time.perf_counter()
     if skip_llm:
         append_graph_run_event(
@@ -255,11 +313,11 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         build_candidate_id=UUID(bcid),
     )
     bc_row = ctx.repo.get_build_candidate(UUID(bcid))
-    ev_input = state.get("event_input") or {}
-    is_static_vertical = (
-        ev_input.get("scenario", "").startswith("kmbl_identity_url_static")
-        or (ev_input.get("constraints") or {}).get("canonical_vertical") == "static_frontend_file_v1"
-    )
+    ev_input = state.get("event_input") if isinstance(state.get("event_input"), dict) else {}
+    bs_ev = state.get("build_spec") if isinstance(state.get("build_spec"), dict) else {}
+    is_static_vertical = ev_input.get("scenario", "").startswith(
+        "kmbl_identity_url_static",
+    ) or is_preview_assembly_vertical(bs_ev, ev_input)
     if bc_row is not None and not is_static_vertical:
         report = merge_gallery_strip_harness_checks(report, bc_row)
     if bc_row is not None:
@@ -288,6 +346,27 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
                 },
                 thread_id=tid,
             )
+        prev_fresh = report.status
+        report = apply_fresh_habitat_duplicate_output_gate(
+            report,
+            bc=bc_row,
+            prior_static_fingerprint=state.get("habitat_prior_static_fingerprint"),
+            iteration_index=int(state.get("iteration_index", 0)),
+            habitat_strategy_effective=state.get("orchestrator_habitat_strategy_effective"),
+        )
+        if prev_fresh != report.status and (report.metrics_json or {}).get(
+            "fresh_habitat_duplicate_bundle"
+        ):
+            append_graph_run_event(
+                ctx.repo,
+                gid,
+                RunEventType.CONTRACT_WARNING,
+                {
+                    "kind": "fresh_habitat_duplicate_output",
+                    "previous_status": prev_fresh,
+                },
+                thread_id=tid,
+            )
     report = apply_preview_surface_gate(report, is_static_vertical=is_static_vertical)
 
     bs_from_state = state.get("build_spec") or {}
@@ -308,6 +387,12 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     )
     report = apply_cool_lane_execution_acknowledgment_gates(
         report,
+        build_candidate=bc if isinstance(bc, dict) else {},
+    )
+    report = apply_interactive_lane_evaluator_gate(
+        report,
+        build_spec=bs_from_state,
+        event_input=ev_input if isinstance(ev_input, dict) else {},
         build_candidate=bc if isinstance(bc, dict) else {},
     )
 

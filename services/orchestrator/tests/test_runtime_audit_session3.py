@@ -11,6 +11,7 @@ from kmbl_orchestrator.runtime.evaluator_preflight import (
 )
 from kmbl_orchestrator.runtime.static_vertical_invariants import (
     clamp_experience_mode_for_static_vertical,
+    is_interactive_frontend_vertical,
     is_static_frontend_vertical,
 )
 from kmbl_orchestrator.staging.integrity import validate_static_frontend_bundle_requirement
@@ -69,17 +70,27 @@ def test_synthetic_skip_raw_shape() -> None:
 
 
 def test_clamp_webgl_on_static_vertical() -> None:
-    """WebGL/immersive modes are no longer clamped for static vertical.
-
-    Static HTML/JS/CSS bundles can contain Three.js/WebGL scenes.
-    The evaluator's 3D content guardrail provides the quality gate instead.
-    """
+    """WebGL-tagged experience modes clamp to flat editorial so the static generator lane is not asked for webgl_experience surface (OpenClaw may contract_failure). Embedded Three.js in HTML remains allowed."""
     bs = {"type": "static_frontend_file_v1", "experience_mode": "webgl_3d_portfolio"}
     ei = {"constraints": {"canonical_vertical": "static_frontend_file_v1"}}
     fixes = clamp_experience_mode_for_static_vertical(bs, ei)
-    # No clamping — WebGL is allowed in static bundles
+    assert fixes
+    assert bs["experience_mode"] == "flat_editorial_static"
+
+
+def test_no_clamp_webgl_on_interactive_vertical() -> None:
+    bs = {"type": "interactive_frontend_app_v1", "experience_mode": "webgl_3d_portfolio"}
+    ei = {"constraints": {"canonical_vertical": "interactive_frontend_app_v1"}}
+    fixes = clamp_experience_mode_for_static_vertical(bs, ei)
     assert fixes == []
     assert bs["experience_mode"] == "webgl_3d_portfolio"
+
+
+def test_is_interactive_frontend_vertical() -> None:
+    assert is_interactive_frontend_vertical(
+        {"type": "interactive_frontend_app_v1", "title": "x"},
+        {},
+    )
 
 
 def test_is_static_frontend_vertical() -> None:

@@ -84,6 +84,8 @@ export default function AutonomousPage() {
   const runsEndRef = useRef<HTMLDivElement>(null);
   /** Latest session staging links from start or run-detail poll (updates during a run). */
   const [sessionStaging, setSessionStaging] = useState<SessionStagingLinks | null>(null);
+  /** Next POST /api/runs/start sends habitat_session=fresh (new thread + empty habitat). */
+  const [pendingFreshHabitat, setPendingFreshHabitat] = useState(false);
   /**
    * Active graph_run on the server for this thread (from GET /api/runs), so refresh
    * does not look "idle" while the orchestrator is still working.
@@ -159,12 +161,12 @@ export default function AutonomousPage() {
 
   const resetSession = () => {
     localStorage.removeItem(LS_THREAD);
-    localStorage.removeItem(LS_IDENTITY);
     setThreadId(null);
-    setIdentityId(null);
     threadIdRef.current = null;
-    identityIdRef.current = null;
     setSessionStaging(null);
+    setPendingFreshHabitat(true);
+    // Keep identity_id in localStorage so the next run can use habitat_session=fresh
+    // (same crawl/identity memory, new thread + empty working staging).
   };
 
   const liveHabitatHref = (tid: string) =>
@@ -187,9 +189,18 @@ export default function AutonomousPage() {
 
       const tidLoop = threadIdRef.current;
       const iidLoop = identityIdRef.current;
-      if (tidLoop && iidLoop) {
-        body.thread_id = tidLoop;
+      if (pendingFreshHabitat && iidLoop) {
+        body.habitat_session = "fresh";
         body.identity_id = iidLoop;
+        setPendingFreshHabitat(false);
+      } else {
+        if (pendingFreshHabitat) {
+          setPendingFreshHabitat(false);
+        }
+        if (tidLoop && iidLoop) {
+          body.thread_id = tidLoop;
+          body.identity_id = iidLoop;
+        }
       }
 
       if (instructionSnapshot.length > 0) {

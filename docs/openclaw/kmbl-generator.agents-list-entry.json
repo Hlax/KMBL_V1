@@ -1,0 +1,8 @@
+{
+  "id": "kmbl-generator",
+  "name": "kmbl-generator",
+  "workspace": "~/.openclaw/workspace-kmbl-generator",
+  "tools": {
+    "deny": ["message", "cron", "gateway"]
+  }
+}

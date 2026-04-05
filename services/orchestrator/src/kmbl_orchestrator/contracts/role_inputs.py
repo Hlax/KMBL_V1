@@ -6,7 +6,23 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from kmbl_orchestrator.runtime.habitat_strategy import HabitatStrategy
+
 RoleType = Literal["planner", "generator", "evaluator"]
+
+
+class KmblHabitatRuntimeInput(BaseModel):
+    """Orchestrator-enforced habitat semantics (see ``habitat_strategy.py``)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    effective_strategy: HabitatStrategy
+    suppress_prior_working_surface: bool = Field(
+        description=(
+            "True when iteration 0 uses fresh_start/rebuild_informed and prior working surface "
+            "must not be trusted as continuation context."
+        ),
+    )
 
 
 class PlannerRoleInput(BaseModel):
@@ -67,9 +83,17 @@ class PlannerRoleInput(BaseModel):
     crawl_context: dict[str, Any] | None = Field(
         default=None,
         description=(
-            "Durable crawl state for cross-session resumption. Includes: crawl_available, "
-            "crawl_status, root_url, total_pages_crawled, visited_count, unvisited_count, "
-            "next_urls_to_crawl (offered frontier URLs), recent_page_summaries, is_exhausted. "
+            "Working crawl memory for cross-session resumption (NOT raw visit logs). "
+            "Includes: crawl_phase (identity_grounding | inspiration_expansion), crawl_available, "
+            "crawl_status, root_url, has_site_memory, has_reused_shared_site_crawl, counts, "
+            "next_urls_to_crawl, top_identity_pages (ranked), top_inspiration_pages (ranked, only "
+            "when phase is inspiration_expansion), recent_portfolio_summaries vs "
+            "recent_inspiration_summaries (compact, origin-tagged), recent_page_summaries "
+            "(short back-compat union), resume (has_prior_crawl_memory, frontier_internal_urls_remaining), "
+            "freshness (site_memory_stale, days_since_site_memory_update, stale_after_days), "
+            "memory_contract, evidence_contract (identity truth vs inspiration reference), "
+            "grounding_available, is_exhausted, external_inspiration_available. "
+            "Durable identity *seed* truth remains in identity_brief + structured_identity. "
             "\n\n"
             "When crawl_context is present and next_urls_to_crawl is non-empty, the planner "
             "MUST return `selected_urls` — the subset of next_urls_to_crawl URLs it actually "
@@ -161,6 +185,30 @@ class GeneratorRoleInput(BaseModel):
             "Derived from build_spec.experience_mode by the orchestrator."
         ),
     )
+    workspace_context: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Orchestrator-resolved paths for local filesystem builds: workspace_root_resolved, "
+            "recommended_write_path (typically {root}/{thread_id}/{graph_run_id}), "
+            "canonical_preview_entry_relative (stable component/preview/index.html hint for sandbox layout). "
+            "Generator should write only under recommended_write_path when emitting workspace_manifest_v1."
+        ),
+    )
+    kmbl_habitat_runtime: KmblHabitatRuntimeInput | None = Field(
+        default=None,
+        description=(
+            "Effective habitat strategy for this step and whether to suppress a stale prior surface; "
+            "built in ``generator_node`` — generator must not infer this from cached canvas alone."
+        ),
+    )
+    kmbl_interactive_lane_context: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "When ``build_spec.type`` / constraints select ``interactive_frontend_app_v1``: orchestrator "
+            "hints for preview-safe bundles (strengths, avoid patterns, fairness notes). Omitted for "
+            "other verticals."
+        ),
+    )
 
 
 class EvaluatorRoleInput(BaseModel):
@@ -207,8 +255,16 @@ class EvaluatorRoleInput(BaseModel):
     preview_url: str | None = Field(
         default=None,
         description=(
-            "Resolved preview URL for visual evaluation — prefers orchestrator staging-preview "
-            "when orchestrator_public_base_url is set, else build_candidate.preview_url."
+            "Resolved preview URL for visual evaluation — when orchestrator_public_base_url is set, "
+            "prefers GET …/orchestrator/runs/{graph_run_id}/candidate-preview (latest build_candidate "
+            "for this run), then staging-preview, else build_candidate.preview_url."
+        ),
+    )
+    preview_resolution: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Orchestrator-computed preview resolution: preview_url, preview_url_source, "
+            "preview_url_is_absolute, orchestrator_public_base_url_configured."
         ),
     )
     iteration_context: dict[str, Any] | None = Field(
@@ -218,6 +274,14 @@ class EvaluatorRoleInput(BaseModel):
     previous_evaluation_report: dict[str, Any] | None = Field(
         default=None,
         description="Prior evaluator JSON on this run when iteration_hint > 0 (sameness / delta).",
+    )
+    kmbl_interactive_lane_expectations: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "When the run is ``interactive_frontend_app_v1``: same structured hints as the generator "
+            "``kmbl_interactive_lane_context`` so evaluation matches lane capabilities (bounded "
+            "interactivity vs full product/WebGL shell)."
+        ),
     )
 
 
@@ -235,6 +299,7 @@ def validate_role_input(role_type: RoleType, payload: dict[str, Any]) -> dict[st
 __all__ = [
     "EvaluatorRoleInput",
     "GeneratorRoleInput",
+    "KmblHabitatRuntimeInput",
     "PlannerRoleInput",
     "RoleType",
     "validate_role_input",

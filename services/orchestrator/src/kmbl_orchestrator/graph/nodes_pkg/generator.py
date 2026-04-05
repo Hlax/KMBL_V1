@@ -35,14 +35,32 @@ from kmbl_orchestrator.runtime.kilo_model_routing import (
     select_generator_provider_config,
 )
 from kmbl_orchestrator.runtime.iteration_plan import build_iteration_plan_for_generator
+from kmbl_orchestrator.runtime.habitat_strategy import (
+    effective_habitat_strategy_for_iteration,
+)
+from kmbl_orchestrator.runtime.interactive_lane_context import build_interactive_lane_context
 from kmbl_orchestrator.runtime.interrupt_checks import raise_if_interrupt_requested
 from kmbl_orchestrator.runtime.run_events import RunEventType, append_graph_run_event
+from kmbl_orchestrator.runtime.static_vertical_invariants import (
+    is_interactive_frontend_vertical,
+    is_manifest_first_bundle_vertical,
+)
+from kmbl_orchestrator.runtime.workspace_ingest import (
+    WorkspaceIngestError,
+    compute_workspace_ingest_preflight,
+    ingest_workspace_manifest_if_present,
+    workspace_ingest_not_attempted_reason,
+    workspace_ingest_should_attempt,
+)
+from kmbl_orchestrator.runtime.workspace_paths import build_workspace_context_for_generator
 from kmbl_orchestrator.staging.facts import (
     build_working_staging_facts,
     working_staging_facts_to_payload,
 )
 from kmbl_orchestrator.staging.integrity import (
     StaticVerticalBundleRejected,
+    scan_interactive_bundle_missing_script_evidence,
+    scan_interactive_bundle_preview_risks,
     validate_generator_output_for_candidate,
     validate_static_frontend_bundle_requirement,
 )
@@ -134,6 +152,18 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         )
         ws_facts = working_staging_facts_to_payload(facts)
 
+    heff = effective_habitat_strategy_for_iteration(
+        event_input=state.get("event_input") or {},
+        build_spec=state.get("build_spec") or {},
+        iteration_index=iteration,
+    )
+    if heff in ("fresh_start", "rebuild_informed") and iteration == 0:
+        ws_facts = {
+            "orchestrator_note": "prior_live_habitat_cleared",
+            "habitat_strategy_effective": heff,
+            "suppress_stale_workspace_snapshot": True,
+        }
+
     st_plan, pr_plan = _iteration_plan_extras_from_ws_facts(ws_facts)
     iteration_plan = (
         build_iteration_plan_for_generator(
@@ -167,6 +197,15 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         # surface_type: tells generator what output shape to produce
         # (static_html vs webgl_experience). Derived from experience_mode by planner.
         "surface_type": bs0.get("surface_type", "static_html"),
+        # Orchestrator-enforced habitat semantics (OpenClaw generator should not trust stale canvas)
+        "kmbl_habitat_runtime": {
+            "effective_strategy": heff,
+            "suppress_prior_working_surface": heff
+            in ("fresh_start", "rebuild_informed")
+            and iteration == 0,
+        },
+        # Local-build lane: resolved workspace root + per-run directory (outside repo by default).
+        "workspace_context": build_workspace_context_for_generator(ctx.settings, tid, gid),
         # Fix 3: retry_context carries orchestrator-selected direction on iterations
         # Generator must use retry_context.retry_direction to determine approach
     }
@@ -191,6 +230,8 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         if payload["iteration_plan"] is None:
             payload["iteration_plan"] = {}
         payload["iteration_plan"] = {**payload["iteration_plan"], **rc}
+    if is_interactive_frontend_vertical(bs0, ei0):
+        payload["kmbl_interactive_lane_context"] = build_interactive_lane_context(bs0, ei0)
     try:
         payload_json_chars = len(json.dumps(payload, ensure_ascii=False, default=str))
     except Exception:
@@ -297,6 +338,207 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         build_spec=state.get("build_spec") if isinstance(state.get("build_spec"), dict) else {},
         event_input=state.get("event_input") if isinstance(state.get("event_input"), dict) else {},
     )
+    bs_ing = state.get("build_spec") if isinstance(state.get("build_spec"), dict) else {}
+    ei_ing = state.get("event_input") if isinstance(state.get("event_input"), dict) else {}
+    manifest_first = bool(
+        getattr(ctx.settings, "kmbl_manifest_first_static_vertical", False),
+    ) and is_manifest_first_bundle_vertical(bs_ing, ei_ing)
+    ingest_role = (
+        "interactive_frontend_app_v1"
+        if is_interactive_frontend_vertical(bs_ing, ei_ing)
+        else "static_frontend_file_v1"
+    )
+    if manifest_first:
+        na = workspace_ingest_not_attempted_reason(raw)
+        if na is not None:
+            append_graph_run_event(
+                ctx.repo,
+                gid,
+                RunEventType.WORKSPACE_INGEST_NOT_ATTEMPTED,
+                {**na, "manifest_first": True},
+                thread_id=tid,
+            )
+            append_graph_run_event(
+                ctx.repo,
+                gid,
+                RunEventType.MANIFEST_FIRST_VIOLATION,
+                {
+                    "error_kind": "manifest_first_missing_workspace",
+                    "phase": "pre_ingest",
+                    "reason": na.get("code"),
+                },
+                thread_id=tid,
+            )
+            detail = contract_validation_failure(
+                phase="generator",
+                message="manifest-first static vertical requires workspace_manifest_v1 with files and sandbox_ref",
+                pydantic_errors=None,
+                extra_details={
+                    "error_kind": "manifest_first_missing_workspace",
+                    "workspace_ingest": na,
+                },
+            )
+            _persist_invocation_failure(
+                inv=inv,
+                raw_detail=detail,
+                phase="generator",
+                graph_run_id=gid,
+                thread_id=tid,
+                repo=ctx.repo,
+            )
+            raise RoleInvocationFailed(
+                phase="generator",
+                graph_run_id=gid,
+                thread_id=tid,
+                detail={
+                    "error_kind": "manifest_first_missing_workspace",
+                    "workspace_ingest": na,
+                },
+            )
+    if workspace_ingest_should_attempt(raw):
+        wm_pf = raw.get("workspace_manifest_v1")
+        sr_pf = raw.get("sandbox_ref")
+        preflight: dict[str, Any] = {}
+        if isinstance(wm_pf, dict) and isinstance(sr_pf, str) and sr_pf.strip():
+            preflight = compute_workspace_ingest_preflight(
+                ctx.settings,
+                tid,
+                gid,
+                sr_pf.strip(),
+                wm_pf,
+            )
+        append_graph_run_event(
+            ctx.repo,
+            gid,
+            RunEventType.WORKSPACE_INGEST_STARTED,
+            preflight,
+            thread_id=tid,
+        )
+    try:
+        raw, ingest_stats, inline_skip = ingest_workspace_manifest_if_present(
+            raw,
+            settings=ctx.settings,
+            thread_id=tid,
+            graph_run_id=gid,
+            ingested_artifact_role=ingest_role,
+        )
+    except WorkspaceIngestError as e:
+        fail_ev: dict[str, Any] = {"message": str(e)[:800]}
+        if e.details:
+            fail_ev["ingest_details"] = e.details
+        append_graph_run_event(
+            ctx.repo,
+            gid,
+            RunEventType.WORKSPACE_INGEST_FAILED,
+            fail_ev,
+            thread_id=tid,
+        )
+        detail = contract_validation_failure(
+            phase="generator",
+            message=str(e),
+            pydantic_errors=None,
+            extra_details={"workspace_ingest": True},
+        )
+        _persist_invocation_failure(
+            inv=inv,
+            raw_detail=detail,
+            phase="generator",
+            graph_run_id=gid,
+            thread_id=tid,
+            repo=ctx.repo,
+        )
+        raise RoleInvocationFailed(
+            phase="generator",
+            graph_run_id=gid,
+            thread_id=tid,
+            detail={"error_kind": "workspace_ingest", "message": str(e)},
+        ) from e
+    if manifest_first and inline_skip == "inline_html":
+        append_graph_run_event(
+            ctx.repo,
+            gid,
+            RunEventType.WORKSPACE_INGEST_SKIPPED_INLINE_HTML,
+            {"reason": "inline_html", "manifest_first": True},
+            thread_id=tid,
+        )
+        append_graph_run_event(
+            ctx.repo,
+            gid,
+            RunEventType.MANIFEST_FIRST_VIOLATION,
+            {
+                "error_kind": "manifest_first_ingest_skipped_or_empty",
+                "phase": "post_ingest",
+                "reason": "inline_html",
+            },
+            thread_id=tid,
+        )
+        detail = contract_validation_failure(
+            phase="generator",
+            message="manifest-first static vertical forbids inline HTML overriding workspace ingest",
+            pydantic_errors=None,
+            extra_details={
+                "error_kind": "manifest_first_ingest_skipped_or_empty",
+                "inline_skip": inline_skip,
+            },
+        )
+        _persist_invocation_failure(
+            inv=inv,
+            raw_detail=detail,
+            phase="generator",
+            graph_run_id=gid,
+            thread_id=tid,
+            repo=ctx.repo,
+        )
+        raise RoleInvocationFailed(
+            phase="generator",
+            graph_run_id=gid,
+            thread_id=tid,
+            detail={
+                "error_kind": "manifest_first_ingest_skipped_or_empty",
+                "inline_skip": inline_skip,
+            },
+        )
+    if manifest_first and ingest_stats is None and workspace_ingest_should_attempt(raw):
+        append_graph_run_event(
+            ctx.repo,
+            gid,
+            RunEventType.MANIFEST_FIRST_VIOLATION,
+            {
+                "error_kind": "manifest_first_ingest_skipped_or_empty",
+                "phase": "post_ingest",
+                "reason": "unexpected_empty_ingest",
+            },
+            thread_id=tid,
+        )
+        detail = contract_validation_failure(
+            phase="generator",
+            message="manifest-first static vertical requires successful workspace ingest",
+            pydantic_errors=None,
+            extra_details={"error_kind": "manifest_first_ingest_skipped_or_empty"},
+        )
+        _persist_invocation_failure(
+            inv=inv,
+            raw_detail=detail,
+            phase="generator",
+            graph_run_id=gid,
+            thread_id=tid,
+            repo=ctx.repo,
+        )
+        raise RoleInvocationFailed(
+            phase="generator",
+            graph_run_id=gid,
+            thread_id=tid,
+            detail={"error_kind": "manifest_first_ingest_skipped_or_empty"},
+        )
+    if ingest_stats:
+        append_graph_run_event(
+            ctx.repo,
+            gid,
+            RunEventType.WORKSPACE_INGEST_COMPLETED,
+            ingest_stats,
+            thread_id=tid,
+        )
+    raw["_kmbl_frontend_artifact_role"] = ingest_role
     try:
         validate_generator_output_for_candidate(raw)
         validate_static_frontend_bundle_requirement(
@@ -304,6 +546,38 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             state.get("event_input") if isinstance(state.get("event_input"), dict) else {},
             raw,
         )
+        bs_v = state.get("build_spec") if isinstance(state.get("build_spec"), dict) else {}
+        ei_v = state.get("event_input") if isinstance(state.get("event_input"), dict) else {}
+        if is_interactive_frontend_vertical(bs_v, ei_v):
+            ao_risk = raw.get("artifact_outputs")
+            risks = scan_interactive_bundle_preview_risks(ao_risk if isinstance(ao_risk, list) else [])
+            if risks:
+                append_graph_run_event(
+                    ctx.repo,
+                    gid,
+                    RunEventType.CONTRACT_WARNING,
+                    {
+                        "role": "generator",
+                        "phase": "interactive_lane_preview_risks",
+                        "risks": risks,
+                    },
+                    thread_id=tid,
+                )
+            miss = scan_interactive_bundle_missing_script_evidence(
+                ao_risk if isinstance(ao_risk, list) else [],
+            )
+            if miss is not None:
+                append_graph_run_event(
+                    ctx.repo,
+                    gid,
+                    RunEventType.CONTRACT_WARNING,
+                    {
+                        "role": "generator",
+                        "phase": "interactive_lane_script_evidence",
+                        **miss,
+                    },
+                    thread_id=tid,
+                )
     except ValueError as e:
         xdetails: dict[str, Any] = {"static_frontend_bundle_gate": True}
         if isinstance(e, StaticVerticalBundleRejected) and getattr(e, "output_class", None):

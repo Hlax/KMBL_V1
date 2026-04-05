@@ -15,7 +15,7 @@ from kmbl_orchestrator.roles.invoke import DefaultRoleInvoker
 from kmbl_orchestrator.runtime.session_staging_links import resolve_evaluator_preview_url
 
 
-def test_resolve_evaluator_preview_url_prefers_orchestrator() -> None:
+def test_resolve_evaluator_preview_url_prefers_candidate_preview() -> None:
     s = Settings(orchestrator_public_base_url="http://127.0.0.1:8010")
     u = resolve_evaluator_preview_url(
         s,
@@ -23,7 +23,7 @@ def test_resolve_evaluator_preview_url_prefers_orchestrator() -> None:
         thread_id="t1",
         build_candidate={"preview_url": "https://candidate.example/preview"},
     )
-    assert u == "http://127.0.0.1:8010/orchestrator/runs/g1/staging-preview"
+    assert u == "http://127.0.0.1:8010/orchestrator/runs/g1/candidate-preview"
 
 
 def test_resolve_evaluator_preview_url_falls_back_to_candidate() -> None:
@@ -77,8 +77,11 @@ def test_evaluator_payload_includes_preview_and_iteration_context() -> None:
 
     assert len(payloads) >= 2
     assert payloads[0]["preview_url"] == (
-        f"http://127.0.0.1:8010/orchestrator/runs/{gid_s}/staging-preview"
+        f"http://127.0.0.1:8010/orchestrator/runs/{gid_s}/candidate-preview"
     )
+    pr0 = payloads[0].get("preview_resolution") or {}
+    assert pr0.get("preview_url_is_absolute") is True
+    assert pr0.get("orchestrator_public_base_url_configured") is True
     assert payloads[0]["iteration_context"]["iteration_index"] == 0
     assert payloads[0]["iteration_context"]["has_previous_evaluation_report"] is False
     assert payloads[0].get("previous_evaluation_report") is None

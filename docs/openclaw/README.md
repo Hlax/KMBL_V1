@@ -6,7 +6,15 @@
 
 **KMBL does not choose the LLM.** The orchestrator only sends OpenAI-style chat requests with `model: "openclaw:<agent_id>"` (e.g. `openclaw:kmbl-planner`). The OpenClaw gateway resolves that **agent id** to a concrete backend model using **`~/.openclaw/openclaw.json`**.
 
-**Reference:** **`openclaw.json`** and **`openclaw.json.example`** in this folder track the current layout (gateway **port 18789**, loopback, Ollama **`models.providers`**, `kmbl-*` agents with **`workspace`** / **`agentDir`**). Paths use **`C:\Users\<you>\`** placeholders; replace with your profile. **Secrets are redacted** (`<gateway-auth-token>`, placeholder Tailscale origin)—never commit real tokens.
+**Reference:** **`openclaw.json`** and **`openclaw.json.example`** in this folder track the current layout (gateway **port 18789**, loopback, Ollama **`models.providers`**, `kmbl-*` agents with **`workspace`** / **`agentDir`**). Paths use **`C:\Users\<you>\`** placeholders where not otherwise pinned; replace with your profile. **Secrets are redacted** (`<gateway-auth-token>`, placeholder Tailscale origin)—never commit real tokens.
+
+### `kmbl-generator` workspace (local-build + orchestrator ingest)
+
+See **`WORKSPACE_ALIGNMENT.md`** for the full **`agentDir` vs `workspace`** table and **`KMBL_GENERATOR_WORKSPACE_ROOT`** rules.
+
+- **Repo reference:** **`openclaw.json`** uses **`C:\Users\<you>\.openclaw\workspace-kmbl-generator`** (or merge **`kmbl-generator.agents-list-entry.json`** with `~/.openclaw/...` expanded on your OS). **Not** a universal path — set the real absolute path only on the gateway host.
+- **Orchestrator:** Set **`KMBL_GENERATOR_WORKSPACE_ROOT`** to the **same** absolute path as OpenClaw **`kmbl-generator.workspace`** (e.g. in repo root **`.env.local`**, not committed). Then ingest and **`sandbox_ref`** validation match.
+- **Do not** point OpenClaw **`workspace`** at the KMBL **application git checkout**; keep the build sandbox separate from **`KMBL_V1`** source.
 
 **Model resolution:** **`agents.defaults.model.primary`** applies when an agent has no **`model`** block. Per-agent **`model.primary`** overrides. In the checked-in reference, **`kmbl-planner`** inherits the default (**`ollama/qwen2.5-coder:7b`**); **`kmbl-generator`** and **`kmbl-evaluator`** override with **`ollama/mistral:latest`**. After edits, **restart the OpenClaw gateway** and confirm in the TUI which **`ollama/...`** each agent uses.
 

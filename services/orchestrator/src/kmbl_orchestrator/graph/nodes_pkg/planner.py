@@ -27,27 +27,30 @@ from kmbl_orchestrator.graph.state import GraphState
 from kmbl_orchestrator.normalize import normalize_planner_output
 from kmbl_orchestrator.normalize.planner_canonicalize import canonicalize_planner_raw
 from kmbl_orchestrator.runtime.cool_generation_lane import apply_cool_generation_lane_presets
-from kmbl_orchestrator.runtime.static_vertical_invariants import clamp_experience_mode_for_static_vertical
+from kmbl_orchestrator.runtime.static_vertical_invariants import (
+    WEBGL_EXPERIENCE_MODES,
+    clamp_experience_mode_for_static_vertical,
+)
 from kmbl_orchestrator.runtime.interrupt_checks import raise_if_interrupt_requested
+from kmbl_orchestrator.runtime.habitat_strategy import (
+    build_spec_with_effective_habitat,
+    effective_habitat_strategy_for_iteration,
+)
 from kmbl_orchestrator.runtime.run_events import RunEventType, append_graph_run_event
 from kmbl_orchestrator.memory.ops import memory_bias_for_experience_mode
 from kmbl_orchestrator.staging.facts import (
     build_working_staging_facts,
     working_staging_facts_to_payload,
 )
+from kmbl_orchestrator.staging.habitat_surface_reset import (
+    clear_working_staging_surface,
+    fingerprint_working_staging_payload,
+)
 
 if TYPE_CHECKING:
     from kmbl_orchestrator.graph.app import GraphContext
 
 _log = logging.getLogger(__name__)
-
-# Experience mode → surface type mapping
-_WEBGL_MODES = frozenset({
-    "webgl_3d_portfolio",
-    "immersive_spatial_portfolio",
-    "model_centric_experience",
-})
-
 
 def _derive_surface_type(experience_mode: str) -> str:
     """Map experience_mode to a surface_type for generator guidance.
@@ -56,7 +59,7 @@ def _derive_surface_type(experience_mode: str) -> str:
     - ``static_html``: standard HTML/CSS/JS (default)
     - ``webgl_experience``: canvas-based rendering with shader/config files
     """
-    if experience_mode in _WEBGL_MODES:
+    if experience_mode in WEBGL_EXPERIENCE_MODES:
         return "webgl_experience"
     return "static_html"
 
@@ -305,6 +308,45 @@ def planner_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     if lane_meta.get("applied"):
         raw.setdefault("_kmbl_planner_metadata", {})["cool_generation_lane"] = lane_meta
 
+    ei_habitat = state.get("event_input") if isinstance(state.get("event_input"), dict) else {}
+    effective = effective_habitat_strategy_for_iteration(
+        event_input=ei_habitat,
+        build_spec=raw["build_spec"],
+        iteration_index=iteration_idx,
+    )
+    raw["build_spec"] = build_spec_with_effective_habitat(raw["build_spec"], effective)
+    append_graph_run_event(
+        ctx.repo,
+        gid,
+        RunEventType.HABITAT_STRATEGY_ENFORCED,
+        {
+            "effective": effective,
+            "iteration_index": iteration_idx,
+            "kmbl_habitat_session": ei_habitat.get("kmbl_habitat_session"),
+        },
+        thread_id=tid,
+    )
+
+    prior_fp: str | None = None
+    if effective in ("fresh_start", "rebuild_informed") and iteration_idx == 0:
+        ws_reset = ctx.repo.get_working_staging_for_thread(tid)
+        if ws_reset is not None and ws_reset.payload_json:
+            prior_fp = fingerprint_working_staging_payload(ws_reset.payload_json)
+            ws_reset, _ = clear_working_staging_surface(
+                ws_reset, reason=f"orchestrator_{effective}"
+            )
+            ctx.repo.save_working_staging(ws_reset)
+            append_graph_run_event(
+                ctx.repo,
+                gid,
+                RunEventType.HABITAT_SURFACE_CLEARED,
+                {
+                    "habitat_strategy_effective": effective,
+                    "had_prior_payload": bool(prior_fp),
+                },
+                thread_id=tid,
+            )
+
     try:
         validate_role_output_for_persistence("planner", raw)
     except (ValidationError, ValueError) as e:
@@ -327,6 +369,16 @@ def planner_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             thread_id=tid,
             repo=ctx.repo,
         )
+    else:
+        h = raw.get("_kmbl_planner_metadata", {}).get("interactive_build_spec_hardening")
+        if isinstance(h, dict) and h.get("interactive_vertical"):
+            append_graph_run_event(
+                ctx.repo,
+                gid,
+                RunEventType.INTERACTIVE_BUILD_SPEC_NORMALIZED,
+                {"hardening": h},
+                thread_id=tid,
+            )
 
     ctx.repo.save_role_invocation(inv)
     spec = normalize_planner_output(
@@ -363,6 +415,8 @@ def planner_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     return {
         "build_spec": raw.get("build_spec"),
         "build_spec_id": str(spec.build_spec_id),
+        "habitat_prior_static_fingerprint": prior_fp if iteration_idx == 0 else None,
+        "orchestrator_habitat_strategy_effective": effective,
     }
 
 

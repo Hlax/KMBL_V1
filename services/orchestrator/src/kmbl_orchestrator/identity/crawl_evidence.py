@@ -430,6 +430,16 @@ def extract_planner_selected_urls(
     return urls
 
 
+def match_planner_selections_to_offered(
+    planner_selected_urls: list[str],
+    offered_urls: list[str],
+) -> list[str]:
+    """Return offered-frontier URL strings that match planner selections (normalized intersection)."""
+    if not planner_selected_urls:
+        return []
+    return _match_against_offered(planner_selected_urls, _normalize_url_set(offered_urls))
+
+
 def _resolve_planner_url(raw: str, root_url: str | None) -> str | None:
     """Resolve a planner-emitted URL string to an absolute http(s) URL.
 

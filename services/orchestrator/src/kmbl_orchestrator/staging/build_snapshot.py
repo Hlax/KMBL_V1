@@ -8,6 +8,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from kmbl_orchestrator.contracts.frontend_artifact_roles import is_frontend_file_artifact_role
 from kmbl_orchestrator.domain import (
     BuildCandidateRecord,
     BuildSpecRecord,
@@ -180,7 +181,7 @@ def derive_frontend_static_v1(
     working_state_patch: dict[str, Any],
 ) -> StagingPayloadFrontendStaticV1 | None:
     """
-    Build a deterministic summary of ``static_frontend_file_v1`` artifacts for review UIs.
+    Build a deterministic summary of static / interactive frontend file artifacts for review UIs.
 
     ``preview_entry_path`` per bundle: explicit ``entry_for_preview``, else
     ``static_frontend_preview_v1.entry_path`` when it matches that bundle, else first
@@ -188,7 +189,7 @@ def derive_frontend_static_v1(
     """
     static_rows: list[dict[str, Any]] = []
     for a in artifact_refs:
-        if isinstance(a, dict) and a.get("role") == "static_frontend_file_v1":
+        if isinstance(a, dict) and is_frontend_file_artifact_role(a.get("role")):
             static_rows.append(a)
 
     if not static_rows:
@@ -276,7 +277,7 @@ def derive_habitat_v1(
     if not isinstance(habitat_meta, dict):
         static_rows = [
             a for a in artifact_refs
-            if isinstance(a, dict) and a.get("role") == "static_frontend_file_v1"
+            if isinstance(a, dict) and is_frontend_file_artifact_role(a.get("role"))
         ]
         if not static_rows:
             return None
@@ -348,7 +349,7 @@ def derive_habitat_v1(
 
     static_count = sum(
         1 for a in artifact_refs
-        if isinstance(a, dict) and a.get("role") == "static_frontend_file_v1"
+        if isinstance(a, dict) and is_frontend_file_artifact_role(a.get("role"))
         and isinstance(a.get("bundle_id"), str) and a.get("bundle_id") == slug
     )
 
@@ -371,7 +372,7 @@ def _derive_preview_kind(
     preview_url: str | None,
 ) -> Literal["static", "external_url"]:
     has_static = any(
-        isinstance(a, dict) and a.get("role") == "static_frontend_file_v1"
+        isinstance(a, dict) and is_frontend_file_artifact_role(a.get("role"))
         for a in artifact_refs
     )
     if has_static:

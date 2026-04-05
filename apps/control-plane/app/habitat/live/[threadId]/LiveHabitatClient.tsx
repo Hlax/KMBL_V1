@@ -66,6 +66,21 @@ export function LiveHabitatClient({
 
   const rm = data?.read_model;
   const ps = data?.preview_surface;
+  const hasPreviewable =
+    rm?.has_previewable_html === true ||
+    (Array.isArray(ps?.html_paths) && (ps.html_paths as unknown[]).length > 0);
+  const defaultEntry =
+    ps?.default_entry_path != null && String(ps.default_entry_path).trim()
+      ? String(ps.default_entry_path)
+      : null;
+  const previewErr =
+    ps?.preview_error != null && String(ps.preview_error).trim()
+      ? String(ps.preview_error)
+      : null;
+  const lastBc =
+    rm?.last_update_build_candidate_id != null && String(rm.last_update_build_candidate_id).trim()
+      ? String(rm.last_update_build_candidate_id)
+      : null;
   const rawRev = rm?.revision;
   const revision: string | number | undefined =
     rawRev === null || rawRev === undefined
@@ -82,6 +97,36 @@ export function LiveHabitatClient({
           {err}
         </p>
       ) : null}
+      {previewErr || !hasPreviewable ? (
+        <div className="op-banner op-banner--warn" style={{ marginBottom: "0.75rem" }}>
+          <strong>Preview not assembled for this working staging payload.</strong>{" "}
+          {previewErr ? (
+            <span className="mono small">{previewErr}</span>
+          ) : (
+            <span className="small">
+              Orchestrator reports no previewable HTML in the live read model — the iframe below may be
+              empty or error. If you used a <strong>graph_run_id</strong> in the URL by mistake, use{" "}
+              <strong>thread_id</strong> from the run page instead.
+            </span>
+          )}
+        </div>
+      ) : (
+        <div className="op-banner op-banner--neutral" style={{ marginBottom: "0.75rem" }}>
+          <strong>Live preview available</strong> — mutable working staging (not a frozen review snapshot).
+          {defaultEntry ? (
+            <>
+              {" "}
+              Entry: <code className="mono small">{defaultEntry}</code>
+            </>
+          ) : null}
+          {lastBc ? (
+            <>
+              {" "}
+              · Last build candidate: <code className="mono small">{lastBc}</code>
+            </>
+          ) : null}
+        </div>
+      )}
       <div className="live-habitat-split">
         <div className="live-habitat-split__preview">
           <div className="live-habitat-frame-wrap">
@@ -123,6 +168,14 @@ export function LiveHabitatClient({
                     ? String(rm.last_alignment_score)
                     : "—"}
                 </dd>
+              </div>
+              <div>
+                <dt>Previewable HTML</dt>
+                <dd>{hasPreviewable ? "yes" : "no"}</dd>
+              </div>
+              <div>
+                <dt>Default entry</dt>
+                <dd className="mono small">{defaultEntry ?? "—"}</dd>
               </div>
               <div>
                 <dt>HTML paths</dt>

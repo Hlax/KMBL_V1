@@ -64,6 +64,15 @@ class PlannerRoleInput(BaseModel):
             "prior evaluation summary, prior build_spec, retry_context, prior_build_spec_id."
         ),
     )
+    crawl_context: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Durable crawl state for cross-session resumption. Includes: crawl_status, "
+            "root_url, total_pages_crawled, visited_count, unvisited_count, "
+            "next_urls_to_crawl, recent_page_summaries, is_exhausted. "
+            "Use to decide what pages to inspect next via Playwright MCP."
+        ),
+    )
 
 
 class GeneratorRoleInput(BaseModel):

@@ -177,6 +177,25 @@ async def _tick_identity_fetch(
 
     persist_identity_from_seed(repo, seed, identity_id=loop.identity_id)
 
+    # Initialize crawl state from the extraction results.
+    # This records the initial page visit(s) and seeds the unvisited frontier
+    # so that future runs can resume crawling from where we left off.
+    from kmbl_orchestrator.identity.crawl_state import (
+        get_or_create_crawl_state,
+        record_page_visit,
+    )
+    crawl_st = get_or_create_crawl_state(repo, loop.identity_id, loop.identity_url)
+    # Record each page the extraction already crawled
+    for page_url in seed.crawled_pages or [seed.source_url]:
+        record_page_visit(
+            repo,
+            loop.identity_id,
+            page_url,
+            summary=seed.to_profile_summary()[:200] if page_url == seed.source_url else "",
+            tone_keywords=list(seed.tone_keywords or []),
+            design_signals=list(seed.aesthetic_keywords or []),
+        )
+
     # Build initial typed exploration directions from the identity brief.
     # This replaces the previous untyped list[dict] with no schema.
     from kmbl_orchestrator.identity.brief import build_identity_brief_from_repo

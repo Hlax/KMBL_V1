@@ -122,6 +122,8 @@ def planner_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         identity_url = identity_url.strip()
 
     iteration_idx = int(state.get("iteration_index", 0))
+    # Crawl context is injected by context_hydrator into event_input
+    crawl_context = ei.get("crawl_context") if isinstance(ei, dict) else None
     payload: dict[str, Any] = {
         "graph_run_id": str(gid),
         "thread_id": state["thread_id"],
@@ -137,6 +139,9 @@ def planner_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         # Structured identity profile for intent-driven planning.
         # Carries themes, tone, visual_tendencies, content_types, complexity, notable_entities.
         "structured_identity": state.get("structured_identity"),
+        # Durable crawl state for cross-session resumption.
+        # Tells the planner what URLs have been visited, what's next, whether crawl is exhausted.
+        "crawl_context": crawl_context,
     }
     if iteration_idx > 0:
         ev = state.get("evaluation_report") if isinstance(state.get("evaluation_report"), dict) else {}

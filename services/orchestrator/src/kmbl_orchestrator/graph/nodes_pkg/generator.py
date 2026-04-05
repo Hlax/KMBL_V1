@@ -164,6 +164,9 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         # Cool lane: compact execution surface + explicit flag (see docs/PLANNER_GENERATOR_COOL_LANE.md)
         "cool_generation_lane_active": cool_generation_lane_active(ei0, bs0),
         "kmbl_execution_contract": summarize_execution_contract_for_generator(bs0),
+        # surface_type: tells generator what output shape to produce
+        # (static_html vs webgl_experience). Derived from experience_mode by planner.
+        "surface_type": bs0.get("surface_type", "static_html"),
         # Fix 3: retry_context carries orchestrator-selected direction on iterations
         # Generator must use retry_context.retry_direction to determine approach
     }

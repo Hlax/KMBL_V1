@@ -298,6 +298,12 @@ async def _tick_graph_run(
         # last_evaluator_score is alignment_score when present, else None
         evaluator_score = alignment_score  # this is the real score now
 
+        # --- Close the crawl feedback loop ---
+        # After each graph run, advance the crawl frontier so the next run
+        # sees updated visited/unvisited state.  This is the orchestrator's
+        # responsibility — we do NOT rely on the LLM to manage crawl state.
+        _advance_crawl_frontier(repo, loop, result)
+
         staging_count = loop.total_staging_count
         if staging_snapshot_id:
             staging_count += 1
@@ -459,3 +465,143 @@ async def _tick_idle(
         phase_after="graph_cycle",
         iteration=loop.iteration_count,
     )
+
+
+# ---------------------------------------------------------------------------
+# Crawl feedback helpers (FIX 2 + FIX 3)
+# ---------------------------------------------------------------------------
+
+def _advance_crawl_frontier(
+    repo: "Repository",
+    loop: AutonomousLoopRecord,
+    graph_result: dict[str, Any],
+) -> None:
+    """Advance the crawl frontier after a graph run.
+
+    Marks the URLs that were offered as ``next_urls_to_crawl`` as visited,
+    then checks for exhaustion and seeds external inspiration when needed.
+    """
+    from kmbl_orchestrator.identity.crawl_state import (
+        get_next_urls_to_crawl,
+        record_page_visit,
+        seed_external_inspiration,
+    )
+
+    try:
+        state = repo.get_crawl_state(loop.identity_id)
+        if state is None:
+            return
+
+        # The URLs that were presented to the planner as next_urls_to_crawl
+        # are treated as "visited" after the graph run completes.
+        urls_to_mark = get_next_urls_to_crawl(state, batch_size=5)
+        if not urls_to_mark:
+            # Nothing to advance — possibly already exhausted
+            _maybe_seed_external(repo, loop)
+            return
+
+        for url in urls_to_mark:
+            state = record_page_visit(
+                repo,
+                loop.identity_id,
+                url,
+                summary=f"Visited during graph iteration (run_id={graph_result.get('graph_run_id', 'unknown')})",
+            )
+
+        # FIX 3: Activate external inspiration when internal crawl is exhausted
+        if state.crawl_status == "exhausted":
+            _maybe_seed_external(repo, loop)
+
+    except Exception as exc:
+        _log.warning(
+            "Loop %s: crawl frontier advance failed: %s",
+            loop.loop_id,
+            str(exc)[:200],
+        )
+
+
+def _maybe_seed_external(
+    repo: "Repository",
+    loop: AutonomousLoopRecord,
+) -> None:
+    """Seed external inspiration URLs when internal crawl is exhausted.
+
+    Derives inspiration sources from the identity profile when available,
+    falling back to defaults only if needed.
+    """
+    from kmbl_orchestrator.identity.crawl_state import seed_external_inspiration
+
+    try:
+        state = repo.get_crawl_state(loop.identity_id)
+        if state is None or state.crawl_status != "exhausted":
+            return
+        # Already seeded?
+        if state.external_inspiration_urls:
+            return
+
+        # Try to derive identity-aware inspiration URLs
+        inspiration_urls = _derive_inspiration_urls_for_identity(repo, loop.identity_id)
+        seed_external_inspiration(repo, loop.identity_id, urls=inspiration_urls or None)
+        _log.info(
+            "Loop %s: seeded external inspiration for identity %s (%d urls)",
+            loop.loop_id,
+            loop.identity_id,
+            len(inspiration_urls) if inspiration_urls else 3,  # 3 = default count
+        )
+    except Exception as exc:
+        _log.warning(
+            "Loop %s: external inspiration seeding failed: %s",
+            loop.loop_id,
+            str(exc)[:200],
+        )
+
+
+def _derive_inspiration_urls_for_identity(
+    repo: "Repository",
+    identity_id: UUID,
+) -> list[str] | None:
+    """Derive inspiration URLs from identity profile themes.
+
+    Returns None to use defaults if no identity-specific URLs can be derived.
+    """
+    try:
+        profile = repo.get_identity_profile(identity_id)
+        if profile is None:
+            return None
+        facets = profile.facets_json or {}
+        themes: list[str] = facets.get("themes", [])
+        if not themes:
+            return None
+
+        # Map identity themes to relevant inspiration sources
+        _THEME_INSPIRATION: dict[str, list[str]] = {
+            "editorial": [
+                "https://www.typewolf.com",
+                "https://www.readymag.com/explore",
+            ],
+            "artistic": [
+                "https://www.behance.net",
+                "https://www.are.na",
+            ],
+            "cinematic": [
+                "https://www.studiomaertens.com",
+                "https://www.awwwards.com/websites/film/",
+            ],
+            "experimental": [
+                "https://experiments.withgoogle.com",
+                "https://www.are.na",
+            ],
+            "minimal": [
+                "https://www.siteinspire.com",
+                "https://minimalissimo.com",
+            ],
+        }
+
+        urls: list[str] = []
+        for theme in themes:
+            for key, theme_urls in _THEME_INSPIRATION.items():
+                if key in theme.lower():
+                    urls.extend(u for u in theme_urls if u not in urls)
+        return urls if urls else None
+    except Exception:
+        return None

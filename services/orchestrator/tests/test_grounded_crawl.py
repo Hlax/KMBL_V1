@@ -544,18 +544,17 @@ class TestRawPayloadEnrichment:
         assert "https://example.com/contact" in post.visited_urls
 
     def test_missing_build_spec_id_gracefully_degrades(self) -> None:
-        """When build_spec_id is missing, enrichment is skipped without error."""
-        from kmbl_orchestrator.autonomous.loop_service import _enrich_urls_from_raw_payload
+        """When build_spec_id is missing, extraction returns empty list."""
+        from kmbl_orchestrator.autonomous.loop_service import _extract_raw_payload_urls
 
         repo = InMemoryRepository()
-        existing = ["https://example.com/about"]
 
-        result = _enrich_urls_from_raw_payload(repo, {}, existing)
-        assert result == existing
+        result = _extract_raw_payload_urls(repo, {})
+        assert result == []
 
     def test_enrichment_deduplicates_urls(self) -> None:
-        """URLs already found in build_spec are not duplicated by raw_payload."""
-        from kmbl_orchestrator.autonomous.loop_service import _enrich_urls_from_raw_payload
+        """Raw payload extraction returns deduplicated URLs."""
+        from kmbl_orchestrator.autonomous.loop_service import _extract_raw_payload_urls
 
         repo = InMemoryRepository()
         bsid = uuid4()
@@ -567,10 +566,8 @@ class TestRawPayloadEnrichment:
         )
         repo.save_build_spec(bsr)
 
-        existing = ["https://example.com/about"]
-        result = _enrich_urls_from_raw_payload(
-            repo, {"build_spec_id": str(bsid)}, existing,
+        result = _extract_raw_payload_urls(
+            repo, {"build_spec_id": str(bsid)},
         )
-        # /about already existed, /new is new
-        assert result.count("https://example.com/about") == 1
+        assert "https://example.com/about" in result
         assert "https://example.com/new" in result

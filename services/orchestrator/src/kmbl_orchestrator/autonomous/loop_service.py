@@ -478,24 +478,27 @@ def _advance_crawl_frontier(
 ) -> None:
     """Advance the crawl frontier after a graph run — grounded in reality.
 
-    Only marks URLs as visited if they were actually referenced by the planner
-    in the build_spec output. Falls back to marking the first offered URL if
-    the planner didn't reference any (to ensure forward progress).
+    Uses tiered evidence to decide which URLs to mark visited:
+      1. verified_fetch        (strongest — not yet implemented)
+      2. selected_by_planner   (not yet implemented)
+      3. build_spec_structured (URLs from structured build_spec ∩ offered)
+      4. raw_payload_text      (from BuildSpecRecord, capped + domain-filtered)
+      5. frontier_fallback     (first offered URL — guarantees progress)
 
-    Optionally fetches real page data for visited URLs when possible.
-
-    URL extraction sources (in order of priority):
-    1. build_spec from graph result (structured planner output)
-    2. raw_payload_json from BuildSpecRecord (full planner response including
-       success_criteria, evaluation_targets, constraints, reasoning)
+    Records provenance for every URL marked visited and emits a
+    CRAWL_FRONTIER_ADVANCED event for full observability.
     """
+    from kmbl_orchestrator.identity.crawl_evidence import resolve_evidence
     from kmbl_orchestrator.identity.crawl_state import (
         get_next_urls_to_crawl,
         record_page_visit,
     )
     from kmbl_orchestrator.identity.page_fetch import (
         extract_urls_from_build_spec,
-        filter_crawl_urls,
+    )
+    from kmbl_orchestrator.runtime.run_events import (
+        RunEventType,
+        append_graph_run_event,
     )
 
     try:
@@ -509,59 +512,73 @@ def _advance_crawl_frontier(
             _maybe_seed_external(repo, loop)
             return
 
-        # --- Grounded URL selection ---
-        # Extract URLs the planner actually referenced in build_spec
+        # --- Collect evidence from each source ---
         build_spec = graph_result.get("build_spec") or {}
-        planner_referenced = extract_urls_from_build_spec(build_spec)
+        build_spec_urls = extract_urls_from_build_spec(build_spec)
 
-        # Also extract from the full raw planner payload (success_criteria,
-        # evaluation_targets, constraints, reasoning) stored in BuildSpecRecord.
-        planner_referenced = _enrich_urls_from_raw_payload(
-            repo, graph_result, planner_referenced,
+        raw_payload_urls = _extract_raw_payload_urls(repo, graph_result)
+
+        # --- Resolve using tiered priority ---
+        report = resolve_evidence(
+            offered_urls=offered_urls,
+            build_spec_urls=build_spec_urls,
+            raw_payload_urls=raw_payload_urls,
+            root_url=state.root_url,
+            allowed_domains=_collect_allowed_domains(state),
         )
 
-        actually_used = filter_crawl_urls(planner_referenced, offered_urls)
-
-        # Fallback: if planner didn't reference any offered URL, mark the first
-        # one as visited to guarantee forward progress (prevents infinite loops)
-        if not actually_used:
-            actually_used = [offered_urls[0]]
-            _log.info(
-                "Loop %s: planner did not reference any offered URLs; "
-                "marking first offered URL for forward progress: %s",
-                loop.loop_id,
-                offered_urls[0],
-            )
+        run_id = str(graph_result.get("graph_run_id", "unknown"))
 
         _log.info(
-            "Loop %s: grounded crawl advance — offered=%d, planner_referenced=%d, marking=%d",
+            "Loop %s: crawl advance — offered=%d, mentioned=%d, "
+            "final=%d, tier=%s",
             loop.loop_id,
-            len(offered_urls),
-            len(planner_referenced),
-            len(actually_used),
+            len(report.offered_urls),
+            len(report.mentioned_urls),
+            len(report.final_visited),
+            report.evidence_tier_used,
         )
 
-        # --- Visit each URL with real page data when possible ---
-        for url in actually_used:
-            page_data = _try_fetch_page(url)
+        # --- Visit each URL with provenance ---
+        for ev in report.final_visited:
+            page_data = _try_fetch_page(ev.url)
             if page_data is not None:
                 state = record_page_visit(
                     repo,
                     loop.identity_id,
-                    url,
+                    ev.url,
                     summary=_build_page_summary(page_data),
                     design_signals=page_data.get("design_signals"),
                     tone_keywords=page_data.get("tone_keywords"),
                     discovered_links=page_data.get("links"),
+                    provenance_source=ev.source,
+                    provenance_tier=ev.tier,
+                    run_id=run_id,
                 )
             else:
-                # No real fetch possible — record with synthetic summary
                 state = record_page_visit(
                     repo,
                     loop.identity_id,
-                    url,
-                    summary=f"Referenced in build_spec (run_id={graph_result.get('graph_run_id', 'unknown')})",
+                    ev.url,
+                    summary=f"Referenced in build_spec (run_id={run_id})",
+                    provenance_source=ev.source,
+                    provenance_tier=ev.tier,
+                    run_id=run_id,
                 )
+
+        # --- Observability: emit event ---
+        graph_run_id = graph_result.get("graph_run_id")
+        if graph_run_id:
+            try:
+                gid = UUID(graph_run_id) if not isinstance(graph_run_id, UUID) else graph_run_id
+                append_graph_run_event(
+                    repo,
+                    gid,
+                    RunEventType.CRAWL_FRONTIER_ADVANCED,
+                    payload=report.to_dict(),
+                )
+            except Exception:
+                pass  # observability is best-effort
 
         # Activate external inspiration when internal crawl is exhausted
         if state.crawl_status == "exhausted":
@@ -575,43 +592,46 @@ def _advance_crawl_frontier(
         )
 
 
-def _enrich_urls_from_raw_payload(
+def _extract_raw_payload_urls(
     repo: "Repository",
     graph_result: dict[str, Any],
-    existing_urls: list[str],
 ) -> list[str]:
-    """Enrich URL list with URLs from the full raw planner payload.
-
-    Loads BuildSpecRecord.raw_payload_json (which contains success_criteria,
-    evaluation_targets, constraints, and any reasoning text) and extracts
-    additional URLs not already found in the build_spec.
-    """
+    """Extract URLs from BuildSpecRecord.raw_payload_json (heuristic source)."""
     from kmbl_orchestrator.identity.page_fetch import extract_urls_from_build_spec
 
     build_spec_id = graph_result.get("build_spec_id")
     if not build_spec_id:
-        return existing_urls
+        return []
 
     try:
-        record = repo.get_build_spec(UUID(build_spec_id) if not isinstance(build_spec_id, UUID) else build_spec_id)
+        record = repo.get_build_spec(
+            UUID(build_spec_id) if not isinstance(build_spec_id, UUID) else build_spec_id,
+        )
         if record is None or not record.raw_payload_json:
-            return existing_urls
-
-        raw_urls = extract_urls_from_build_spec(record.raw_payload_json)
-        seen = set(existing_urls)
-        merged = list(existing_urls)
-        for u in raw_urls:
-            if u not in seen:
-                seen.add(u)
-                merged.append(u)
-        return merged
+            return []
+        return extract_urls_from_build_spec(record.raw_payload_json)
     except Exception as exc:
         _log.debug(
-            "raw_payload URL enrichment failed build_spec_id=%s: %s",
+            "raw_payload URL extraction failed build_spec_id=%s: %s",
             build_spec_id,
             str(exc)[:200],
         )
-        return existing_urls
+        return []
+
+
+def _collect_allowed_domains(state: Any) -> set[str]:
+    """Build the set of allowed domains from external inspiration URLs."""
+    from urllib.parse import urlparse
+
+    allowed: set[str] = set()
+    for u in getattr(state, "external_inspiration_urls", []):
+        try:
+            host = (urlparse(u).hostname or "").lower().removeprefix("www.")
+            if host:
+                allowed.add(host)
+        except Exception:
+            pass
+    return allowed
 
 
 def _try_fetch_page(url: str) -> dict[str, Any] | None:

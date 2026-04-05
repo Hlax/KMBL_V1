@@ -114,6 +114,9 @@ def record_page_visit(
     design_signals: list[str] | None = None,
     tone_keywords: list[str] | None = None,
     discovered_links: list[str] | None = None,
+    provenance_source: str = "",
+    provenance_tier: int = 0,
+    run_id: str = "",
 ) -> CrawlStateRecord:
     """Mark a URL as visited and record page-level data.
 
@@ -123,6 +126,9 @@ def record_page_visit(
         design_signals: Visual/design signals extracted from the page.
         tone_keywords: Tone/mood keywords from the page.
         discovered_links: Raw href values found on the page (will be resolved + filtered).
+        provenance_source: Why this URL was marked visited (e.g. ``build_spec_structured``).
+        provenance_tier: Numeric evidence tier (lower = stronger).
+        run_id: Graph run ID that triggered this visit.
 
     Returns the updated crawl state.
     """
@@ -149,6 +155,16 @@ def record_page_visit(
             "design_signals": (design_signals or [])[:_MAX_DESIGN_SIGNALS_PER_PAGE],
             "tone_keywords": (tone_keywords or [])[:_MAX_TONE_KEYWORDS_PER_PAGE],
             "crawled_at": now,
+        }
+
+    # Store visit provenance (why was this URL marked visited?)
+    provenance = dict(state.visit_provenance)
+    if provenance_source:
+        provenance[normalized] = {
+            "source": provenance_source,
+            "tier": provenance_tier,
+            "run_id": run_id,
+            "recorded_at": now,
         }
 
     # Process discovered links: resolve, normalize, filter internal, add to unvisited
@@ -186,6 +202,7 @@ def record_page_visit(
             "visited_urls": visited,
             "unvisited_urls": unvisited,
             "page_summaries": summaries,
+            "visit_provenance": provenance,
             "crawl_status": crawl_status,
             "total_pages_crawled": state.total_pages_crawled + 1,
             "last_crawled_at": now,

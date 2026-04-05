@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 if TYPE_CHECKING:
+    from kmbl_orchestrator.domain import CrawlStateRecord
     from kmbl_orchestrator.persistence.repository import Repository
 
 from kmbl_orchestrator.config import get_settings
@@ -570,7 +571,7 @@ def _advance_crawl_frontier(
         graph_run_id = graph_result.get("graph_run_id")
         if graph_run_id:
             try:
-                gid = UUID(graph_run_id) if not isinstance(graph_run_id, UUID) else graph_run_id
+                gid = _to_uuid(graph_run_id)
                 append_graph_run_event(
                     repo,
                     gid,
@@ -592,6 +593,11 @@ def _advance_crawl_frontier(
         )
 
 
+def _to_uuid(value: Any) -> UUID:
+    """Coerce a string or UUID to UUID."""
+    return value if isinstance(value, UUID) else UUID(value)
+
+
 def _extract_raw_payload_urls(
     repo: "Repository",
     graph_result: dict[str, Any],
@@ -605,7 +611,7 @@ def _extract_raw_payload_urls(
 
     try:
         record = repo.get_build_spec(
-            UUID(build_spec_id) if not isinstance(build_spec_id, UUID) else build_spec_id,
+            _to_uuid(build_spec_id),
         )
         if record is None or not record.raw_payload_json:
             return []
@@ -619,12 +625,12 @@ def _extract_raw_payload_urls(
         return []
 
 
-def _collect_allowed_domains(state: Any) -> set[str]:
+def _collect_allowed_domains(state: "CrawlStateRecord") -> set[str]:
     """Build the set of allowed domains from external inspiration URLs."""
     from urllib.parse import urlparse
 
     allowed: set[str] = set()
-    for u in getattr(state, "external_inspiration_urls", []):
+    for u in state.external_inspiration_urls:
         try:
             host = (urlparse(u).hostname or "").lower().removeprefix("www.")
             if host:

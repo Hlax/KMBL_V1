@@ -41,9 +41,6 @@ from kmbl_orchestrator.runtime.run_events import RunEventType
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _iid() -> str:
-    return str(uuid4())
-
 
 def _make_loop(identity_id=None, loop_id=None):
     return AutonomousLoopRecord(

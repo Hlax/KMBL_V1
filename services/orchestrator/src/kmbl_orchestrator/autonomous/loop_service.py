@@ -184,7 +184,7 @@ async def _tick_identity_fetch(
         get_or_create_crawl_state,
         record_page_visit,
     )
-    crawl_st = get_or_create_crawl_state(repo, loop.identity_id, loop.identity_url)
+    get_or_create_crawl_state(repo, loop.identity_id, loop.identity_url)
     # Record each page the extraction already crawled
     for page_url in seed.crawled_pages or [seed.source_url]:
         record_page_visit(

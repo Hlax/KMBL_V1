@@ -9,6 +9,10 @@ from uuid import UUID
 from kmbl_orchestrator.graph.state import GraphState
 from kmbl_orchestrator.runtime.interrupt_checks import raise_if_interrupt_requested
 from kmbl_orchestrator.identity.brief import build_identity_brief_from_repo
+from kmbl_orchestrator.identity.crawl_state import (
+    build_crawl_context_for_planner,
+    get_or_create_crawl_state,
+)
 from kmbl_orchestrator.identity.sanitize import sanitize_identity_brief_payload
 from kmbl_orchestrator.identity.hydrate import build_planner_identity_context
 from kmbl_orchestrator.identity.profile import extract_structured_identity
@@ -169,6 +173,24 @@ def context_hydrator(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
                 type(exc).__name__,
                 str(exc)[:200],
             )
+    # Hydrate crawl state for cross-session crawl resumption
+    crawl_context: dict[str, Any] | None = None
+    if iid_raw:
+        try:
+            iid_u = UUID(str(iid_raw))
+            _identity_url = ei.get("identity_url") if isinstance(ei, dict) else None
+            if isinstance(_identity_url, str) and _identity_url.strip():
+                crawl_st = get_or_create_crawl_state(
+                    ctx.repo, iid_u, _identity_url.strip()
+                )
+                crawl_context = build_crawl_context_for_planner(crawl_st)
+        except Exception as exc:
+            _log.warning(
+                "crawl_state hydration failed identity_id=%s exc=%s",
+                iid_raw,
+                str(exc)[:200],
+            )
+
     out: dict[str, Any] = {
         "identity_context": ic,
         "memory_context": base_mc,
@@ -180,4 +202,7 @@ def context_hydrator(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         out["identity_brief"] = identity_brief_payload
     if structured_identity_payload is not None:
         out["structured_identity"] = structured_identity_payload
+    if crawl_context is not None:
+        out["event_input"] = dict(out.get("event_input") or {})
+        out["event_input"]["crawl_context"] = crawl_context
     return out

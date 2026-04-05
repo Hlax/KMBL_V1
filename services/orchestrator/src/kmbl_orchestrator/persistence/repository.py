@@ -17,6 +17,7 @@ from kmbl_orchestrator.domain import (
     BuildCandidateRecord,
     BuildSpecRecord,
     CheckpointRecord,
+    CrawlStateRecord,
     EvaluationReportRecord,
     GraphRunEventRecord,
     GraphRunRecord,
@@ -422,6 +423,16 @@ class Repository(Protocol):
     ) -> None:
         """Atomically persist pre-approval checkpoint, publication_snapshot, and frozen working_staging."""
 
+    # --- Crawl State ---
+
+    def get_crawl_state(self, identity_id: UUID) -> CrawlStateRecord | None:
+        """Return the crawl state for an identity, or None if no crawl has started."""
+        ...
+
+    def upsert_crawl_state(self, record: CrawlStateRecord) -> None:
+        """Insert or replace crawl state for an identity (keyed by identity_id)."""
+        ...
+
     # --- In-memory test snapshot scope & thread locking ---
 
     def in_memory_write_snapshot(self) -> AbstractContextManager[None]:
@@ -486,6 +497,7 @@ class InMemoryRepository:
         self._identity_profiles: dict[str, IdentityProfileRecord] = {}
         self._identity_cross_run_memory: dict[str, IdentityCrossRunMemoryRecord] = {}
         self._autonomous_loops: dict[str, AutonomousLoopRecord] = {}
+        self._crawl_states: dict[str, CrawlStateRecord] = {}
         # Thread-level advisory locks
         self._thread_locks: dict[str, threading.Lock] = {}
         self._thread_lock_guard = threading.Lock()
@@ -1293,6 +1305,14 @@ class InMemoryRepository:
             self.save_publication_snapshot(publication)
             self.save_working_staging(working_staging)
 
+    # --- Crawl State ---
+
+    def get_crawl_state(self, identity_id: UUID) -> CrawlStateRecord | None:
+        return self._crawl_states.get(str(identity_id))
+
+    def upsert_crawl_state(self, record: CrawlStateRecord) -> None:
+        self._crawl_states[str(record.identity_id)] = record
+
     # --- Transaction & Thread Locking ---
 
     _SNAPSHOT_ATTRS = (
@@ -1301,7 +1321,7 @@ class InMemoryRepository:
         "_run_snapshots", "_graph_run_events", "_staging_snapshots",
         "_working_stagings", "_staging_checkpoints", "_publications",
         "_identity_sources", "_identity_profiles", "_identity_cross_run_memory",
-        "_autonomous_loops",
+        "_autonomous_loops", "_crawl_states",
     )
 
     @contextmanager

@@ -430,3 +430,28 @@ class AutonomousLoopRecord(BaseModel):
     total_staging_count: int = 0
     total_publication_count: int = 0
     best_rating: int | None = None
+
+
+class CrawlStateRecord(BaseModel):
+    """Durable crawl state for an identity — tracks visited/unvisited URLs + page signals across sessions."""
+
+    identity_id: UUID
+    root_url: str
+    visited_urls: list[str] = Field(default_factory=list)
+    unvisited_urls: list[str] = Field(default_factory=list)
+    page_summaries: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Map of normalized URL → {summary: str, design_signals: list[str], "
+            "tone_keywords: list[str], crawled_at: str}. Compact per-page data."
+        ),
+    )
+    crawl_status: Literal["in_progress", "exhausted"] = "in_progress"
+    external_inspiration_urls: list[str] = Field(
+        default_factory=list,
+        description="URLs to crawl after internal exhaustion (external sites for inspiration).",
+    )
+    total_pages_crawled: int = 0
+    last_crawled_at: str | None = None
+    created_at: str = Field(default_factory=_utc_now_iso)
+    updated_at: str = Field(default_factory=_utc_now_iso)

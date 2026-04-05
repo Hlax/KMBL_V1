@@ -20,13 +20,13 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 _log = logging.getLogger(__name__)
 
 _PATH_RE = re.compile(
-    r"^component/(?:[a-zA-Z0-9][a-zA-Z0-9_-]*/)*[a-zA-Z0-9][a-zA-Z0-9_-]*\.(html|css|js)$"
+    r"^component/(?:[a-zA-Z0-9][a-zA-Z0-9_-]*/)*[a-zA-Z0-9][a-zA-Z0-9_-]*\.(html|css|js|json|glsl|wgsl)$"
 )
 _KEY_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$")
 _MAX_CONTENT_BYTES = 256 * 1024
 
 
-def _infer_language_from_path(path: str) -> Literal["html", "css", "js"]:
+def _infer_language_from_path(path: str) -> Literal["html", "css", "js", "json", "glsl", "wgsl"]:
     lower = path.lower()
     if lower.endswith(".html"):
         return "html"
@@ -34,6 +34,12 @@ def _infer_language_from_path(path: str) -> Literal["html", "css", "js"]:
         return "css"
     if lower.endswith(".js"):
         return "js"
+    if lower.endswith(".json"):
+        return "json"
+    if lower.endswith(".glsl"):
+        return "glsl"
+    if lower.endswith(".wgsl"):
+        return "wgsl"
     raise ValueError("cannot infer language from path")
 
 
@@ -44,7 +50,7 @@ class StaticFrontendFileArtifactV1(BaseModel):
 
     role: Literal["static_frontend_file_v1"]
     path: str = Field(min_length=1, max_length=512)
-    language: Literal["html", "css", "js"]
+    language: Literal["html", "css", "js", "json", "glsl", "wgsl"]
     content: str = Field(min_length=1, max_length=_MAX_CONTENT_BYTES)
     bundle_id: str | None = Field(default=None, max_length=64)
     previewable: bool | None = None
@@ -80,7 +86,7 @@ class StaticFrontendFileArtifactV1(BaseModel):
             try:
                 d["language"] = _infer_language_from_path(d["path"])
             except ValueError as e:
-                raise ValueError("language is required if path has no .html/.css/.js suffix") from e
+                raise ValueError("language is required if path has no .html/.css/.js/.json/.glsl/.wgsl suffix") from e
         return d
 
     @model_validator(mode="after")
@@ -92,7 +98,7 @@ class StaticFrontendFileArtifactV1(BaseModel):
             raise ValueError('path must start with "component/"')
         if not _PATH_RE.match(p):
             raise ValueError(
-                "path must match component/<segments>/<name>.html|.css|.js "
+                "path must match component/<segments>/<name>.html|.css|.js|.json|.glsl|.wgsl "
                 "(no .., no absolute paths)"
             )
         inferred = _infer_language_from_path(p)

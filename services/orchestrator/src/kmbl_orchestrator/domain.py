@@ -446,6 +446,13 @@ class CrawlStateRecord(BaseModel):
             "tone_keywords: list[str], crawled_at: str}. Compact per-page data."
         ),
     )
+    visit_provenance: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Map of normalized URL → {source: str, tier: int, run_id: str, "
+            "recorded_at: str}. Records *why* a URL was marked visited."
+        ),
+    )
     crawl_status: Literal["in_progress", "exhausted"] = "in_progress"
     external_inspiration_urls: list[str] = Field(
         default_factory=list,

@@ -409,6 +409,7 @@ def _row_to_crawl_state(row: dict[str, Any]) -> CrawlStateRecord:
     vu = row.get("visited_urls")
     uu = row.get("unvisited_urls")
     ps = row.get("page_summaries")
+    vp = row.get("visit_provenance")
     ei = row.get("external_inspiration_urls")
     return CrawlStateRecord(
         identity_id=UUID(row["identity_id"]),
@@ -416,6 +417,7 @@ def _row_to_crawl_state(row: dict[str, Any]) -> CrawlStateRecord:
         visited_urls=list(vu) if isinstance(vu, list) else [],
         unvisited_urls=list(uu) if isinstance(uu, list) else [],
         page_summaries=dict(ps) if isinstance(ps, dict) else {},
+        visit_provenance=dict(vp) if isinstance(vp, dict) else {},
         crawl_status=str(row.get("crawl_status", "in_progress")),  # type: ignore[arg-type]
         external_inspiration_urls=list(ei) if isinstance(ei, list) else [],
         total_pages_crawled=int(row.get("total_pages_crawled", 0)),

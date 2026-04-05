@@ -81,6 +81,9 @@ class RunEventType:
     GRAPH_RUN_INTERRUPTED = "graph_run_interrupted"
     DUPLICATE_START_BLOCKED = "duplicate_start_blocked"
 
+    # Crawl frontier observability
+    CRAWL_FRONTIER_ADVANCED = "crawl_frontier_advanced"
+
 
 def append_graph_run_event(
     repo: Repository,

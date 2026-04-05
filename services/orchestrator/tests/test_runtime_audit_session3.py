@@ -69,11 +69,17 @@ def test_synthetic_skip_raw_shape() -> None:
 
 
 def test_clamp_webgl_on_static_vertical() -> None:
+    """WebGL/immersive modes are no longer clamped for static vertical.
+
+    Static HTML/JS/CSS bundles can contain Three.js/WebGL scenes.
+    The evaluator's 3D content guardrail provides the quality gate instead.
+    """
     bs = {"type": "static_frontend_file_v1", "experience_mode": "webgl_3d_portfolio"}
     ei = {"constraints": {"canonical_vertical": "static_frontend_file_v1"}}
     fixes = clamp_experience_mode_for_static_vertical(bs, ei)
-    assert fixes
-    assert bs["experience_mode"] == "flat_editorial_static"
+    # No clamping — WebGL is allowed in static bundles
+    assert fixes == []
+    assert bs["experience_mode"] == "webgl_3d_portfolio"
 
 
 def test_is_static_frontend_vertical() -> None:

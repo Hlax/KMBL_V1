@@ -7,13 +7,11 @@ from typing import Any
 
 _log = logging.getLogger(__name__)
 
-# 3D / immersive modes that contradict a static file bundle unless explicitly dual-track.
-_STATIC_VERTICAL_INCOMPATIBLE_MODES: frozenset[str] = frozenset(
-    (
-        "webgl_3d_portfolio",
-        "immersive_spatial_portfolio",
-    )
-)
+# 3D / immersive modes were previously blocked for static file bundles.
+# Removed: static HTML/JS/CSS bundles CAN contain Three.js / WebGL scenes.
+# The generator SOUL.md explicitly permits this ("Three.js / WebGL: only if planner set experience_mode").
+# The evaluator's 3D content guardrail (soft → partial) provides the quality gate.
+_STATIC_VERTICAL_INCOMPATIBLE_MODES: frozenset[str] = frozenset()
 
 _DEFAULT_STATIC_EXPERIENCE_MODE = "flat_editorial_static"
 

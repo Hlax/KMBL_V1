@@ -476,14 +476,21 @@ def _advance_crawl_frontier(
     loop: AutonomousLoopRecord,
     graph_result: dict[str, Any],
 ) -> None:
-    """Advance the crawl frontier after a graph run.
+    """Advance the crawl frontier after a graph run — grounded in reality.
 
-    Marks the URLs that were offered as ``next_urls_to_crawl`` as visited,
-    then checks for exhaustion and seeds external inspiration when needed.
+    Only marks URLs as visited if they were actually referenced by the planner
+    in the build_spec output. Falls back to marking the first offered URL if
+    the planner didn't reference any (to ensure forward progress).
+
+    Optionally fetches real page data for visited URLs when possible.
     """
     from kmbl_orchestrator.identity.crawl_state import (
         get_next_urls_to_crawl,
         record_page_visit,
+    )
+    from kmbl_orchestrator.identity.page_fetch import (
+        extract_urls_from_build_spec,
+        filter_crawl_urls,
     )
 
     try:
@@ -491,23 +498,60 @@ def _advance_crawl_frontier(
         if state is None:
             return
 
-        # The URLs that were presented to the planner as next_urls_to_crawl
-        # are treated as "visited" after the graph run completes.
-        urls_to_mark = get_next_urls_to_crawl(state, batch_size=5)
-        if not urls_to_mark:
-            # Nothing to advance — possibly already exhausted
+        # Get the URLs that were offered to the planner
+        offered_urls = get_next_urls_to_crawl(state, batch_size=5)
+        if not offered_urls:
             _maybe_seed_external(repo, loop)
             return
 
-        for url in urls_to_mark:
-            state = record_page_visit(
-                repo,
-                loop.identity_id,
-                url,
-                summary=f"Visited during graph iteration (run_id={graph_result.get('graph_run_id', 'unknown')})",
+        # --- Grounded URL selection ---
+        # Extract URLs the planner actually referenced in build_spec
+        build_spec = graph_result.get("build_spec") or {}
+        planner_referenced = extract_urls_from_build_spec(build_spec)
+        actually_used = filter_crawl_urls(planner_referenced, offered_urls)
+
+        # Fallback: if planner didn't reference any offered URL, mark the first
+        # one as visited to guarantee forward progress (prevents infinite loops)
+        if not actually_used:
+            actually_used = [offered_urls[0]]
+            _log.info(
+                "Loop %s: planner did not reference any offered URLs; "
+                "marking first offered URL for forward progress: %s",
+                loop.loop_id,
+                offered_urls[0],
             )
 
-        # FIX 3: Activate external inspiration when internal crawl is exhausted
+        _log.info(
+            "Loop %s: grounded crawl advance — offered=%d, planner_referenced=%d, marking=%d",
+            loop.loop_id,
+            len(offered_urls),
+            len(planner_referenced),
+            len(actually_used),
+        )
+
+        # --- Visit each URL with real page data when possible ---
+        for url in actually_used:
+            page_data = _try_fetch_page(url)
+            if page_data is not None:
+                state = record_page_visit(
+                    repo,
+                    loop.identity_id,
+                    url,
+                    summary=_build_page_summary(page_data),
+                    design_signals=page_data.get("design_signals"),
+                    tone_keywords=page_data.get("tone_keywords"),
+                    discovered_links=page_data.get("links"),
+                )
+            else:
+                # No real fetch possible — record with synthetic summary
+                state = record_page_visit(
+                    repo,
+                    loop.identity_id,
+                    url,
+                    summary=f"Referenced in build_spec (run_id={graph_result.get('graph_run_id', 'unknown')})",
+                )
+
+        # Activate external inspiration when internal crawl is exhausted
         if state.crawl_status == "exhausted":
             _maybe_seed_external(repo, loop)
 
@@ -517,6 +561,29 @@ def _advance_crawl_frontier(
             loop.loop_id,
             str(exc)[:200],
         )
+
+
+def _try_fetch_page(url: str) -> dict[str, Any] | None:
+    """Attempt to fetch real page data, returning None on any failure.
+
+    This is best-effort — network failures, timeouts, non-HTML pages
+    all result in None. The crawl loop still advances regardless.
+    """
+    from kmbl_orchestrator.identity.page_fetch import fetch_page_data
+
+    try:
+        return fetch_page_data(url, timeout=5.0)
+    except Exception:
+        return None
+
+
+def _build_page_summary(page_data: dict[str, Any]) -> str:
+    """Build a one-line page summary from fetched page data."""
+    title = page_data.get("title", "")
+    desc = page_data.get("description", "")
+    if title and desc:
+        return f"{title} — {desc}"[:300]
+    return (title or desc or "Page fetched")[:300]
 
 
 def _maybe_seed_external(

@@ -276,6 +276,13 @@ def build_crawl_context_for_planner(
             "design_signals": data.get("design_signals", []),
         })
 
+    # Detect whether any page summaries contain real fetched data
+    # (real summaries have design_signals or tone_keywords from actual HTML)
+    has_real_data = any(
+        bool(data.get("design_signals")) or bool(data.get("tone_keywords"))
+        for data in state.page_summaries.values()
+    )
+
     return {
         "crawl_available": True,
         "crawl_status": state.crawl_status,
@@ -287,4 +294,5 @@ def build_crawl_context_for_planner(
         "recent_page_summaries": recent_summaries,
         "external_inspiration_available": bool(state.external_inspiration_urls),
         "is_exhausted": state.crawl_status == "exhausted",
+        "grounding_available": has_real_data,
     }

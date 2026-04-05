@@ -214,6 +214,12 @@ def planner_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     raw = compact_planner_wire_output(raw)
     if not isinstance(raw.get("build_spec"), dict):
         raw["build_spec"] = {}
+
+    # FIX 3: Hoist top-level selected_urls into build_spec so
+    # extract_planner_selected_urls() can find them regardless of where
+    # the planner placed them.  Merge with any already inside build_spec.
+    _hoist_selected_urls_into_build_spec(raw)
+
     wire_fixes = canonicalize_planner_raw(raw)
     if wire_fixes:
         append_graph_run_event(
@@ -358,3 +364,33 @@ def planner_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         "build_spec": raw.get("build_spec"),
         "build_spec_id": str(spec.build_spec_id),
     }
+
+
+def _hoist_selected_urls_into_build_spec(raw: dict[str, Any]) -> None:
+    """Merge top-level ``selected_urls`` into ``build_spec.selected_urls``.
+
+    The planner contract allows ``selected_urls`` at the top level of the
+    output *or* inside ``build_spec``.  Downstream evidence resolution only
+    looks at ``build_spec``, so we merge here to keep a single extraction
+    path.  Deduplication preserves order (first occurrence wins).
+    """
+    top_urls = raw.get("selected_urls")
+    if not isinstance(top_urls, list):
+        return
+
+    bs = raw.get("build_spec")
+    if not isinstance(bs, dict):
+        return
+
+    existing = bs.get("selected_urls")
+    if not isinstance(existing, list):
+        existing = []
+
+    seen: set[str] = set(existing)
+    merged = list(existing)
+    for u in top_urls:
+        if isinstance(u, str) and u not in seen:
+            seen.add(u)
+            merged.append(u)
+
+    bs["selected_urls"] = merged

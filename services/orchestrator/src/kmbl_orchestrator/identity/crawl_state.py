@@ -312,4 +312,10 @@ def build_crawl_context_for_planner(
         "external_inspiration_available": bool(state.external_inspiration_urls),
         "is_exhausted": state.crawl_status == "exhausted",
         "grounding_available": has_real_data,
+        # Planner instructions for selected_urls contract:
+        "planner_instruction": (
+            "Return `selected_urls` containing the exact URLs from "
+            "`next_urls_to_crawl` that you consulted or used. "
+            "Use absolute URLs exactly as listed. Return [] if none were used."
+        ),
     }

@@ -526,7 +526,10 @@ def _advance_crawl_frontier(
         build_spec = graph_result.get("build_spec") or {}
 
         # FIX 1: extract explicit planner-selected URLs
-        planner_selected = extract_planner_selected_urls(build_spec)
+        # FIX 2: resolve relative URLs against root_url before matching
+        planner_selected = extract_planner_selected_urls(
+            build_spec, root_url=state.root_url,
+        )
 
         build_spec_urls = extract_urls_from_build_spec(build_spec)
         raw_payload_urls = _extract_raw_payload_urls(repo, graph_result)

@@ -382,12 +382,20 @@ def try_upgrade_to_verified(
 # ---------------------------------------------------------------------------
 
 
-def extract_planner_selected_urls(build_spec: dict[str, Any]) -> list[str]:
+def extract_planner_selected_urls(
+    build_spec: dict[str, Any],
+    *,
+    root_url: str | None = None,
+) -> list[str]:
     """Extract explicitly selected URLs from planner build_spec output.
 
     The planner may declare which crawl URLs it intentionally chose via:
     - ``build_spec.selected_urls`` (list of URL strings)
     - ``build_spec.crawl_actions.selected_urls`` (nested path)
+
+    When *root_url* is provided, relative paths (e.g. ``/about``,
+    ``work/project-a``, ``./contact``) are resolved against it before
+    filtering.  Only ``http`` / ``https`` results are kept.
 
     Returns deduplicated list of URLs found, or empty list.
     """
@@ -400,9 +408,12 @@ def extract_planner_selected_urls(build_spec: dict[str, Any]) -> list[str]:
     def _add(raw: Any) -> None:
         if isinstance(raw, list):
             for item in raw:
-                if isinstance(item, str) and (item.startswith("http://") or item.startswith("https://")) and item not in seen:
-                    seen.add(item)
-                    urls.append(item)
+                if not isinstance(item, str) or not item.strip():
+                    continue
+                resolved = _resolve_planner_url(item, root_url)
+                if resolved is not None and resolved not in seen:
+                    seen.add(resolved)
+                    urls.append(resolved)
 
     # Top-level: build_spec.selected_urls
     _add(build_spec.get("selected_urls"))
@@ -413,6 +424,37 @@ def extract_planner_selected_urls(build_spec: dict[str, Any]) -> list[str]:
         _add(crawl_actions.get("selected_urls"))
 
     return urls
+
+
+def _resolve_planner_url(raw: str, root_url: str | None) -> str | None:
+    """Resolve a planner-emitted URL string to an absolute http(s) URL.
+
+    * Already-absolute http(s) URLs are returned as-is.
+    * Relative paths (``/about``, ``./contact``, ``work/x``) are resolved
+      against *root_url* when provided.
+    * Fragment-only, clearly invalid, or non-http results return ``None``.
+    """
+    raw = raw.strip()
+    if not raw:
+        return None
+
+    # Already absolute http(s)
+    if raw.startswith("http://") or raw.startswith("https://"):
+        return raw
+
+    # Reject clearly non-http schemes
+    if ":" in raw.split("/")[0] and not raw.startswith("/"):
+        # e.g. ftp://..., mailto:..., javascript:..., data:...
+        return None
+
+    # Fragment-only (e.g. "#section") — not a page URL
+    if raw.startswith("#"):
+        return None
+
+    # Resolve relative against root_url
+    if root_url:
+        from kmbl_orchestrator.identity.url_normalize import resolve_url
+        return resolve_url(raw, root_url)
 
 
 # ---------------------------------------------------------------------------

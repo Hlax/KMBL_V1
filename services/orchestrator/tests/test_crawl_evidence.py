@@ -1076,3 +1076,315 @@ class TestObservabilityEnhancements:
         payload = crawl_events[0].payload_json
         assert payload["evidence_tier_used"] == "verified_fetch"
         assert "https://example.com/a" in payload["verified_urls"]
+
+
+# ---------------------------------------------------------------------------
+# FIX 4 (planner contract): selected_urls + relative resolution + guardrails
+# ---------------------------------------------------------------------------
+
+
+class TestPlannerContractSelectedUrls:
+    """Tests that planner contract and relative URL resolution work end-to-end."""
+
+    def test_absolute_selected_urls_trigger_tier2(self) -> None:
+        """Planner output with explicit absolute selected_urls triggers tier-2 evidence."""
+        from kmbl_orchestrator.identity.crawl_evidence import extract_planner_selected_urls
+
+        bs = {"selected_urls": ["https://example.com/about", "https://example.com/work"]}
+        urls = extract_planner_selected_urls(bs, root_url="https://example.com")
+        assert urls == ["https://example.com/about", "https://example.com/work"]
+
+        report = resolve_evidence(
+            offered_urls=["https://example.com/about", "https://example.com/work"],
+            planner_selected_urls=urls,
+            build_spec_urls=[],
+            raw_payload_urls=[],
+            root_url="https://example.com",
+        )
+        assert report.evidence_tier_used == "selected_by_planner"
+        assert len(report.final_visited) == 2
+        assert all(e.tier == EvidenceTier.SELECTED_BY_PLANNER for e in report.final_visited)
+
+    def test_relative_slash_about_resolved(self) -> None:
+        """Planner emitting '/about' resolves to absolute URL and triggers tier-2."""
+        from kmbl_orchestrator.identity.crawl_evidence import extract_planner_selected_urls
+
+        bs = {"selected_urls": ["/about"]}
+        urls = extract_planner_selected_urls(bs, root_url="https://example.com")
+        assert len(urls) == 1
+        assert "example.com" in urls[0]
+        assert "about" in urls[0]
+
+        report = resolve_evidence(
+            offered_urls=["https://example.com/about"],
+            planner_selected_urls=urls,
+            build_spec_urls=[],
+            raw_payload_urls=[],
+            root_url="https://example.com",
+        )
+        assert report.evidence_tier_used == "selected_by_planner"
+
+    def test_relative_no_slash_resolved(self) -> None:
+        """Planner emitting 'work/project-a' resolves against root."""
+        from kmbl_orchestrator.identity.crawl_evidence import extract_planner_selected_urls
+
+        bs = {"selected_urls": ["work/project-a"]}
+        urls = extract_planner_selected_urls(bs, root_url="https://example.com/")
+        assert len(urls) == 1
+        assert "example.com" in urls[0]
+        assert "work/project-a" in urls[0]
+
+    def test_dot_slash_relative_resolved(self) -> None:
+        """Planner emitting './contact' resolves against root."""
+        from kmbl_orchestrator.identity.crawl_evidence import extract_planner_selected_urls
+
+        bs = {"selected_urls": ["./contact"]}
+        urls = extract_planner_selected_urls(bs, root_url="https://example.com/")
+        assert len(urls) == 1
+        assert "example.com" in urls[0]
+        assert "contact" in urls[0]
+
+    def test_fragment_only_rejected(self) -> None:
+        """Fragment-only (#section) is rejected — not a page URL."""
+        from kmbl_orchestrator.identity.crawl_evidence import extract_planner_selected_urls
+
+        bs = {"selected_urls": ["#section-2"]}
+        urls = extract_planner_selected_urls(bs, root_url="https://example.com")
+        assert urls == []
+
+    def test_non_http_schemes_rejected(self) -> None:
+        """Non-http schemes (ftp, mailto, javascript, data) are rejected."""
+        from kmbl_orchestrator.identity.crawl_evidence import extract_planner_selected_urls
+
+        bs = {"selected_urls": [
+            "ftp://example.com/file",
+            "mailto:test@example.com",
+            "javascript:void(0)",
+            "data:text/html,<h1>hi</h1>",
+        ]}
+        urls = extract_planner_selected_urls(bs, root_url="https://example.com")
+        assert urls == []
+
+    def test_outside_offered_set_not_credited(self) -> None:
+        """Planner-selected URLs not in offered set fall through to lower tiers."""
+        from kmbl_orchestrator.identity.crawl_evidence import extract_planner_selected_urls
+
+        bs = {"selected_urls": ["https://example.com/invented-page"]}
+        urls = extract_planner_selected_urls(bs, root_url="https://example.com")
+        assert urls == ["https://example.com/invented-page"]
+
+        # But resolve_evidence won't credit it because it's not offered
+        report = resolve_evidence(
+            offered_urls=["https://example.com/real-page"],
+            planner_selected_urls=urls,
+            build_spec_urls=[],
+            raw_payload_urls=[],
+            root_url="https://example.com",
+        )
+        assert report.evidence_tier_used == "frontier_fallback"
+
+    def test_empty_selected_urls_degrades_gracefully(self) -> None:
+        """Empty selected_urls degrades to lower evidence tiers."""
+        report = resolve_evidence(
+            offered_urls=["https://example.com/a"],
+            planner_selected_urls=[],
+            build_spec_urls=["https://example.com/a"],
+            raw_payload_urls=[],
+            root_url="https://example.com",
+        )
+        assert report.evidence_tier_used == "build_spec_structured"
+
+    def test_empty_selected_urls_degrades_to_fallback(self) -> None:
+        """Empty selected_urls with no other evidence falls to frontier_fallback."""
+        report = resolve_evidence(
+            offered_urls=["https://example.com/a"],
+            planner_selected_urls=[],
+            build_spec_urls=[],
+            raw_payload_urls=[],
+            root_url="https://example.com",
+        )
+        assert report.evidence_tier_used == "frontier_fallback"
+
+    def test_relative_url_matches_offered_after_resolution(self) -> None:
+        """Relative URL resolved then matched against offered via normalization."""
+        from kmbl_orchestrator.identity.crawl_evidence import extract_planner_selected_urls
+
+        bs = {"selected_urls": ["/about"]}
+        urls = extract_planner_selected_urls(bs, root_url="https://example.com")
+
+        report = resolve_evidence(
+            offered_urls=["https://example.com/about"],
+            planner_selected_urls=urls,
+            build_spec_urls=[],
+            raw_payload_urls=[],
+            root_url="https://example.com",
+        )
+        assert report.evidence_tier_used == "selected_by_planner"
+        assert report.final_visited[0].url == "https://example.com/about"
+
+    def test_tracking_param_relative_resolved_and_matched(self) -> None:
+        """Relative URL with tracking params resolves and matches after normalization."""
+        from kmbl_orchestrator.identity.crawl_evidence import extract_planner_selected_urls
+
+        bs = {"selected_urls": ["/work?utm_source=planner"]}
+        urls = extract_planner_selected_urls(bs, root_url="https://example.com")
+
+        report = resolve_evidence(
+            offered_urls=["https://example.com/work"],
+            planner_selected_urls=urls,
+            build_spec_urls=[],
+            raw_payload_urls=[],
+            root_url="https://example.com",
+        )
+        assert report.evidence_tier_used == "selected_by_planner"
+
+    def test_no_root_url_skips_relative_resolution(self) -> None:
+        """Without root_url, relative paths are silently dropped."""
+        from kmbl_orchestrator.identity.crawl_evidence import extract_planner_selected_urls
+
+        bs = {"selected_urls": ["/about", "https://example.com/abs"]}
+        urls = extract_planner_selected_urls(bs, root_url=None)
+        assert urls == ["https://example.com/abs"]
+
+    def test_integration_relative_urls_in_advance_frontier(self) -> None:
+        """End-to-end: relative planner URLs resolved and credited in advance_crawl_frontier."""
+        from kmbl_orchestrator.autonomous.loop_service import _advance_crawl_frontier
+
+        repo = InMemoryRepository()
+        iid = uuid4()
+        loop = _make_loop(identity_id=iid)
+        state = get_or_create_crawl_state(repo, iid, "https://example.com")
+        updated = state.model_copy(
+            update={"unvisited_urls": ["https://example.com/about", "https://example.com/work"]},
+        )
+        repo.upsert_crawl_state(updated)
+
+        # Planner emits relative URL
+        graph_result = {
+            "build_spec": {
+                "selected_urls": ["/about"],
+                "note": "used about page",
+            },
+            "graph_run_id": str(uuid4()),
+        }
+
+        with patch(
+            "kmbl_orchestrator.identity.page_fetch.fetch_page_data",
+            return_value=None,
+        ):
+            _advance_crawl_frontier(repo, loop, graph_result)
+
+        state = repo.get_crawl_state(iid)
+        assert "https://example.com/about" in state.visited_urls
+        prov = state.visit_provenance.get("https://example.com/about", {})
+        assert prov.get("source") == "selected_by_planner"
+        assert prov.get("tier") == EvidenceTier.SELECTED_BY_PLANNER
+
+
+class TestPlannerOutputHoisting:
+    """Tests that top-level selected_urls are hoisted into build_spec."""
+
+    def test_hoist_merges_top_level_into_build_spec(self) -> None:
+        from kmbl_orchestrator.graph.nodes_pkg.planner import _hoist_selected_urls_into_build_spec
+
+        raw = {
+            "selected_urls": ["https://example.com/a", "https://example.com/b"],
+            "build_spec": {},
+        }
+        _hoist_selected_urls_into_build_spec(raw)
+        assert raw["build_spec"]["selected_urls"] == [
+            "https://example.com/a",
+            "https://example.com/b",
+        ]
+
+    def test_hoist_deduplicates(self) -> None:
+        from kmbl_orchestrator.graph.nodes_pkg.planner import _hoist_selected_urls_into_build_spec
+
+        raw = {
+            "selected_urls": ["https://example.com/a"],
+            "build_spec": {"selected_urls": ["https://example.com/a"]},
+        }
+        _hoist_selected_urls_into_build_spec(raw)
+        assert raw["build_spec"]["selected_urls"] == ["https://example.com/a"]
+
+    def test_hoist_preserves_existing(self) -> None:
+        from kmbl_orchestrator.graph.nodes_pkg.planner import _hoist_selected_urls_into_build_spec
+
+        raw = {
+            "selected_urls": ["https://example.com/c"],
+            "build_spec": {"selected_urls": ["https://example.com/a"]},
+        }
+        _hoist_selected_urls_into_build_spec(raw)
+        assert raw["build_spec"]["selected_urls"] == [
+            "https://example.com/a",
+            "https://example.com/c",
+        ]
+
+    def test_hoist_noop_without_top_level(self) -> None:
+        from kmbl_orchestrator.graph.nodes_pkg.planner import _hoist_selected_urls_into_build_spec
+
+        raw = {"build_spec": {"other": "stuff"}}
+        _hoist_selected_urls_into_build_spec(raw)
+        assert "selected_urls" not in raw["build_spec"]
+
+    def test_hoist_noop_without_build_spec(self) -> None:
+        from kmbl_orchestrator.graph.nodes_pkg.planner import _hoist_selected_urls_into_build_spec
+
+        raw = {"selected_urls": ["https://example.com/a"]}
+        _hoist_selected_urls_into_build_spec(raw)
+        # No crash, no build_spec created
+        assert "build_spec" not in raw
+
+
+class TestCrawlContextPlannerInstruction:
+    """Tests that crawl_context includes planner instructions."""
+
+    def test_planner_instruction_present(self) -> None:
+        from kmbl_orchestrator.identity.crawl_state import (
+            build_crawl_context_for_planner,
+            get_or_create_crawl_state,
+        )
+
+        repo = InMemoryRepository()
+        iid = uuid4()
+        state = get_or_create_crawl_state(repo, iid, "https://example.com")
+        ctx = build_crawl_context_for_planner(state)
+        assert "planner_instruction" in ctx
+        assert "selected_urls" in ctx["planner_instruction"]
+
+    def test_planner_instruction_absent_when_no_state(self) -> None:
+        from kmbl_orchestrator.identity.crawl_state import build_crawl_context_for_planner
+
+        ctx = build_crawl_context_for_planner(None)
+        assert ctx.get("crawl_available") is False
+        assert "planner_instruction" not in ctx
+
+
+class TestPlannerRoleOutputContract:
+    """Tests that the planner output contract supports selected_urls."""
+
+    def test_selected_urls_accepted_in_output(self) -> None:
+        from kmbl_orchestrator.contracts.role_outputs import PlannerRoleOutput
+
+        out = PlannerRoleOutput.model_validate({
+            "build_spec": {"type": "test"},
+            "selected_urls": ["https://example.com/about"],
+        })
+        assert out.selected_urls == ["https://example.com/about"]
+
+    def test_selected_urls_defaults_to_empty(self) -> None:
+        from kmbl_orchestrator.contracts.role_outputs import PlannerRoleOutput
+
+        out = PlannerRoleOutput.model_validate({
+            "build_spec": {"type": "test"},
+        })
+        assert out.selected_urls == []
+
+    def test_selected_urls_empty_list_valid(self) -> None:
+        from kmbl_orchestrator.contracts.role_outputs import PlannerRoleOutput
+
+        out = PlannerRoleOutput.model_validate({
+            "build_spec": {"type": "test"},
+            "selected_urls": [],
+        })
+        assert out.selected_urls == []

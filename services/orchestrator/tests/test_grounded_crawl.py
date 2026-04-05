@@ -10,7 +10,7 @@ from __future__ import annotations
 from unittest.mock import patch
 from uuid import uuid4
 
-from kmbl_orchestrator.domain import AutonomousLoopRecord
+from kmbl_orchestrator.domain import AutonomousLoopRecord, BuildSpecRecord
 from kmbl_orchestrator.identity.crawl_state import (
     build_crawl_context_for_planner,
     get_or_create_crawl_state,
@@ -398,3 +398,179 @@ class TestCrawlContextGroundingFlag:
     def test_no_state_returns_unavailable(self) -> None:
         ctx = build_crawl_context_for_planner(None)
         assert ctx["crawl_available"] is False
+
+
+# ---------------------------------------------------------------------------
+# Truth loop: build_spec passthrough and raw_payload enrichment
+# ---------------------------------------------------------------------------
+
+
+def _make_build_spec_record(
+    build_spec_id=None,
+    spec_json=None,
+    raw_payload_json=None,
+) -> BuildSpecRecord:
+    """Helper to create a BuildSpecRecord for tests."""
+    return BuildSpecRecord(
+        build_spec_id=build_spec_id or uuid4(),
+        thread_id=uuid4(),
+        graph_run_id=uuid4(),
+        planner_invocation_id=uuid4(),
+        spec_json=spec_json or {},
+        raw_payload_json=raw_payload_json,
+    )
+
+
+class TestBuildSpecPassthrough:
+    """Tests that build_spec is properly forwarded from graph result to crawl frontier."""
+
+    def test_urls_extracted_from_build_spec_in_graph_result(self) -> None:
+        """When graph_result contains build_spec, URLs are extracted and grounded."""
+        from kmbl_orchestrator.autonomous.loop_service import _advance_crawl_frontier
+
+        repo = InMemoryRepository()
+        iid = uuid4()
+        loop = _make_loop(identity_id=iid)
+
+        get_or_create_crawl_state(repo, iid, "https://example.com")
+        record_page_visit(
+            repo, iid, "https://example.com/",
+            discovered_links=[
+                "https://example.com/about",
+                "https://example.com/work",
+            ],
+        )
+
+        # Simulate graph result WITH build_spec (the fix)
+        graph_result = {
+            "graph_run_id": str(uuid4()),
+            "build_spec": {
+                "title": "Portfolio",
+                "inspiration": "https://example.com/work",
+            },
+        }
+
+        with patch(
+            "kmbl_orchestrator.autonomous.loop_service._try_fetch_page",
+            return_value=None,
+        ):
+            _advance_crawl_frontier(repo, loop, graph_result)
+
+        post = repo.get_crawl_state(iid)
+        # /work was referenced in build_spec → should be visited
+        assert "https://example.com/work" in post.visited_urls
+        # /about was NOT referenced → should remain unvisited
+        assert "https://example.com/about" in post.unvisited_urls
+
+    def test_empty_build_spec_falls_back_to_first_url(self) -> None:
+        """When build_spec is empty (old-style result), fallback still works."""
+        from kmbl_orchestrator.autonomous.loop_service import _advance_crawl_frontier
+
+        repo = InMemoryRepository()
+        iid = uuid4()
+        loop = _make_loop(identity_id=iid)
+
+        get_or_create_crawl_state(repo, iid, "https://example.com")
+
+        # graph_result WITHOUT build_spec (simulates old wrapper behavior)
+        graph_result = {
+            "graph_run_id": str(uuid4()),
+        }
+
+        with patch(
+            "kmbl_orchestrator.autonomous.loop_service._try_fetch_page",
+            return_value=None,
+        ):
+            _advance_crawl_frontier(repo, loop, graph_result)
+
+        post = repo.get_crawl_state(iid)
+        # Fallback: first offered URL marked visited for forward progress
+        assert "https://example.com/" in post.visited_urls
+
+
+class TestRawPayloadEnrichment:
+    """Tests that URLs from BuildSpecRecord.raw_payload_json are also extracted."""
+
+    def test_urls_from_raw_payload_enrich_build_spec_urls(self) -> None:
+        """URLs in raw_payload_json (e.g. success_criteria) are used for grounding."""
+        from kmbl_orchestrator.autonomous.loop_service import _advance_crawl_frontier
+
+        repo = InMemoryRepository()
+        iid = uuid4()
+        loop = _make_loop(identity_id=iid)
+
+        get_or_create_crawl_state(repo, iid, "https://example.com")
+        record_page_visit(
+            repo, iid, "https://example.com/",
+            discovered_links=[
+                "https://example.com/portfolio",
+                "https://example.com/contact",
+            ],
+        )
+
+        # Create a BuildSpecRecord with URLs in raw_payload_json
+        bsid = uuid4()
+        bsr = _make_build_spec_record(
+            build_spec_id=bsid,
+            spec_json={"title": "Portfolio"},
+            raw_payload_json={
+                "build_spec": {"title": "Portfolio"},
+                "success_criteria": [
+                    "Match the layout of https://example.com/portfolio",
+                ],
+                "evaluation_targets": [
+                    {"url": "https://example.com/contact", "check": "form"},
+                ],
+            },
+        )
+        repo.save_build_spec(bsr)
+
+        # Graph result with build_spec (no URLs) but build_spec_id (has URLs in raw)
+        graph_result = {
+            "graph_run_id": str(uuid4()),
+            "build_spec": {"title": "Portfolio"},  # No URLs here
+            "build_spec_id": str(bsid),
+        }
+
+        with patch(
+            "kmbl_orchestrator.autonomous.loop_service._try_fetch_page",
+            return_value=None,
+        ):
+            _advance_crawl_frontier(repo, loop, graph_result)
+
+        post = repo.get_crawl_state(iid)
+        # Both URLs should be visited (found in raw_payload_json)
+        assert "https://example.com/portfolio" in post.visited_urls
+        assert "https://example.com/contact" in post.visited_urls
+
+    def test_missing_build_spec_id_gracefully_degrades(self) -> None:
+        """When build_spec_id is missing, enrichment is skipped without error."""
+        from kmbl_orchestrator.autonomous.loop_service import _enrich_urls_from_raw_payload
+
+        repo = InMemoryRepository()
+        existing = ["https://example.com/about"]
+
+        result = _enrich_urls_from_raw_payload(repo, {}, existing)
+        assert result == existing
+
+    def test_enrichment_deduplicates_urls(self) -> None:
+        """URLs already found in build_spec are not duplicated by raw_payload."""
+        from kmbl_orchestrator.autonomous.loop_service import _enrich_urls_from_raw_payload
+
+        repo = InMemoryRepository()
+        bsid = uuid4()
+        bsr = _make_build_spec_record(
+            build_spec_id=bsid,
+            raw_payload_json={
+                "note": "Inspired by https://example.com/about and https://example.com/new",
+            },
+        )
+        repo.save_build_spec(bsr)
+
+        existing = ["https://example.com/about"]
+        result = _enrich_urls_from_raw_payload(
+            repo, {"build_spec_id": str(bsid)}, existing,
+        )
+        # /about already existed, /new is new
+        assert result.count("https://example.com/about") == 1
+        assert "https://example.com/new" in result

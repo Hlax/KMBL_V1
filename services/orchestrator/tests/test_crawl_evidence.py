@@ -1111,9 +1111,7 @@ class TestPlannerContractSelectedUrls:
 
         bs = {"selected_urls": ["/about"]}
         urls = extract_planner_selected_urls(bs, root_url="https://example.com")
-        assert len(urls) == 1
-        assert "example.com" in urls[0]
-        assert "about" in urls[0]
+        assert urls == ["https://example.com/about"]
 
         report = resolve_evidence(
             offered_urls=["https://example.com/about"],
@@ -1130,9 +1128,7 @@ class TestPlannerContractSelectedUrls:
 
         bs = {"selected_urls": ["work/project-a"]}
         urls = extract_planner_selected_urls(bs, root_url="https://example.com/")
-        assert len(urls) == 1
-        assert "example.com" in urls[0]
-        assert "work/project-a" in urls[0]
+        assert urls == ["https://example.com/work/project-a"]
 
     def test_dot_slash_relative_resolved(self) -> None:
         """Planner emitting './contact' resolves against root."""
@@ -1140,9 +1136,7 @@ class TestPlannerContractSelectedUrls:
 
         bs = {"selected_urls": ["./contact"]}
         urls = extract_planner_selected_urls(bs, root_url="https://example.com/")
-        assert len(urls) == 1
-        assert "example.com" in urls[0]
-        assert "contact" in urls[0]
+        assert urls == ["https://example.com/contact"]
 
     def test_fragment_only_rejected(self) -> None:
         """Fragment-only (#section) is rejected — not a page URL."""

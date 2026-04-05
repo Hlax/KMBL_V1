@@ -442,8 +442,9 @@ def _resolve_planner_url(raw: str, root_url: str | None) -> str | None:
     if raw.startswith("http://") or raw.startswith("https://"):
         return raw
 
-    # Reject clearly non-http schemes
-    if ":" in raw.split("/")[0] and not raw.startswith("/"):
+    # Reject clearly non-http schemes using urlparse for reliable detection
+    parsed = urlparse(raw)
+    if parsed.scheme and parsed.scheme not in ("http", "https"):
         # e.g. ftp://..., mailto:..., javascript:..., data:...
         return None
 

@@ -1333,7 +1333,7 @@ class TestPlannerOutputHoisting:
 class TestCrawlContextPlannerInstruction:
     """Tests that crawl_context includes planner instructions."""
 
-    def test_planner_instruction_present(self) -> None:
+    def test_selected_urls_contract_present(self) -> None:
         from kmbl_orchestrator.identity.crawl_state import (
             build_crawl_context_for_planner,
             get_or_create_crawl_state,
@@ -1343,15 +1343,20 @@ class TestCrawlContextPlannerInstruction:
         iid = uuid4()
         state = get_or_create_crawl_state(repo, iid, "https://example.com")
         ctx = build_crawl_context_for_planner(state)
-        assert "planner_instruction" in ctx
-        assert "selected_urls" in ctx["planner_instruction"]
+        assert "selected_urls_contract" in ctx
+        contract = ctx["selected_urls_contract"]
+        assert "instruction" in contract
+        assert "selected_urls" in contract["instruction"]
+        assert "examples" in contract
+        assert len(contract["examples"]) >= 2
+        assert "forbidden" in contract
 
-    def test_planner_instruction_absent_when_no_state(self) -> None:
+    def test_selected_urls_contract_absent_when_no_state(self) -> None:
         from kmbl_orchestrator.identity.crawl_state import build_crawl_context_for_planner
 
         ctx = build_crawl_context_for_planner(None)
         assert ctx.get("crawl_available") is False
-        assert "planner_instruction" not in ctx
+        assert "selected_urls_contract" not in ctx
 
 
 class TestPlannerRoleOutputContract:
@@ -1382,3 +1387,405 @@ class TestPlannerRoleOutputContract:
             "selected_urls": [],
         })
         assert out.selected_urls == []
+
+
+# ---------------------------------------------------------------------------
+# Planner compliance metrics (FIX 2)
+# ---------------------------------------------------------------------------
+
+
+class TestPlannerComplianceMetrics:
+    """Tests that compliance metrics capture planner behavior accurately."""
+
+    def test_compliant_planner_with_selected_urls(self) -> None:
+        """When planner returns valid selected_urls matching offered, metrics reflect compliance."""
+        from kmbl_orchestrator.identity.crawl_evidence import compute_planner_compliance
+
+        compliance = compute_planner_compliance(
+            offered_urls=["https://example.com/about", "https://example.com/work"],
+            raw_planner_selected=["https://example.com/about"],
+            resolved_planner_selected=["https://example.com/about"],
+            matched_count=1,
+            build_spec_urls=["https://example.com/about"],
+            evidence_tier_used="selected_by_planner",
+            root_url="https://example.com",
+        )
+        assert compliance["selected_urls_present"] is True
+        assert compliance["selected_urls_count"] == 1
+        assert compliance["selected_urls_valid_count"] == 1
+        assert compliance["selected_urls_matched_count"] == 1
+        assert compliance["selected_urls_rejected_count"] == 0
+        assert compliance["tier2_evidence_fired"] is True
+        assert compliance["frontier_was_offered"] is True
+        assert compliance["omitted_despite_frontier"] is False
+
+    def test_planner_omits_selected_urls_despite_frontier(self) -> None:
+        """When planner omits selected_urls but frontier was offered → non-compliance flagged."""
+        from kmbl_orchestrator.identity.crawl_evidence import compute_planner_compliance
+
+        compliance = compute_planner_compliance(
+            offered_urls=["https://example.com/about"],
+            raw_planner_selected=[],
+            resolved_planner_selected=[],
+            matched_count=0,
+            build_spec_urls=[],
+            evidence_tier_used="frontier_fallback",
+            root_url="https://example.com",
+        )
+        assert compliance["selected_urls_present"] is False
+        assert compliance["omitted_despite_frontier"] is True
+        assert compliance["tier2_evidence_fired"] is False
+        assert compliance["degraded_to_tier"] == "frontier_fallback"
+
+    def test_planner_selected_urls_rejected_count(self) -> None:
+        """When planner selects URLs not in offered set → rejected_count > 0."""
+        from kmbl_orchestrator.identity.crawl_evidence import compute_planner_compliance
+
+        compliance = compute_planner_compliance(
+            offered_urls=["https://example.com/about"],
+            raw_planner_selected=["https://example.com/about", "https://example.com/INVENTED"],
+            resolved_planner_selected=["https://example.com/about", "https://example.com/INVENTED"],
+            matched_count=1,
+            build_spec_urls=[],
+            evidence_tier_used="selected_by_planner",
+            root_url="https://example.com",
+        )
+        assert compliance["selected_urls_count"] == 2
+        assert compliance["selected_urls_valid_count"] == 2
+        assert compliance["selected_urls_matched_count"] == 1
+        assert compliance["selected_urls_rejected_count"] == 1
+
+    def test_no_frontier_offered(self) -> None:
+        """When no frontier URLs were offered, no non-compliance flagged."""
+        from kmbl_orchestrator.identity.crawl_evidence import compute_planner_compliance
+
+        compliance = compute_planner_compliance(
+            offered_urls=[],
+            raw_planner_selected=[],
+            resolved_planner_selected=[],
+            matched_count=0,
+            build_spec_urls=[],
+            evidence_tier_used="",
+            root_url="https://example.com",
+        )
+        assert compliance["frontier_was_offered"] is False
+        assert compliance["omitted_despite_frontier"] is False
+
+    def test_degraded_tier_is_none_when_tier2_fires(self) -> None:
+        """degraded_to_tier should be None when tier-2 fires."""
+        from kmbl_orchestrator.identity.crawl_evidence import compute_planner_compliance
+
+        compliance = compute_planner_compliance(
+            offered_urls=["https://example.com/a"],
+            raw_planner_selected=["https://example.com/a"],
+            resolved_planner_selected=["https://example.com/a"],
+            matched_count=1,
+            build_spec_urls=[],
+            evidence_tier_used="selected_by_planner",
+            root_url="https://example.com",
+        )
+        assert compliance["degraded_to_tier"] is None
+
+    def test_degraded_to_build_spec_structured(self) -> None:
+        """When planner selects but none match, degrades to build_spec_structured."""
+        from kmbl_orchestrator.identity.crawl_evidence import compute_planner_compliance
+
+        compliance = compute_planner_compliance(
+            offered_urls=["https://example.com/a"],
+            raw_planner_selected=["https://example.com/NOT_OFFERED"],
+            resolved_planner_selected=["https://example.com/NOT_OFFERED"],
+            matched_count=0,
+            build_spec_urls=["https://example.com/a"],
+            evidence_tier_used="build_spec_structured",
+            root_url="https://example.com",
+        )
+        assert compliance["selected_urls_present"] is True
+        assert compliance["tier2_evidence_fired"] is False
+        assert compliance["degraded_to_tier"] == "build_spec_structured"
+
+
+# ---------------------------------------------------------------------------
+# Consistency signal (FIX 3)
+# ---------------------------------------------------------------------------
+
+
+class TestSelectedUrlsConsistencySignal:
+    """Tests that selected_urls_consistent_with_output is computed correctly."""
+
+    def test_consistent_when_selected_in_build_spec(self) -> None:
+        """selected URL also appears in build_spec → consistent."""
+        from kmbl_orchestrator.identity.crawl_evidence import compute_planner_compliance
+
+        compliance = compute_planner_compliance(
+            offered_urls=["https://example.com/about"],
+            raw_planner_selected=["https://example.com/about"],
+            resolved_planner_selected=["https://example.com/about"],
+            matched_count=1,
+            build_spec_urls=["https://example.com/about", "https://example.com/work"],
+            evidence_tier_used="selected_by_planner",
+            root_url="https://example.com",
+        )
+        assert compliance["selected_urls_consistent_with_output"] is True
+
+    def test_inconsistent_when_selected_not_in_build_spec(self) -> None:
+        """selected URL is not referenced anywhere in build_spec → inconsistent."""
+        from kmbl_orchestrator.identity.crawl_evidence import compute_planner_compliance
+
+        compliance = compute_planner_compliance(
+            offered_urls=["https://example.com/about"],
+            raw_planner_selected=["https://example.com/about"],
+            resolved_planner_selected=["https://example.com/about"],
+            matched_count=1,
+            build_spec_urls=["https://example.com/work"],  # different!
+            evidence_tier_used="selected_by_planner",
+            root_url="https://example.com",
+        )
+        assert compliance["selected_urls_consistent_with_output"] is False
+
+    def test_consistent_false_when_no_selected(self) -> None:
+        """No selected URLs → consistent is False."""
+        from kmbl_orchestrator.identity.crawl_evidence import compute_planner_compliance
+
+        compliance = compute_planner_compliance(
+            offered_urls=["https://example.com/about"],
+            raw_planner_selected=[],
+            resolved_planner_selected=[],
+            matched_count=0,
+            build_spec_urls=["https://example.com/about"],
+            evidence_tier_used="build_spec_structured",
+            root_url="https://example.com",
+        )
+        assert compliance["selected_urls_consistent_with_output"] is False
+
+    def test_consistent_with_normalized_urls(self) -> None:
+        """Normalization (trailing slash, etc.) shouldn't break consistency check."""
+        from kmbl_orchestrator.identity.crawl_evidence import compute_planner_compliance
+
+        compliance = compute_planner_compliance(
+            offered_urls=["https://example.com/about/"],
+            raw_planner_selected=["https://example.com/about"],
+            resolved_planner_selected=["https://example.com/about"],
+            matched_count=1,
+            build_spec_urls=["https://example.com/about/"],  # trailing slash
+            evidence_tier_used="selected_by_planner",
+            root_url="https://example.com",
+        )
+        assert compliance["selected_urls_consistent_with_output"] is True
+
+
+# ---------------------------------------------------------------------------
+# Integration: compliance events in _advance_crawl_frontier
+# ---------------------------------------------------------------------------
+
+
+class TestComplianceEventIntegration:
+    """Tests that _advance_crawl_frontier emits compliance events."""
+
+    def test_compliance_event_emitted_on_advance(self) -> None:
+        """PLANNER_CRAWL_COMPLIANCE event is emitted with metrics."""
+        from kmbl_orchestrator.autonomous.loop_service import _advance_crawl_frontier
+
+        repo = InMemoryRepository()
+        iid = uuid4()
+        loop = _make_loop(identity_id=iid)
+        state = get_or_create_crawl_state(repo, iid, "https://example.com")
+        updated = state.model_copy(
+            update={"unvisited_urls": ["https://example.com/about"]},
+        )
+        repo.upsert_crawl_state(updated)
+
+        grun_id = uuid4()
+        repo.save_graph_run(GraphRunRecord(
+            graph_run_id=grun_id,
+            thread_id=uuid4(),
+            identity_id=iid,
+            trigger_type="autonomous_loop",
+            status="completed",
+        ))
+
+        graph_result = {
+            "build_spec": {
+                "selected_urls": ["https://example.com/about"],
+            },
+            "graph_run_id": grun_id,
+        }
+
+        with patch(
+            "kmbl_orchestrator.identity.page_fetch.fetch_page_data",
+            return_value=None,
+        ):
+            _advance_crawl_frontier(repo, loop, graph_result)
+
+        events = repo.list_graph_run_events(grun_id)
+        compliance_events = [
+            e for e in events
+            if e.event_type == RunEventType.PLANNER_CRAWL_COMPLIANCE
+        ]
+        assert len(compliance_events) == 1
+        payload = compliance_events[0].payload_json
+        assert payload["selected_urls_present"] is True
+        assert payload["selected_urls_count"] == 1
+        assert payload["tier2_evidence_fired"] is True
+        assert payload["omitted_despite_frontier"] is False
+
+    def test_compliance_event_non_compliant_planner(self) -> None:
+        """When planner omits selected_urls, compliance event captures non-compliance."""
+        from kmbl_orchestrator.autonomous.loop_service import _advance_crawl_frontier
+
+        repo = InMemoryRepository()
+        iid = uuid4()
+        loop = _make_loop(identity_id=iid)
+        state = get_or_create_crawl_state(repo, iid, "https://example.com")
+        updated = state.model_copy(
+            update={"unvisited_urls": ["https://example.com/about"]},
+        )
+        repo.upsert_crawl_state(updated)
+
+        grun_id = uuid4()
+        repo.save_graph_run(GraphRunRecord(
+            graph_run_id=grun_id,
+            thread_id=uuid4(),
+            identity_id=iid,
+            trigger_type="autonomous_loop",
+            status="completed",
+        ))
+
+        # Planner did not return selected_urls at all
+        graph_result = {
+            "build_spec": {
+                "title": "test build",
+            },
+            "graph_run_id": grun_id,
+        }
+
+        with patch(
+            "kmbl_orchestrator.identity.page_fetch.fetch_page_data",
+            return_value=None,
+        ):
+            _advance_crawl_frontier(repo, loop, graph_result)
+
+        events = repo.list_graph_run_events(grun_id)
+        compliance_events = [
+            e for e in events
+            if e.event_type == RunEventType.PLANNER_CRAWL_COMPLIANCE
+        ]
+        assert len(compliance_events) == 1
+        payload = compliance_events[0].payload_json
+        assert payload["selected_urls_present"] is False
+        assert payload["omitted_despite_frontier"] is True
+        assert payload["tier2_evidence_fired"] is False
+
+    def test_compliance_in_report_to_dict(self) -> None:
+        """CrawlAdvancementReport.to_dict() includes planner_compliance."""
+        report = CrawlAdvancementReport(
+            planner_compliance={"selected_urls_present": True, "tier2_evidence_fired": True},
+        )
+        d = report.to_dict()
+        assert "planner_compliance" in d
+        assert d["planner_compliance"]["selected_urls_present"] is True
+
+    def test_compliance_defaults_to_empty_dict(self) -> None:
+        """Default planner_compliance is empty dict."""
+        report = CrawlAdvancementReport()
+        assert report.planner_compliance == {}
+        d = report.to_dict()
+        assert d["planner_compliance"] == {}
+
+    def test_consistency_signal_in_integration(self) -> None:
+        """End-to-end: consistency signal computed when selected matches build_spec."""
+        from kmbl_orchestrator.autonomous.loop_service import _advance_crawl_frontier
+
+        repo = InMemoryRepository()
+        iid = uuid4()
+        loop = _make_loop(identity_id=iid)
+        state = get_or_create_crawl_state(repo, iid, "https://example.com")
+        updated = state.model_copy(
+            update={"unvisited_urls": ["https://example.com/about"]},
+        )
+        repo.upsert_crawl_state(updated)
+
+        grun_id = uuid4()
+        repo.save_graph_run(GraphRunRecord(
+            graph_run_id=grun_id,
+            thread_id=uuid4(),
+            identity_id=iid,
+            trigger_type="autonomous_loop",
+            status="completed",
+        ))
+
+        # Planner selected /about AND referenced it in build_spec
+        graph_result = {
+            "build_spec": {
+                "selected_urls": ["https://example.com/about"],
+                "reference_urls": ["https://example.com/about"],
+                "sections": [{"url": "https://example.com/about"}],
+            },
+            "graph_run_id": grun_id,
+        }
+
+        with patch(
+            "kmbl_orchestrator.identity.page_fetch.fetch_page_data",
+            return_value=None,
+        ):
+            _advance_crawl_frontier(repo, loop, graph_result)
+
+        events = repo.list_graph_run_events(grun_id)
+        compliance_events = [
+            e for e in events
+            if e.event_type == RunEventType.PLANNER_CRAWL_COMPLIANCE
+        ]
+        assert len(compliance_events) == 1
+        payload = compliance_events[0].payload_json
+        assert payload["selected_urls_consistent_with_output"] is True
+
+
+# ---------------------------------------------------------------------------
+# Contract examples in crawl_context
+# ---------------------------------------------------------------------------
+
+
+class TestSelectedUrlsContractExamples:
+    """Tests that the selected_urls_contract has properly structured examples."""
+
+    def test_contract_has_absolute_url_example(self) -> None:
+        from kmbl_orchestrator.identity.crawl_state import _SELECTED_URLS_CONTRACT
+
+        examples = _SELECTED_URLS_CONTRACT["examples"]
+        # At least one example uses absolute URLs
+        abs_example = next(
+            (e for e in examples if any(
+                u.startswith("https://") for u in e["correct_output"]["selected_urls"]
+            )),
+            None,
+        )
+        assert abs_example is not None
+
+    def test_contract_has_relative_url_example(self) -> None:
+        from kmbl_orchestrator.identity.crawl_state import _SELECTED_URLS_CONTRACT
+
+        examples = _SELECTED_URLS_CONTRACT["examples"]
+        # At least one example uses relative paths
+        rel_example = next(
+            (e for e in examples if any(
+                u.startswith("/") for u in e["correct_output"]["selected_urls"]
+            )),
+            None,
+        )
+        assert rel_example is not None
+
+    def test_contract_has_empty_example(self) -> None:
+        from kmbl_orchestrator.identity.crawl_state import _SELECTED_URLS_CONTRACT
+
+        examples = _SELECTED_URLS_CONTRACT["examples"]
+        # At least one example with empty selected_urls
+        empty_example = next(
+            (e for e in examples if e["correct_output"]["selected_urls"] == []),
+            None,
+        )
+        assert empty_example is not None
+
+    def test_contract_forbids_invented_urls(self) -> None:
+        from kmbl_orchestrator.identity.crawl_state import _SELECTED_URLS_CONTRACT
+
+        forbidden = _SELECTED_URLS_CONTRACT["forbidden"]
+        assert "not in" in forbidden.lower() or "invented" in forbidden.lower()

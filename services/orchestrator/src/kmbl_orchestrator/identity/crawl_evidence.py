@@ -91,6 +91,9 @@ class CrawlAdvancementReport:
     domain_filtered_count: int = 0
     capped_count: int = 0
 
+    # --- Planner compliance metrics (FIX 2) ---
+    planner_compliance: dict[str, Any] = field(default_factory=dict)
+
     def to_dict(self) -> dict[str, Any]:
         """Serialise for event payload / logging."""
         return {
@@ -109,6 +112,7 @@ class CrawlAdvancementReport:
             "raw_payload_credits": self.raw_payload_credits,
             "domain_filtered_count": self.domain_filtered_count,
             "capped_count": self.capped_count,
+            "planner_compliance": self.planner_compliance,
         }
 
 
@@ -456,6 +460,68 @@ def _resolve_planner_url(raw: str, root_url: str | None) -> str | None:
     if root_url:
         from kmbl_orchestrator.identity.url_normalize import resolve_url
         return resolve_url(raw, root_url)
+
+
+# ---------------------------------------------------------------------------
+# Planner compliance validation + consistency check (FIX 2 + FIX 3)
+# ---------------------------------------------------------------------------
+
+
+def compute_planner_compliance(
+    *,
+    offered_urls: list[str],
+    raw_planner_selected: list[str],
+    resolved_planner_selected: list[str],
+    matched_count: int,
+    build_spec_urls: list[str],
+    evidence_tier_used: str,
+    root_url: str,
+) -> dict[str, Any]:
+    """Compute planner compliance metrics for observability.
+
+    Returns a dict suitable for inclusion in the CrawlAdvancementReport
+    and event payloads.  Fields:
+
+    * ``selected_urls_present`` — planner returned a non-empty selected_urls
+    * ``selected_urls_count`` — raw count before normalization/resolution
+    * ``selected_urls_valid_count`` — count after resolution (http/https only)
+    * ``selected_urls_matched_count`` — count that matched offered frontier
+    * ``selected_urls_rejected_count`` — valid but not in offered set
+    * ``tier2_evidence_fired`` — whether tier-2 (selected_by_planner) was used
+    * ``degraded_to_tier`` — which tier was actually used (if not tier-2)
+    * ``frontier_was_offered`` — whether offered_urls was non-empty
+    * ``omitted_despite_frontier`` — planner had URLs to pick from but didn't
+    * ``selected_urls_consistent_with_output`` — at least one selected URL also
+      appears in build_spec structured output (lightweight confidence signal)
+    """
+    frontier_offered = bool(offered_urls)
+    present = bool(raw_planner_selected)
+    raw_count = len(raw_planner_selected)
+    valid_count = len(resolved_planner_selected)
+    rejected_count = valid_count - matched_count
+    tier2_fired = evidence_tier_used == EvidenceTier.label(EvidenceTier.SELECTED_BY_PLANNER)
+
+    # --- FIX 3: consistency check ---
+    # Compare selected_urls against build_spec_urls using normalization.
+    consistent = False
+    if resolved_planner_selected and build_spec_urls:
+        sel_norm = {normalize_url(u) for u in resolved_planner_selected}
+        bs_norm = {normalize_url(u) for u in build_spec_urls}
+        consistent = bool(sel_norm & bs_norm)
+
+    return {
+        "selected_urls_present": present,
+        "selected_urls_count": raw_count,
+        "selected_urls_valid_count": valid_count,
+        "selected_urls_matched_count": matched_count,
+        "selected_urls_rejected_count": rejected_count,
+        "tier2_evidence_fired": tier2_fired,
+        "crawl_evidence_tier_used": evidence_tier_used,
+        "degraded_to_tier": evidence_tier_used if not tier2_fired else None,
+        "frontier_was_offered": frontier_offered,
+        "omitted_despite_frontier": frontier_offered and not present,
+        "selected_urls_consistent_with_output": consistent,
+    }
 
 
 # ---------------------------------------------------------------------------

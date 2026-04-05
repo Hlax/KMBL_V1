@@ -593,7 +593,7 @@ def _enrich_urls_from_raw_payload(
         return existing_urls
 
     try:
-        record = repo.get_build_spec(UUID(str(build_spec_id)))
+        record = repo.get_build_spec(UUID(build_spec_id) if not isinstance(build_spec_id, UUID) else build_spec_id)
         if record is None or not record.raw_payload_json:
             return existing_urls
 

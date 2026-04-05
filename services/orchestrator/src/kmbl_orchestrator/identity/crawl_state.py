@@ -36,6 +36,12 @@ _MAX_UNVISITED = 200
 _MAX_VISITED = 500
 # Max page summaries to retain
 _MAX_PAGE_SUMMARIES = 100
+# Max characters for a page summary
+_MAX_SUMMARY_LENGTH = 300
+# Max design signals per page
+_MAX_DESIGN_SIGNALS_PER_PAGE = 10
+# Max tone keywords per page
+_MAX_TONE_KEYWORDS_PER_PAGE = 8
 # Max external inspiration URLs
 _MAX_EXTERNAL_URLS = 20
 # Default external inspiration URLs when internal crawl is exhausted
@@ -139,9 +145,9 @@ def record_page_visit(
     summaries = dict(state.page_summaries)
     if len(summaries) < _MAX_PAGE_SUMMARIES:
         summaries[normalized] = {
-            "summary": (summary or "")[:300],
-            "design_signals": (design_signals or [])[:10],
-            "tone_keywords": (tone_keywords or [])[:8],
+            "summary": (summary or "")[:_MAX_SUMMARY_LENGTH],
+            "design_signals": (design_signals or [])[:_MAX_DESIGN_SIGNALS_PER_PAGE],
+            "tone_keywords": (tone_keywords or [])[:_MAX_TONE_KEYWORDS_PER_PAGE],
             "crawled_at": now,
         }
 

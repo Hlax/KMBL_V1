@@ -230,7 +230,8 @@ class TestCrawlExhaustion:
             repo, iid, "https://example.com",
             discovered_links=["/about", "/about", "/about"],  # duplicate hrefs
         )
-        about_count = sum(1 for u in state.unvisited_urls if "/about" in u)
+        about_url = normalize_url("https://example.com/about")
+        about_count = sum(1 for u in state.unvisited_urls if u == about_url)
         assert about_count == 1
 
 

@@ -181,6 +181,7 @@ async def _tick_identity_fetch(
     # This records the initial page visit(s) and seeds the unvisited frontier
     # so that future runs can resume crawling from where we left off.
     from kmbl_orchestrator.identity.crawl_state import (
+        _MAX_SUMMARY_LENGTH,
         get_or_create_crawl_state,
         record_page_visit,
     )
@@ -191,7 +192,7 @@ async def _tick_identity_fetch(
             repo,
             loop.identity_id,
             page_url,
-            summary=seed.to_profile_summary()[:200] if page_url == seed.source_url else "",
+            summary=seed.to_profile_summary()[:_MAX_SUMMARY_LENGTH] if page_url == seed.source_url else "",
             tone_keywords=list(seed.tone_keywords or []),
             design_signals=list(seed.aesthetic_keywords or []),
         )

@@ -74,7 +74,7 @@ def resolve_url(href: str, base_url: str) -> str | None:
 
     Returns normalized absolute URL or None if unresolvable.
     """
-    if not href or href.startswith(_IGNORE_SCHEMES):
+    if not isinstance(href, str) or not href or href.startswith(_IGNORE_SCHEMES):
         return None
     try:
         absolute = urljoin(base_url, href)

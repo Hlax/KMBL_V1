@@ -314,8 +314,10 @@ def build_crawl_context_for_planner(
         "grounding_available": has_real_data,
         # Planner instructions for selected_urls contract:
         "planner_instruction": (
-            "Return `selected_urls` containing the exact URLs from "
+            "Return `selected_urls` containing the URLs from "
             "`next_urls_to_crawl` that you consulted or used. "
-            "Use absolute URLs exactly as listed. Return [] if none were used."
+            "Prefer absolute URLs exactly as listed. Relative paths "
+            "(e.g. /about) are accepted and will be resolved. "
+            "Return [] if none were used."
         ),
     }

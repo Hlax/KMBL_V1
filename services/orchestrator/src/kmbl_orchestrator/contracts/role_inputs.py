@@ -73,9 +73,10 @@ class PlannerRoleInput(BaseModel):
             "\n\n"
             "When crawl_context is present and next_urls_to_crawl is non-empty, the planner "
             "MUST return `selected_urls` — the subset of next_urls_to_crawl URLs it actually "
-            "consulted or used. Prefer exact URLs from next_urls_to_crawl (do not invent new "
-            "URLs). Return [] if no frontier URLs were used. This enables tier-2 evidence "
-            "(selected_by_planner) for auditable crawl progression."
+            "consulted or used. Prefer exact absolute URLs from next_urls_to_crawl; relative "
+            "paths (e.g. /about) are accepted and will be resolved against root_url. Do not "
+            "invent URLs not in the offered set. Return [] if no frontier URLs were used. "
+            "This enables tier-2 evidence (selected_by_planner) for auditable crawl progression."
         ),
     )
 

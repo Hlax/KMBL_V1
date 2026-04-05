@@ -217,11 +217,11 @@ def test_graph_run_detail_generator_routing_hints_persisted(clear_singleton: Non
             ended_at="2026-03-29T10:02:00+00:00",
             routing_metadata_json={
                 "kmb_routing_version": 3,
-                "generator_route_kind": "kiloclaw_image_agent",
+                "generator_route_kind": "openclaw_image_agent",
                 "openai_image_route_applied": True,
                 "image_generation_intent_kind": "gallery_strip",
                 "budget_denial_reason": None,
-                "route_reason": "kiloclaw_image_agent_route_applied",
+                "route_reason": "openclaw_image_agent_route_applied",
             },
         )
     )
@@ -239,7 +239,7 @@ def test_graph_run_detail_generator_routing_hints_persisted(clear_singleton: Non
         assert len(invs) == 1
         g0 = invs[0]
         assert g0["routing_fact_source"] == "persisted"
-        assert g0["routing_hints"]["generator_route_kind"] == "kiloclaw_image_agent"
+        assert g0["routing_hints"]["generator_route_kind"] == "openclaw_image_agent"
         assert g0["routing_hints"]["openai_image_route_applied"] is True
     finally:
         app.dependency_overrides.clear()

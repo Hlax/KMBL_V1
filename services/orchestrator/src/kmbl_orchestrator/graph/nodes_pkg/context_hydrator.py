@@ -9,6 +9,7 @@ from uuid import UUID
 from kmbl_orchestrator.graph.state import GraphState
 from kmbl_orchestrator.runtime.interrupt_checks import raise_if_interrupt_requested
 from kmbl_orchestrator.identity.brief import build_identity_brief_from_repo
+from kmbl_orchestrator.identity.sanitize import sanitize_identity_brief_payload
 from kmbl_orchestrator.identity.hydrate import build_planner_identity_context
 from kmbl_orchestrator.identity.profile import extract_structured_identity
 from kmbl_orchestrator.memory.ops import (
@@ -50,7 +51,9 @@ def context_hydrator(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             # This is the fix: identity survives past the planner boundary.
             brief = build_identity_brief_from_repo(ctx.repo, iid_uuid)
             if brief is not None:
-                identity_brief_payload = brief.to_generator_payload()
+                identity_brief_payload = sanitize_identity_brief_payload(
+                    brief.to_generator_payload()
+                )
 
             # Build structured identity profile for intent-driven planning.
             # This provides themes, tone, visual_tendencies, content_types, complexity
@@ -101,6 +104,10 @@ def context_hydrator(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     # If identity_brief was already set in state (e.g. resume), keep it
     if identity_brief_payload is None:
         identity_brief_payload = state.get("identity_brief")
+    if identity_brief_payload is not None:
+        identity_brief_payload = sanitize_identity_brief_payload(
+            dict(identity_brief_payload) if isinstance(identity_brief_payload, dict) else {}
+        )
     if structured_identity_payload is None:
         structured_identity_payload = state.get("structured_identity")
 
@@ -169,7 +176,7 @@ def context_hydrator(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         "compacted_context": state.get("compacted_context") or {},
         "event_input": ei,
     }
-    if identity_brief_payload is not None:
+    if identity_brief_payload is not None and identity_brief_payload:
         out["identity_brief"] = identity_brief_payload
     if structured_identity_payload is not None:
         out["structured_identity"] = structured_identity_payload

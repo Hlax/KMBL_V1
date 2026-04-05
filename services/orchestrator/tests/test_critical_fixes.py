@@ -36,7 +36,7 @@ from kmbl_orchestrator.persistence.repository import InMemoryRepository
 
 def _make_settings(**overrides: Any) -> Settings:
     defaults = {
-        "kiloclaw_transport": "stub",
+        "openclaw_transport": "stub",
         "graph_max_iterations_default": 2,
         "habitat_image_generation_enabled": False,
         "identity_allow_fallback_profile": True,
@@ -510,7 +510,7 @@ class TestAutonomousLoopRetryContextGeneratorMerge:
         repo, iid_str = _make_repo_with_identity()
         iid = UUID(iid_str)
         settings = Settings.model_construct(
-            kiloclaw_transport="stub",
+            openclaw_transport="stub",
             graph_max_iterations_default=2,
             habitat_image_generation_enabled=False,
             identity_allow_fallback_profile=True,

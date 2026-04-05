@@ -3,6 +3,10 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 
 import { scenarioBadgeFromScenarioTag, scenarioBadgeLabel } from "@/lib/gallery-strip-visibility";
+import {
+  fetchRunStartExclusive,
+  isRunStartBlocked,
+} from "@/lib/run-start-single-flight";
 
 /** Next.js API route wrapper around orchestrator JSON (and 502/500 envelopes). */
 type ProxyPayload = {
@@ -429,12 +433,18 @@ export function RunDebugPanel() {
               : { scenario_preset: "seeded_gallery_strip_varied_v1" as const };
       let merged: ProxyPayload | null = null;
       try {
-        const res = await fetch("/api/orchestrator/runs/start", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-          cache: "no-store",
-        });
+        const res = await fetchRunStartExclusive(
+          "/api/orchestrator/runs/start",
+          body,
+          { cache: "no-store" },
+        );
+        if (isRunStartBlocked(res)) {
+          setStartResult({
+            ok: false,
+            error: res.message,
+          });
+          return;
+        }
         const json = (await res.json()) as ProxyPayload;
         merged = {
           ...json,

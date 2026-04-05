@@ -15,7 +15,12 @@ def normalize_planner_output(
     graph_run_id: UUID,
     planner_invocation_id: UUID,
 ) -> BuildSpecRecord:
-    """Map KiloClaw planner JSON into persisted build_spec columns."""
+    """
+    Map KiloClaw planner JSON into persisted build_spec columns.
+
+    Callers must run ``canonicalize_planner_raw`` earlier in the pipeline so nested LLM
+    shapes are hoisted before cool-lane presets and persistence.
+    """
     build_spec_id = uuid4()
     spec = raw.get("build_spec")
     if not isinstance(spec, dict):

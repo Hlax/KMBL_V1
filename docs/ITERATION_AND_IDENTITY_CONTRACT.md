@@ -14,7 +14,7 @@ Built in [`runtime/iteration_plan.py`](../services/orchestrator/src/kmbl_orchest
 | `evaluator_status` | Last pass/partial/fail. |
 | `stagnation_count` / `pressure_recommendation` | From working-staging facts (pressure subsystem). |
 
-Planner prompts in [`docs/kiloclaw-agents/`](./kiloclaw-agents/) should reference `identity_context.facets_json.evolution_signals` and `recent_quality_trend` when choosing **success_criteria** and **evaluation_targets**.
+Planner prompts in [`docs/openclaw-agents/`](./openclaw-agents/) should reference `identity_context.facets_json.evolution_signals` and `recent_quality_trend` when choosing **success_criteria** and **evaluation_targets**.
 
 ## `evolution_signals` (identity profile)
 

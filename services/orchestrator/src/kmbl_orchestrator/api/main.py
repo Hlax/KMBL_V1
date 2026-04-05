@@ -34,6 +34,7 @@ from kmbl_orchestrator.persistence.factory import (
     persisted_graph_runs_available,
     repository_backend,
 )
+from kmbl_orchestrator.persistence.exceptions import ActiveGraphRunPerThreadConflictError
 from kmbl_orchestrator.persistence.repository import Repository
 from kmbl_orchestrator.roles.invoke import DefaultRoleInvoker
 from kmbl_orchestrator.runtime.kilo_model_routing import (
@@ -61,8 +62,8 @@ from kmbl_orchestrator.runtime.run_resume import (
 )
 from kmbl_orchestrator.providers.kiloclaw_protocol import (
     KiloclawTransportConfigError,
-    compute_kiloclaw_resolution,
-    log_kiloclaw_transport_banner,
+    compute_openclaw_resolution,
+    log_openclaw_transport_banner,
 )
 from kmbl_orchestrator.runtime.run_events import (
     RunEventType,
@@ -109,7 +110,7 @@ def _orchestrator_verbose_logging() -> None:
 async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Lifespan handler — replaces deprecated ``@app.on_event("startup")``."""
     _orchestrator_verbose_logging()
-    log_kiloclaw_transport_banner(get_settings())
+    log_openclaw_transport_banner(get_settings())
     yield
 
 
@@ -316,39 +317,67 @@ def _evaluation_history_summaries(
     return result
 
 
-def _kiloclaw_configured(settings: Settings, eff: str) -> bool:
+def _loopback_openclaw_url(url: str) -> bool:
+    u = url.strip().rstrip("/").lower()
+    return u.startswith("http://127.0.0.1:") or u.startswith("http://localhost:")
+
+
+def _resolution_public_view(trace: dict[str, object]) -> dict[str, object]:
+    """Include deprecated kiloclaw_* mirrors of openclaw_* trace keys for older clients."""
+    out = dict(trace)
+    pairs = (
+        ("kiloclaw_transport_configured", "openclaw_transport_configured"),
+        ("kiloclaw_transport_resolved", "openclaw_transport_resolved"),
+        ("kiloclaw_stub_mode", "openclaw_stub_mode"),
+        ("kiloclaw_api_key_present", "openclaw_api_key_present"),
+        ("kiloclaw_auto_resolution_note", "openclaw_auto_resolution_note"),
+        ("kiloclaw_openclaw_cli_path", "openclaw_openclaw_cli_path"),
+    )
+    for legacy, modern in pairs:
+        if legacy not in out and modern in out:
+            out[legacy] = out[modern]
+    return out
+
+
+def _openclaw_configured(settings: Settings, eff: str) -> bool:
     if eff == "invalid":
         return False
     if eff == "stub":
         return True
     if eff == "http":
-        return bool((settings.kiloclaw_api_key or "").strip())
+        base = (settings.openclaw_base_url or "").strip()
+        if not base:
+            return False
+        key = bool((settings.openclaw_api_key or "").strip())
+        return key or _loopback_openclaw_url(base)
     if eff == "openclaw_cli":
-        return bool((settings.kiloclaw_openclaw_executable or "").strip())
+        return bool((settings.openclaw_openclaw_executable or "").strip())
     return False
 
 
 @app.get("/health")
 def health(settings: Settings = Depends(get_settings)) -> dict[str, object]:
     """Liveness + deployment hints. Never returns secret values — only booleans / non-sensitive config."""
-    eff = settings.effective_kiloclaw_transport()
-    key_set = bool((settings.kiloclaw_api_key or "").strip())
+    eff = settings.effective_openclaw_transport()
+    key_set = bool((settings.openclaw_api_key or "").strip())
     supabase_ok = bool((settings.supabase_url or "").strip()) and bool(
         (settings.supabase_service_role_key or "").strip()
     )
     persist_ok = persisted_graph_runs_available(settings)
-    kc_ok = _kiloclaw_configured(settings, eff)
+    oc_ok = _openclaw_configured(settings, eff)
 
-    kiloclaw_resolution: dict[str, object] = {}
+    openclaw_resolution: dict[str, object] = {}
     try:
-        r = compute_kiloclaw_resolution(settings)
-        kiloclaw_resolution = {
-            "configuration_valid": True,
-            **r.to_trace_dict(),
-            "real_agent_capable": not r.stub_mode,
-        }
+        r = compute_openclaw_resolution(settings)
+        openclaw_resolution = _resolution_public_view(
+            {
+                "configuration_valid": True,
+                **r.to_trace_dict(),
+                "real_agent_capable": not r.stub_mode,
+            }
+        )
     except KiloclawTransportConfigError as e:
-        kiloclaw_resolution = {
+        openclaw_resolution = {
             "configuration_valid": False,
             "configuration_error": str(e),
             "real_agent_capable": False,
@@ -361,6 +390,11 @@ def health(settings: Settings = Depends(get_settings)) -> dict[str, object]:
         else f"dispatch_mode={dispatch}"
     )
 
+    loopback = _loopback_openclaw_url(settings.openclaw_base_url or "")
+    http_ready = eff == "http" and bool((settings.openclaw_base_url or "").strip()) and (
+        key_set or loopback
+    )
+
     return {
         "status": "ok",
         "service": "kmbl-orchestrator",
@@ -370,15 +404,25 @@ def health(settings: Settings = Depends(get_settings)) -> dict[str, object]:
         },
         "kmbl_env": settings.kmbl_env,
         "allow_stub_transport": settings.allow_stub_transport,
-        "kiloclaw_transport": settings.kiloclaw_transport,
+        "openclaw_transport": settings.openclaw_transport,
+        "openclaw_transport_effective": eff,
+        "openclaw_resolution": openclaw_resolution,
+        "openclaw_base_url": settings.openclaw_base_url,
+        "openclaw_invoke_path": settings.openclaw_invoke_path,
+        "openclaw_chat_completions_user": settings.openclaw_chat_completions_user,
+        "openclaw_planner_config_key": settings.openclaw_planner_config_key,
+        "openclaw_generator_config_key": settings.openclaw_generator_config_key,
+        "openclaw_evaluator_config_key": settings.openclaw_evaluator_config_key,
+        # Deprecated: same values as openclaw_* — kept for short-lived scripts / older tooling.
+        "kiloclaw_transport": settings.openclaw_transport,
         "kiloclaw_transport_effective": eff,
-        "kiloclaw_resolution": kiloclaw_resolution,
-        "kiloclaw_base_url": settings.kiloclaw_base_url,
-        "kiloclaw_invoke_path": settings.kiloclaw_invoke_path,
-        "kiloclaw_chat_completions_user": settings.kiloclaw_chat_completions_user,
-        "kiloclaw_planner_config_key": settings.kiloclaw_planner_config_key,
-        "kiloclaw_generator_config_key": settings.kiloclaw_generator_config_key,
-        "kiloclaw_evaluator_config_key": settings.kiloclaw_evaluator_config_key,
+        "kiloclaw_resolution": openclaw_resolution,
+        "kiloclaw_base_url": settings.openclaw_base_url,
+        "kiloclaw_invoke_path": settings.openclaw_invoke_path,
+        "kiloclaw_chat_completions_user": settings.openclaw_chat_completions_user,
+        "kiloclaw_planner_config_key": settings.openclaw_planner_config_key,
+        "kiloclaw_generator_config_key": settings.openclaw_generator_config_key,
+        "kiloclaw_evaluator_config_key": settings.openclaw_evaluator_config_key,
         "normalization_rescue_events_total": normalization_rescue_event_total(),
         "normalization_rescue_events_total_note": (
             "Process-local counter since orchestrator start — use graph_run detail quality_metrics for durable counts."
@@ -390,26 +434,32 @@ def health(settings: Settings = Depends(get_settings)) -> dict[str, object]:
             "supabase_service_role_key_configured": bool(
                 (settings.supabase_service_role_key or "").strip()
             ),
+            "openclaw_api_key_configured": key_set,
             "kiloclaw_api_key_configured": key_set,
-            "http_transport_ready": eff == "http" and key_set,
+            "http_transport_ready": http_ready,
         },
         "readiness": {
             "supabase_configured": supabase_ok,
-            "kiloclaw_configured": kc_ok,
+            "openclaw_configured": oc_ok,
+            "kiloclaw_configured": oc_ok,
+            "openclaw_transport_operational": eff != "invalid"
+            and bool(openclaw_resolution.get("configuration_valid")),
             "kiloclaw_transport_operational": eff != "invalid"
-            and bool(kiloclaw_resolution.get("configuration_valid")),
+            and bool(openclaw_resolution.get("configuration_valid")),
             "persisted_runs_available": persist_ok,
-            "ready_for_full_local_run": persist_ok and kc_ok,
+            "ready_for_full_local_run": persist_ok and oc_ok,
             "note": (
-                "Config-only flags: they do not probe live Supabase REST or KiloClaw HTTP. "
+                "Config-only flags: they do not probe live Supabase REST or OpenClaw gateway HTTP. "
                 "A true ready_for_full_local_run still requires valid keys and network reachability."
             ),
         },
         "repository_backend": repository_backend(settings),
         "orchestrator_running_stale_after_seconds": settings.orchestrator_running_stale_after_seconds,
         "orchestrator_smoke_planner_only": settings.orchestrator_smoke_planner_only,
-        "kiloclaw_http_connect_timeout_sec": settings.kiloclaw_http_connect_timeout_sec,
-        "kiloclaw_http_read_timeout_sec": settings.kiloclaw_http_read_timeout_sec,
+        "openclaw_http_connect_timeout_sec": settings.openclaw_http_connect_timeout_sec,
+        "openclaw_http_read_timeout_sec": settings.openclaw_http_read_timeout_sec,
+        "kiloclaw_http_connect_timeout_sec": settings.openclaw_http_connect_timeout_sec,
+        "kiloclaw_http_read_timeout_sec": settings.openclaw_http_read_timeout_sec,
     }
 
 
@@ -502,6 +552,17 @@ async def start_run(
                         "Requires KILOCLAW_GENERATOR_OPENAI_IMAGE_CONFIG_KEY and a working gateway."
                     ),
                     "value": {"scenario_preset": "kiloclaw_image_only_test_v1"},
+                },
+                "identity_url_cool_generation_lane": {
+                    "summary": "Identity URL vertical + cool_generation_v1 lane (merge into preset)",
+                    "description": (
+                        "Sets identity_url and merges event_input.cool_generation_lane into the canonical "
+                        "kmbl_identity_url_static_v1 seed — required for planner literal/pattern presets."
+                    ),
+                    "value": {
+                        "identity_url": "https://example.com/",
+                        "event_input": {"cool_generation_lane": True},
+                    },
                 },
             },
         ),
@@ -646,6 +707,43 @@ async def start_run(
                 ),
             },
         ) from None
+    except ActiveGraphRunPerThreadConflictError:
+        _log.warning(
+            "run_start race: concurrent persist for thread_id=%s (graph_run_one_active_per_thread)",
+            body.thread_id,
+        )
+        active_after: GraphRunRecord | None = None
+        if body.thread_id is not None:
+            try:
+                active_after = await asyncio.to_thread(
+                    repo.get_active_graph_run_for_thread,
+                    UUID(str(body.thread_id)),
+                )
+            except Exception:
+                active_after = None
+        if active_after is not None:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error_kind": "active_graph_run",
+                    "message": (
+                        "This thread already has an active graph run (detected after a concurrent "
+                        "start raced). Wait for it to finish, interrupt it, or retry shortly."
+                    ),
+                    "active_graph_run_id": str(active_after.graph_run_id),
+                    "active_status": active_after.status,
+                },
+            ) from None
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_kind": "active_graph_run",
+                "message": (
+                    "Concurrent start requests conflicted for this thread. "
+                    "Only one active graph run is allowed per thread."
+                ),
+            },
+        ) from None
     except Exception as e:
         _log.exception("persist_graph_run_start failed")
         raise HTTPException(
@@ -776,6 +874,7 @@ def list_graph_runs_endpoint(
     status: str | None = None,
     trigger_type: str | None = None,
     identity_id: str | None = None,
+    thread_id: str | None = None,
     limit: int = 50,
     repo: Repository = Depends(get_repo),
 ) -> GraphRunListResponse:
@@ -784,6 +883,8 @@ def list_graph_runs_endpoint(
 
     Does not reconcile stale ``running`` rows or return checkpoint snapshots — use
     **GET /orchestrator/runs/{id}** or **/detail** for per-run views.
+
+    Optional **thread_id** scopes results to a single thread (newest ``started_at`` first).
     """
     lim = max(1, min(limit, 200))
     st = _optional_query_str(status)
@@ -795,11 +896,19 @@ def list_graph_runs_endpoint(
             id_uuid = UUID(id_raw)
         except ValueError as e:
             raise HTTPException(status_code=400, detail="invalid identity_id") from e
+    thread_uuid: UUID | None = None
+    thread_raw = _optional_query_str(thread_id)
+    if thread_raw is not None:
+        try:
+            thread_uuid = UUID(thread_raw)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail="invalid thread_id") from e
 
     runs = repo.list_graph_runs(
         status=st,
         trigger_type=tt,
         identity_id=id_uuid,
+        thread_id=thread_uuid,
         limit=lim,
     )
     raw = build_graph_run_list_read_model(repo, runs)
@@ -1026,6 +1135,8 @@ def graph_run_detail(
         identity_trace=id_trace,
         session_staging=_session_staging_model(settings, gr),
         memory_influence=mem_block,
+        failure_info=raw.get("failure_info"),
+        last_meaningful_event=raw.get("last_meaningful_event"),
     )
 
 
@@ -1158,9 +1269,9 @@ def invoke_role(
             raise HTTPException(status_code=400, detail=str(e)) from e
     else:
         key = {
-            "planner": settings.kiloclaw_planner_config_key,
-            "generator": settings.kiloclaw_generator_config_key,
-            "evaluator": settings.kiloclaw_evaluator_config_key,
+            "planner": settings.openclaw_planner_config_key,
+            "generator": settings.openclaw_generator_config_key,
+            "evaluator": settings.openclaw_evaluator_config_key,
         }[body.role_type]
     _inv, raw = invoker.invoke(
         graph_run_id=gid,

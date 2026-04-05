@@ -228,7 +228,7 @@ export type GraphRunSummaryBlock = {
   last_resumed_at?: string | null;
   /** Denormalized `graph_run.identity_id` when set (may match thread identity). */
   graph_run_identity_id?: string | null;
-  kiloclaw_transport_trace?: Record<string, unknown> | null;
+  openclaw_transport_trace?: Record<string, unknown> | null;
   /** Durable normalization rescue: event_count, generator_invocation_flag_count */
   quality_metrics?: Record<string, unknown>;
   /** v1 pressure telemetry from persisted events */
@@ -249,7 +249,7 @@ export type RoleInvocationDetailItem = {
   /** Subset of persisted routing_metadata_json (generator rows). */
   routing_hints?: Record<string, unknown> | null;
   routing_fact_source?: "persisted" | "none";
-  kiloclaw_transport_trace?: Record<string, unknown> | null;
+  openclaw_transport_trace?: Record<string, unknown> | null;
   normalization_rescue?: boolean | null;
 };
 
@@ -313,6 +313,18 @@ export type GraphRunDetail = {
     updated_payloads: { created_at: string; payload: Record<string, unknown> }[];
     persisted_memory_keys_for_run: string[];
     identity_taste_summary?: Record<string, unknown> | null;
+  } | null;
+  /** When summary.status=failed: phase, error_kind, error_message. */
+  failure_info?: {
+    failure_phase?: string | null;
+    error_kind?: string | null;
+    error_message?: string | null;
+  } | null;
+  /** Latest meaningful graph_run_event with payload (debugging). */
+  last_meaningful_event?: {
+    event_type?: string;
+    timestamp?: string;
+    payload?: Record<string, unknown>;
   } | null;
   error?: string;
   detail?: unknown;

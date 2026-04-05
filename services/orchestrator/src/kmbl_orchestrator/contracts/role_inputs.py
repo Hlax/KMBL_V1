@@ -13,6 +13,13 @@ class PlannerRoleInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     thread_id: str
+    graph_run_id: str | None = Field(
+        default=None,
+        description=(
+            "Orchestrator graph run id — echoed for OpenClaw chat-completions `user` isolation; "
+            "not part of planner agent semantics."
+        ),
+    )
     identity_context: dict[str, Any] = Field(default_factory=dict)
     memory_context: dict[str, Any] = Field(
         default_factory=dict,
@@ -63,6 +70,13 @@ class GeneratorRoleInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     thread_id: str
+    graph_run_id: str | None = Field(
+        default=None,
+        description=(
+            "Orchestrator graph run id — echoed for OpenClaw chat-completions `user` isolation; "
+            "not part of generator agent semantics."
+        ),
+    )
     build_spec: dict[str, Any] = Field(default_factory=dict)
     current_working_state: dict[str, Any] = Field(default_factory=dict)
     iteration_feedback: Any | None = None
@@ -109,12 +123,34 @@ class GeneratorRoleInput(BaseModel):
             "E.g. 'map projects to 3D planes', 'use animated transitions and camera movement'."
         ),
     )
+    cool_generation_lane_active: bool = Field(
+        default=False,
+        description=(
+            "True when cool_generation_v1 lane is active (event_input.cool_generation_lane or "
+            "build_spec.execution_contract.lane). Prefer kmbl_execution_contract + pattern_rules."
+        ),
+    )
+    kmbl_execution_contract: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Compact obligations: lane, surface_type, layout_mode, pattern_rules, "
+            "selected_reference_patterns, literal_success_checks_count, "
+            "literal_success_checks_preview (first needles, truncated), creative_brief_mood."
+        ),
+    )
 
 
 class EvaluatorRoleInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     thread_id: str
+    graph_run_id: str | None = Field(
+        default=None,
+        description=(
+            "Orchestrator graph run id — echoed for OpenClaw chat-completions `user` isolation; "
+            "not part of evaluator agent semantics."
+        ),
+    )
     build_candidate: dict[str, Any] = Field(default_factory=dict)
     success_criteria: list[Any] = Field(default_factory=list)
     evaluation_targets: list[Any] = Field(default_factory=list)

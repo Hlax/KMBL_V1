@@ -69,7 +69,7 @@ class RoleInvocationRecord(BaseModel):
     graph_run_id: UUID
     thread_id: UUID
     role_type: Literal["planner", "generator", "evaluator"]
-    provider: Literal["kiloclaw"] = "kiloclaw"
+    provider: Literal["kiloclaw", "openclaw"] = "openclaw"
     provider_config_key: str
     input_payload_json: dict[str, Any]
     output_payload_json: dict[str, Any] | None = None

@@ -10,6 +10,7 @@ export const dynamic = "force-dynamic";
 
 /**
  * Pass I: GET /api/runs?... → orchestrator GET /orchestrator/runs (same query string).
+ * Supports identity_id, status, trigger_type, thread_id, limit (orchestrator passthrough).
  * Persisted run index only — no snapshots.
  */
 export async function GET(request: Request) {

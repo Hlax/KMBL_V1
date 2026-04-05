@@ -128,3 +128,70 @@ def test_list_graph_runs_invalid_identity(clear_singleton: None) -> None:
         assert client.get("/orchestrator/runs?identity_id=not-a-uuid").status_code == 400
     finally:
         app.dependency_overrides.clear()
+
+
+def test_list_graph_runs_thread_id_filter(clear_singleton: None) -> None:
+    tid_a = uuid4()
+    tid_b = uuid4()
+    iden = uuid4()
+    repo = InMemoryRepository()
+    repo.ensure_thread(
+        ThreadRecord(thread_id=tid_a, identity_id=iden, thread_kind="build", status="active")
+    )
+    repo.ensure_thread(
+        ThreadRecord(thread_id=tid_b, identity_id=iden, thread_kind="build", status="active")
+    )
+    g_a = uuid4()
+    g_b = uuid4()
+    repo.save_graph_run(
+        GraphRunRecord(
+            graph_run_id=g_a,
+            thread_id=tid_a,
+            trigger_type="prompt",
+            status="completed",
+            started_at="2026-03-28T10:00:00+00:00",
+            ended_at="2026-03-28T10:05:00+00:00",
+        )
+    )
+    repo.save_graph_run(
+        GraphRunRecord(
+            graph_run_id=g_b,
+            thread_id=tid_b,
+            trigger_type="prompt",
+            status="failed",
+            started_at="2026-03-29T12:00:00+00:00",
+        )
+    )
+
+    def _ov() -> InMemoryRepository:
+        return repo
+
+    app.dependency_overrides[get_repo] = _ov
+    try:
+        client = TestClient(app)
+        r = client.get(f"/orchestrator/runs?thread_id={tid_a}")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["count"] == 1
+        assert body["runs"][0]["graph_run_id"] == str(g_a)
+
+        r2 = client.get(f"/orchestrator/runs?thread_id={tid_b}&status=failed")
+        assert r2.status_code == 200
+        assert r2.json()["count"] == 1
+        assert r2.json()["runs"][0]["graph_run_id"] == str(g_b)
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_list_graph_runs_invalid_thread_id(clear_singleton: None) -> None:
+    repo = InMemoryRepository()
+
+    def _ov() -> InMemoryRepository:
+        return repo
+
+    app.dependency_overrides[get_repo] = _ov
+    try:
+        client = TestClient(app)
+        assert client.get("/orchestrator/runs?thread_id=not-a-uuid").status_code == 400
+    finally:
+        app.dependency_overrides.clear()

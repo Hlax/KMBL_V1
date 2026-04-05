@@ -481,7 +481,7 @@ def test_alignment_score_history_populated_in_full_pipeline():
 
     repo = _make_repo()
     settings = Settings.model_construct(
-        kiloclaw_transport="stub",
+        openclaw_transport="stub",
         graph_max_iterations_default=2,  # allow 1 retry
         habitat_image_generation_enabled=False,
         identity_allow_fallback_profile=False,  # force real identity
@@ -555,7 +555,7 @@ def test_retry_direction_set_on_second_iteration():
 
     repo = _make_repo()
     settings = Settings.model_construct(
-        kiloclaw_transport="stub",
+        openclaw_transport="stub",
         graph_max_iterations_default=2,
         habitat_image_generation_enabled=False,
         identity_allow_fallback_profile=True,  # allow fallback so run doesn't abort

@@ -1,4 +1,4 @@
-"""Role invocation interface — KMBL → KiloClaw boundary (docs/06, docs/12 §6)."""
+"""Role invocation interface — KMBL → OpenClaw gateway boundary (docs/06, docs/12 §6)."""
 
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ class RoleInvoker(Protocol):
 
 
 class DefaultRoleInvoker:
-    """Wires KiloClaw client; records invocation metadata for persistence upstream."""
+    """Wires OpenClaw-compatible gateway client; records invocation metadata for persistence upstream."""
 
     def __init__(
         self,
@@ -51,12 +51,12 @@ class DefaultRoleInvoker:
         if client is not None:
             self._client = client
             self._transport_trace: dict[str, Any] = {
-                "kiloclaw_transport_configured": "injected",
-                "kiloclaw_transport_resolved": "injected",
-                "kiloclaw_stub_mode": False,
-                "kiloclaw_api_key_present": bool((s.kiloclaw_api_key or "").strip()),
-                "kiloclaw_auto_resolution_note": None,
-                "kiloclaw_openclaw_cli_path": None,
+                "openclaw_transport_configured": "injected",
+                "openclaw_transport_resolved": "injected",
+                "openclaw_stub_mode": False,
+                "openclaw_api_key_present": bool((s.openclaw_api_key or "").strip()),
+                "openclaw_auto_resolution_note": None,
+                "openclaw_openclaw_cli_path": None,
             }
         else:
             self._client, self._transport_trace = get_kiloclaw_client_with_trace(s)
@@ -88,7 +88,7 @@ class DefaultRoleInvoker:
             graph_run_id=graph_run_id,
             thread_id=thread_id,
             role_type=rt,
-            provider="kiloclaw",
+            provider="openclaw",
             provider_config_key=provider_config_key,
             input_payload_json=input_payload,
             output_payload_json=None,
@@ -119,8 +119,8 @@ class DefaultRoleInvoker:
         _log.info(
             "role_invoke role=%s transport=%s stub_mode=%s graph_run_id=%s",
             rt,
-            self._transport_trace.get("kiloclaw_transport_resolved"),
-            self._transport_trace.get("kiloclaw_stub_mode"),
+            self._transport_trace.get("openclaw_transport_resolved"),
+            self._transport_trace.get("openclaw_stub_mode"),
             graph_run_id,
         )
         try:

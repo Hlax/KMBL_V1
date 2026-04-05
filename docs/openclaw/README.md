@@ -2,6 +2,32 @@
 
 **Secrets:** Do **not** commit live API keys, Discord tokens, gateway auth tokens, or Stream Chat credentials. Use **`openclaw.json.example`** as the safe template; copy it to a **local** `openclaw.json` (or merge into your gateway host config) and fill values **only on the machine** that runs the gateway. If real secrets were ever committed to git, **rotate them** in each provider’s dashboard—git history may retain old values.
 
+## Chat models (planner / generator / evaluator)
+
+**KMBL does not choose the LLM.** The orchestrator only sends OpenAI-style chat requests with `model: "openclaw:<agent_id>"` (e.g. `openclaw:kmbl-planner`). The OpenClaw gateway resolves that **agent id** to a concrete backend model using **`~/.openclaw/openclaw.json`**.
+
+**Reference:** **`openclaw.json`** and **`openclaw.json.example`** in this folder track the current layout (gateway **port 18789**, loopback, Ollama **`models.providers`**, `kmbl-*` agents with **`workspace`** / **`agentDir`**). Paths use **`C:\Users\<you>\`** placeholders; replace with your profile. **Secrets are redacted** (`<gateway-auth-token>`, placeholder Tailscale origin)—never commit real tokens.
+
+**Model resolution:** **`agents.defaults.model.primary`** applies when an agent has no **`model`** block. Per-agent **`model.primary`** overrides. In the checked-in reference, **`kmbl-planner`** inherits the default (**`ollama/qwen2.5-coder:7b`**); **`kmbl-generator`** and **`kmbl-evaluator`** override with **`ollama/mistral:latest`**. After edits, **restart the OpenClaw gateway** and confirm in the TUI which **`ollama/...`** each agent uses.
+
+### KMBL repo agent instructions vs runtime
+
+**Changing planner/generator behavior:** Updates live in **`docs/openclaw-agents/kmbl-planner/`** and **`docs/openclaw-agents/kmbl-generator/`** (e.g. **SOUL.md**, **USER.md**) are **not** picked up by the gateway until they are **copied or symlinked** into each agent’s **`agentDir`** under **`~/.openclaw/agents/...`** (see **`agents.list[].agentDir`** in **`openclaw.json`**). **`openclaw.json` itself usually does not need edits** for instruction-only changes — the operational step is **sync markdown → agent workspace → restart gateway**. If you change **models** or **paths**, then edit JSON and restart.
+
+### KMBL graph runs vs OpenClaw chat (why chat can “pass” while the run fails)
+
+- **OpenClaw chat / TUI** is a conversational loop with its own session; success means the model replied usefully. It does **not** enforce KMBL’s **JSON contracts** for planner / generator / evaluator or persist **Supabase** rows.
+- **KMBL** calls the gateway with **`model: openclaw:`** + agent id and expects **parseable JSON** in **`message.content`** per role, then runs **staging** and DB writes. Failures are often **`provider_error`** (timeouts, 401), **`contract_validation`**, or **graph** errors—not “the model was wrong in chat.”
+- **Per-run session isolation:** the orchestrator sends **`user`** = `kmbl-orchestrator:{thread_id}:{graph_run_id}` so gateway session state does not match a **chat-only** session key.
+- **Operator debugging:** **`GET /orchestrator/runs?thread_id={uuid}`** lists runs for one thread (newest first). Then **`GET /orchestrator/runs/{graph_run_id}`** for **`failure_phase`**, **`error_message`**, and **`timeline_events`**.
+
+**Observed failure modes (example thread `99f654f9-a62a-495d-aaf2-74be26cb608f`):**
+
+| Symptom in `GET /orchestrator/runs/{id}` | Likely cause |
+|------------------------------------------|----------------|
+| **`TimeoutError: Could not acquire thread lock … within 300s`**, **`role_invocation_count`: 0** | Another graph or lock holder on the **same thread**; avoid overlapping starts or wait for the prior run to finish / release. |
+| **`failure_phase`: `evaluator`**, **`ReadTimeout`**, “gateway failed after 3 attempts: timed out” | **HTTP read timeout** to OpenClaw (evaluator slow or stalled). Raise **`OPENCLAW_HTTP_READ_TIMEOUT_SEC`**, reduce load, or fix gateway/Ollama latency—not a “wrong model in chat” issue. |
+
 This folder holds a **mergeable** `agents.list` entry for the **`kmbl-image-gen`** full agent. **KMBL** is unchanged here; set **`KILOCLAW_GENERATOR_OPENAI_IMAGE_CONFIG_KEY=kmbl-image-gen`** on the orchestrator when you wire routing.
 
 **Operator visibility (KMBL control plane):** The mutable **working staging** surface for a thread is viewable as **live habitat** at **`/habitat/live/{thread_id}`** (same assembled HTML as the orchestrator preview, not a review snapshot). Session staging links in graph run payloads include **`control_plane_live_habitat_path`**. This is independent of OpenClaw agent workspaces; it only needs the orchestrator + control plane apps running.
@@ -17,7 +43,7 @@ Exact key names (`agents.list` vs `agents` → `list`) depend on your OpenClaw v
 
 ## Workspace path on disk
 
-- **Repo (source):** `docs/kiloclaw-agents/kmbl-image-gen/` — markdown workspace for review and copy.
+- **Repo (source):** `docs/openclaw-agents/kmbl-image-gen/` — markdown workspace for review and copy.
 - **Runtime:** Copy or symlink that folder to the path you set as **`workspace`** in the JSON entry (example below uses `~/.openclaw/workspace-kmbl-image-gen`).
 
 ### Windows path assumptions
@@ -25,7 +51,7 @@ Exact key names (`agents.list` vs `agents` → `list`) depend on your OpenClaw v
 - **`~`** may **not** expand the same way in all tools. Prefer an **absolute** path in `openclaw.json`, e.g.  
   `C:\\Users\\<you>\\.openclaw\\workspace-kmbl-image-gen`  
   or `%USERPROFILE%\.openclaw\workspace-kmbl-image-gen` resolved to a string in JSON.
-- **`openai-image-gen`** script paths (e.g. under `node_modules`) differ by install — set **`exec`** / skill paths per your machine (see **`docs/kiloclaw-agents/kmbl-image-gen/TOOLS.md`**).
+- **`openai-image-gen`** script paths (e.g. under `node_modules`) differ by install — set **`exec`** / skill paths per your machine (see **`docs/openclaw-agents/kmbl-image-gen/TOOLS.md`**).
 
 ## Auth paths (why KiloCode BYOK ≠ `gen.py`)
 
@@ -48,7 +74,7 @@ Exact key names (`agents.list` vs `agents` → `list`) depend on your OpenClaw v
 
 ## JSON contract for **`kmbl-image-gen`**
 
-Runtime model output must be **one JSON object** (no markdown fences). Field-level rules and success/failure examples live in **`docs/kiloclaw-agents/kmbl-image-gen/SOUL.md`** (appendix). **`gallery_strip_image_v1`** rows must match KMBL’s **`GalleryStripImageArtifactV1`** (orchestrator `gallery_image_artifact_v1.py`). On **failure** (no valid images), use **`updated_state.kmbl_image_generation`** — **do not** emit a partial **`ui_gallery_strip_v1`** (KMBL validates **`UIGalleryStripV1`** and will reject diagnostic stubs). On **success**, prefer **`artifact_outputs`** + **`updated_state`: `{}`**. **`ui_gallery_strip_v1`** is optional and must match **`headline`** + **`items`** — **never** metadata-only objects (**`surface`**, **`status`**, **`item_count`**, **`model`**, **`size`**, **`quality`**).
+Runtime model output must be **one JSON object** (no markdown fences). Field-level rules and success/failure examples live in **`docs/openclaw-agents/kmbl-image-gen/SOUL.md`** (appendix). **`gallery_strip_image_v1`** rows must match KMBL’s **`GalleryStripImageArtifactV1`** (orchestrator `gallery_image_artifact_v1.py`). On **failure** (no valid images), use **`updated_state.kmbl_image_generation`** — **do not** emit a partial **`ui_gallery_strip_v1`** (KMBL validates **`UIGalleryStripV1`** and will reject diagnostic stubs). On **success**, prefer **`artifact_outputs`** + **`updated_state`: `{}`**. **`ui_gallery_strip_v1`** is optional and must match **`headline`** + **`items`** — **never** metadata-only objects (**`surface`**, **`status`**, **`item_count`**, **`model`**, **`size`**, **`quality`**).
 
 ## Confirm the gateway sees `kmbl-image-gen`
 

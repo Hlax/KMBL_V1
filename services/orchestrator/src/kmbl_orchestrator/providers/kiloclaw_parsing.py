@@ -30,6 +30,9 @@ def _looks_like_role_output(d: dict[str, Any]) -> bool:
         return True
     if any(k in d for k in ("proposed_changes", "updated_state", "artifact_outputs")):
         return True
+    cf = d.get("contract_failure")
+    if isinstance(cf, dict) and isinstance(cf.get("code"), str) and cf["code"].strip():
+        return True
     return False
 
 
@@ -225,6 +228,32 @@ def _strip_markdown_json_fence(s: str) -> str:
     return body.strip()
 
 
+_OPENCLAW_PLACEHOLDER_HINT = (
+    "OpenClaw returned a placeholder instead of JSON (NO_REPLY or empty gateway response). "
+    "Check Ollama logs, context size, bootstrap limits (bootstrapMaxChars), assign a "
+    "JSON-capable model for kmbl-generator/kmbl-evaluator, or shorten SOUL/bootstrap text."
+)
+
+
+def _openclaw_placeholder_user_message(raw_after_fence: str) -> str | None:
+    """
+    Detect short gateway/model sentinel strings before ``json.loads`` so failures are actionable.
+
+    Common when the local model returns ``NO_REPLY`` or the gateway substitutes
+    ``No response from OpenClaw.`` — not recoverable as role JSON.
+    """
+    t = raw_after_fence.strip()
+    if not t:
+        return None
+    first = t.split("\n", 1)[0].strip()
+    if len(first) > 280:
+        return None
+    fl = first.lower()
+    if fl in ("no_reply", "no response from openclaw."):
+        return _OPENCLAW_PLACEHOLDER_HINT
+    return None
+
+
 def _iter_json_objects_in_text(text: str) -> list[dict[str, Any]]:
     """Every top-level JSON object in ``text`` (models sometimes emit multiple concatenated objects)."""
     decoder = json.JSONDecoder()
@@ -349,16 +378,31 @@ def _parse_chat_completion_json_content(
                 error_type="invalid_response",
             ),
         )
+    if raw_content.lstrip().startswith("```"):
+        _log.info(
+            "role_output_normalization step=stripped_markdown_json_fence role_type=%s",
+            role_type,
+        )
     raw = _strip_markdown_json_fence(raw_content)
-    
-    # Debug logging for raw content before JSON parse
+
     _log.debug(
-        "kiloclaw_http_inbound role_type=%s raw_content_len=%d raw_preview=%s",
+        "openclaw_http_inbound role_type=%s raw_content_len=%d raw_preview=%s",
         role_type,
         len(raw),
         raw[:500] if raw else "<empty>",
     )
-    
+
+    ph = _openclaw_placeholder_user_message(raw)
+    if ph is not None:
+        raise KiloClawInvocationError(
+            ph,
+            normalized=provider_failure(
+                ph,
+                error_type="provider_error",
+                details={"preview": raw[:500], "kind": "openclaw_placeholder"},
+            ),
+        )
+
     e_first: json.JSONDecodeError | None = None
     try:
         parsed: Any = json.loads(raw)
@@ -397,7 +441,7 @@ def _parse_chat_completion_json_content(
             for item in parsed:
                 if isinstance(item, dict) and _looks_like_role_output(item):
                     _log.warning(
-                        "kiloclaw %s returned list-root JSON; recovering first matching dict",
+                        "openclaw %s returned list-root JSON; recovering first matching dict",
                         role_type,
                     )
                     return item
@@ -456,20 +500,60 @@ def _extract_http_role_dict(
                 return v
         if _looks_like_variation_only_echo(data):
             _log.warning(
-                "kiloclaw_http planner returned variation-only JSON; applying gallery-varied synthetic contract"
+                "openclaw_http planner returned variation-only JSON; applying gallery-varied synthetic contract"
             )
             return _synthetic_planner_from_variation_echo(data)
         _log.warning(
-            "kiloclaw_http planner payload not recognized (before OpenClaw envelope scan): top_keys=%s",
+            "openclaw_http planner payload not recognized (before OpenClaw envelope scan): top_keys=%s",
             list(data.keys())[:30],
         )
     return extract_role_payload_from_openclaw_output(data)
 
 
+def _soft_fill_missing_contract_fields(
+    role_type: RoleType, body: dict[str, Any]
+) -> tuple[dict[str, Any], list[str]]:
+    """
+    Best-effort defaults for early-stage agent output (logged, not silent).
+
+    Does not invent required semantic fields (e.g. planner ``build_spec``, evaluator ``status``).
+    """
+    steps: list[str] = []
+    out = dict(body)
+    if role_type == "planner":
+        if "constraints" not in out:
+            out["constraints"] = {}
+            steps.append("defaulted_planner_constraints_empty_object")
+        if "success_criteria" not in out:
+            out["success_criteria"] = []
+            steps.append("defaulted_planner_success_criteria_empty_array")
+        if "evaluation_targets" not in out:
+            out["evaluation_targets"] = []
+            steps.append("defaulted_planner_evaluation_targets_empty_array")
+    elif role_type == "evaluator":
+        if "issues" not in out:
+            out["issues"] = []
+            steps.append("defaulted_evaluator_issues_empty_array")
+        if "metrics" not in out:
+            out["metrics"] = {}
+            steps.append("defaulted_evaluator_metrics_empty_object")
+        if "artifacts" not in out:
+            out["artifacts"] = []
+            steps.append("defaulted_evaluator_artifacts_empty_array")
+    if steps:
+        _log.info(
+            "role_output_normalization role_type=%s steps=%s",
+            role_type,
+            steps,
+        )
+    return out, steps
+
+
 def _apply_role_contract(role_type: RoleType, body: dict[str, Any]) -> dict[str, Any]:
     """Pydantic wire contract (see ``contracts.role_outputs``); maps errors to KiloClawInvocationError."""
+    filled, _steps = _soft_fill_missing_contract_fields(role_type, body)
     try:
-        return validate_role_contract(role_type, body)
+        return validate_role_contract(role_type, filled)
     except ValidationError as e:
         raise KiloClawInvocationError(
             f"role output contract validation failed: {e!s}",

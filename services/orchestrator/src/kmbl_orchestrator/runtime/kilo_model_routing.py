@@ -2,9 +2,9 @@
 KMBL-side OpenClaw **provider_config_key** selection for generator invocations.
 
 Only **generator** may be routed to the image OpenClaw agent (``kmbl-image-gen``) for explicit
-image-generation work. Planner and evaluator always use their default ``kiloclaw_*_config_key``.
+image-generation work. Planner and evaluator always use their default ``openclaw_*_config_key``.
 
-When image intent is present, routing **requires** ``KILOCLAW_GENERATOR_OPENAI_IMAGE_CONFIG_KEY``
+When image intent is present, routing **requires** ``OPENCLAW_GENERATOR_OPENAI_IMAGE_CONFIG_KEY``
 (typically ``kmbl-image-gen``). There is **no** silent fallback to ``kmbl-generator``.
 """
 
@@ -30,7 +30,7 @@ _LOG = logging.getLogger(__name__)
 
 
 class ImageRouteConfigurationError(ValueError):
-    """Image generation intent is present but ``KILOCLAW_GENERATOR_OPENAI_IMAGE_CONFIG_KEY`` is unset."""
+    """Image generation intent is present but ``OPENCLAW_GENERATOR_OPENAI_IMAGE_CONFIG_KEY`` is unset."""
 
 
 class ImageRouteBudgetExceededError(ValueError):
@@ -87,11 +87,11 @@ def select_generator_provider_config(
     now: datetime | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """
-    Return ``(kiloclaw provider_config_key, routing_metadata_json)`` for persistence and logs.
+    Return ``(openclaw provider_config_key, routing_metadata_json)`` for persistence and logs.
 
-    Default path: ``settings.kiloclaw_generator_config_key``.
+    Default path: ``settings.openclaw_generator_config_key``.
 
-    Image path: ``settings.kiloclaw_generator_openai_image_config_key`` (default ``kmbl-image-gen``)
+    Image path: ``settings.openclaw_generator_openai_image_config_key`` (default ``kmbl-image-gen``)
     when explicit image intent matches **and** hourly budget allows. If intent is present but the
     key is empty, raises :class:`ImageRouteConfigurationError`. If budget blocks, raises
     :class:`ImageRouteBudgetExceededError`.
@@ -107,8 +107,8 @@ def select_generator_provider_config(
     image_requested = intent.kind != "none"
 
     intent_kind = intent.kind if image_requested else "none"
-    default_key = (settings.kiloclaw_generator_config_key or "kmbl-generator").strip()
-    alt_key = (settings.kiloclaw_generator_openai_image_config_key or "").strip()
+    default_key = (settings.openclaw_generator_config_key or "kmbl-generator").strip()
+    alt_key = (settings.openclaw_generator_openai_image_config_key or "").strip()
 
     used0 = store.usage_in_window(now=now)
     rem0 = max(0, store.cap_tokens - used0)
@@ -127,10 +127,10 @@ def select_generator_provider_config(
 
     if not alt_key:
         _LOG.error(
-            "generator routing: image intent but KILOCLAW_GENERATOR_OPENAI_IMAGE_CONFIG_KEY is unset"
+            "generator routing: image intent but OPENCLAW_GENERATOR_OPENAI_IMAGE_CONFIG_KEY is unset"
         )
         raise ImageRouteConfigurationError(
-            "Image generation intent requires KILOCLAW_GENERATOR_OPENAI_IMAGE_CONFIG_KEY "
+            "Image generation intent requires OPENCLAW_GENERATOR_OPENAI_IMAGE_CONFIG_KEY "
             "(e.g. kmbl-image-gen). Orchestrator does not call OpenAI Images directly."
         )
 
@@ -159,12 +159,12 @@ def select_generator_provider_config(
         )
 
     meta["openai_image_route_applied"] = True
-    meta["generator_route_kind"] = "kiloclaw_image_agent"
-    meta["route_reason"] = "kiloclaw_image_agent_route_applied"
+    meta["generator_route_kind"] = "openclaw_image_agent"
+    meta["route_reason"] = "openclaw_image_agent_route_applied"
     meta["provider_config_key"] = alt_key
     meta["provider_config_key_resolved"] = alt_key
     meta["budget_used_tokens_after_decision"] = decision.used_tokens_after
-    _LOG.info("generator routing: using KiloClaw image agent config key=%s", alt_key)
+    _LOG.info("generator routing: using OpenClaw image agent config key=%s", alt_key)
     return alt_key, meta
 
 

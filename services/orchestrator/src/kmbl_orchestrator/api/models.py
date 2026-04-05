@@ -292,7 +292,7 @@ class GraphRunSummaryBlock(BaseModel):
     attention_reason: str
     resume_count: int = 0
     last_resumed_at: str | None = None
-    kiloclaw_transport_trace: dict[str, Any] | None = Field(
+    openclaw_transport_trace: dict[str, Any] | None = Field(
         default=None,
         description="From first planner routing_metadata_json when present.",
     )
@@ -332,9 +332,9 @@ class RoleInvocationDetailItem(BaseModel):
         description="Subset of persisted routing_metadata_json (generator invocations only).",
     )
     routing_fact_source: Literal["persisted", "none"] = "none"
-    kiloclaw_transport_trace: dict[str, Any] | None = Field(
+    openclaw_transport_trace: dict[str, Any] | None = Field(
         default=None,
-        description="Subset of persisted routing_metadata_json (KiloClaw trace keys).",
+        description="Subset of persisted routing_metadata_json (OpenClaw gateway trace keys).",
     )
     normalization_rescue: bool | None = Field(
         default=None,
@@ -440,6 +440,17 @@ class GraphRunDetailResponse(BaseModel):
     memory_influence: MemoryInfluenceBlock | None = Field(
         default=None,
         description="Cross-run memory audit: events + persisted keys + optional taste summary.",
+    )
+    failure_info: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "When status=failed: failure_phase, error_kind, error_message "
+            "(from failed role_invocation or graph_run_failed event)."
+        ),
+    )
+    last_meaningful_event: dict[str, Any] | None = Field(
+        default=None,
+        description="Most recent high-signal graph_run_event with full payload (debugging).",
     )
 
 

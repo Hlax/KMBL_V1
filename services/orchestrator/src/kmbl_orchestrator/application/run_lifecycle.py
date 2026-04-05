@@ -27,6 +27,7 @@ from kmbl_orchestrator.seeds import (
     SEEDED_LOCAL_SCENARIO_PRESET,
     build_identity_url_static_frontend_event_input,
     build_seeded_gallery_strip_varied_v1_event_input,
+    merge_identity_url_static_frontend_extras,
 )
 
 _log = logging.getLogger(__name__)
@@ -40,13 +41,12 @@ def resolve_start_event_input(
     """Map ``StartRunBody`` + optional identity summary to ``event_input`` and optional preset tag."""
     if body.identity_url or body.scenario_preset == IDENTITY_URL_STATIC_FRONTEND_PRESET:
         url = body.identity_url or ""
-        return (
-            build_identity_url_static_frontend_event_input(
-                identity_url=url,
-                seed_summary=identity_seed_summary,
-            ),
-            IDENTITY_URL_STATIC_FRONTEND_PRESET,
+        built = build_identity_url_static_frontend_event_input(
+            identity_url=url,
+            seed_summary=identity_seed_summary,
         )
+        merged = merge_identity_url_static_frontend_extras(built, body.event_input)
+        return merged, IDENTITY_URL_STATIC_FRONTEND_PRESET
     if body.scenario_preset == SEEDED_LOCAL_SCENARIO_PRESET:
         return dict(SEEDED_LOCAL_EVENT_INPUT), SEEDED_LOCAL_SCENARIO_PRESET
     if body.scenario_preset == SEEDED_GALLERY_STRIP_SCENARIO_PRESET:

@@ -101,7 +101,7 @@ def test_malformed_planner_persistence_contract_validation() -> None:
 
     repo = InMemoryRepository()
     invoker = DefaultRoleInvoker(client=BadPlannerOut())
-    settings = Settings.model_construct(kiloclaw_transport="stub")
+    settings = Settings.model_construct(openclaw_transport="stub")
     tid, gid = persist_graph_run_start(
         repo,
         thread_id=None,
@@ -141,7 +141,7 @@ def test_failed_role_invocation_surfaces_provider_error_on_get() -> None:
 
     repo = InMemoryRepository()
     invoker = DefaultRoleInvoker(client=FailPlanner())
-    settings = Settings.model_construct(kiloclaw_transport="stub")
+    settings = Settings.model_construct(openclaw_transport="stub")
     tid, gid = persist_graph_run_start(
         repo,
         thread_id=None,

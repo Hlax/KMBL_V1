@@ -33,7 +33,10 @@ from kmbl_orchestrator.domain import (
     ThreadRecord,
     WorkingStagingRecord,
 )
-from kmbl_orchestrator.persistence.exceptions import WriteSnapshotNotSupportedError
+from kmbl_orchestrator.persistence.exceptions import (
+    ActiveGraphRunPerThreadConflictError,
+    WriteSnapshotNotSupportedError,
+)
 from kmbl_orchestrator.persistence.atomic_payloads import (
     publication_snapshot_to_rpc_dict,
     staging_checkpoint_to_rpc_dict,
@@ -75,6 +78,14 @@ def _exception_chain_str(exc: BaseException) -> str:
         parts.append(str(cur))
         cur = cur.__cause__
     return "\n".join(parts)
+
+
+def _is_active_graph_run_per_thread_unique_violation(exc: BaseException) -> bool:
+    """Postgres 23505 on partial unique index graph_run_one_active_per_thread."""
+    s = _exception_chain_str(exc)
+    if "23505" not in s:
+        return False
+    return "graph_run_one_active_per_thread" in s
 
 
 def _is_duplicate_graph_run_event_pkey(exc: BaseException) -> bool:
@@ -210,14 +221,21 @@ class SupabaseRepository(SupabaseRepositoryAutonomousLoopMixin):
             row["ended_at"] = record.ended_at
         if record.interrupt_requested_at is not None:
             row["interrupt_requested_at"] = record.interrupt_requested_at
-        self._run(
-            "save_graph_run",
-            "graph_run",
-            lambda: self._client.table("graph_run")
-            .upsert(row, on_conflict="graph_run_id")
-            .execute(),
-            graph_run_id=str(record.graph_run_id),
-        )
+        try:
+            self._run(
+                "save_graph_run",
+                "graph_run",
+                lambda: self._client.table("graph_run")
+                .upsert(row, on_conflict="graph_run_id")
+                .execute(),
+                graph_run_id=str(record.graph_run_id),
+            )
+        except Exception as e:
+            if _is_active_graph_run_per_thread_unique_violation(e):
+                raise ActiveGraphRunPerThreadConflictError(
+                    "graph_run_one_active_per_thread"
+                ) from e
+            raise
 
     def get_graph_run(self, graph_run_id: UUID) -> GraphRunRecord | None:
         res = self._run(
@@ -288,9 +306,36 @@ class SupabaseRepository(SupabaseRepositoryAutonomousLoopMixin):
         status: str | None = None,
         trigger_type: str | None = None,
         identity_id: UUID | None = None,
+        thread_id: UUID | None = None,
         limit: int = 50,
     ) -> list[GraphRunRecord]:
         lim = max(1, min(limit, 500))
+
+        def _apply_status_trigger(b: Any) -> Any:
+            if status is not None:
+                b = b.eq("status", status)
+            if trigger_type is not None:
+                b = b.eq("trigger_type", trigger_type)
+            return b
+
+        if thread_id is not None:
+            tid_s = str(thread_id)
+
+            def _q_thread_scoped() -> Any:
+                return _apply_status_trigger(
+                    self._client.table("graph_run").select("*").eq("thread_id", tid_s)
+                ).order("started_at", desc=True).limit(lim).execute()
+
+            res = self._run(
+                "list_graph_runs",
+                "graph_run",
+                _q_thread_scoped,
+                thread_id=tid_s,
+            )
+            if not res.data:
+                return []
+            return [_row_to_graph_run(r) for r in res.data]
+
         if identity_id is not None:
             id_s = str(identity_id)
             tr = self._run(

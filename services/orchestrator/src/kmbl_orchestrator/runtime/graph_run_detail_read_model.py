@@ -40,19 +40,34 @@ _MEANINGFUL_EVENT_TYPES: frozenset[str] = frozenset(
         RunEventType.DEGRADED_STAGING,
         RunEventType.NORMALIZATION_RESCUE,
         RunEventType.CONTEXT_IDENTITY_ABSENT,
+        # Session_3 hardening — visible without TUI / raw role rows
+        RunEventType.PLANNER_WIRE_CANONICALIZED,
+        RunEventType.STATIC_VERTICAL_EXPERIENCE_MODE_CLAMPED,
+        RunEventType.GENERATOR_STATIC_BUNDLE_REJECTED,
+        RunEventType.EVALUATOR_SKIPPED_NO_ARTIFACTS,
     }
 )
 
 # Subset of persisted role_invocation.routing_metadata_json (generator only) for operator UI.
-# KiloClaw transport trace (all roles) — from role_invocation.routing_metadata_json
-_TRANSPORT_TRACE_KEYS: tuple[str, ...] = (
-    "kiloclaw_transport_configured",
-    "kiloclaw_transport_resolved",
-    "kiloclaw_stub_mode",
-    "kiloclaw_api_key_present",
-    "kiloclaw_auto_resolution_note",
-    "kiloclaw_openclaw_cli_path",
+# OpenClaw gateway transport trace (all roles). Legacy kiloclaw_* keys are normalized for display.
+_TRACE_KEY_ALIASES: tuple[tuple[str, str], ...] = (
+    ("openclaw_transport_configured", "kiloclaw_transport_configured"),
+    ("openclaw_transport_resolved", "kiloclaw_transport_resolved"),
+    ("openclaw_stub_mode", "kiloclaw_stub_mode"),
+    ("openclaw_api_key_present", "kiloclaw_api_key_present"),
+    ("openclaw_auto_resolution_note", "kiloclaw_auto_resolution_note"),
+    ("openclaw_openclaw_cli_path", "kiloclaw_openclaw_cli_path"),
 )
+
+
+def _transport_trace_from_rm(rm: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for new_k, old_k in _TRACE_KEY_ALIASES:
+        if new_k in rm:
+            out[new_k] = rm[new_k]
+        elif old_k in rm:
+            out[new_k] = rm[old_k]
+    return out
 
 _ROUTING_HINT_KEYS: tuple[str, ...] = (
     "kmb_routing_version",
@@ -269,7 +284,7 @@ def build_graph_run_detail_read_model(
     for r in inv_sorted:
         rh, rsrc = _routing_hints_payload(r)
         rm = dict(r.routing_metadata_json or {})
-        tt = {k: rm[k] for k in _TRANSPORT_TRACE_KEYS if k in rm}
+        tt = _transport_trace_from_rm(rm)
         row: dict[str, Any] = {
             "role_invocation_id": str(r.role_invocation_id),
             "role_type": r.role_type,
@@ -282,7 +297,7 @@ def build_graph_run_detail_read_model(
             "routing_fact_source": rsrc,
         }
         if tt:
-            row["kiloclaw_transport_trace"] = tt
+            row["openclaw_transport_trace"] = tt
         if r.role_type == "generator" and rm.get("normalization_rescue"):
             row["normalization_rescue"] = True
         if rh is not None:
@@ -318,11 +333,11 @@ def build_graph_run_detail_read_model(
     planner_tt: dict[str, Any] | None = None
     if first_planner:
         prm = dict(first_planner.routing_metadata_json or {})
-        planner_tt = {k: prm[k] for k in _TRANSPORT_TRACE_KEYS if k in prm}
+        planner_tt = _transport_trace_from_rm(prm)
 
     summary_extra: dict[str, Any] = {}
     if planner_tt:
-        summary_extra["kiloclaw_transport_trace"] = planner_tt
+        summary_extra["openclaw_transport_trace"] = planner_tt
 
     qp = _quality_and_pressure_from_persisted(
         events=events_sorted,

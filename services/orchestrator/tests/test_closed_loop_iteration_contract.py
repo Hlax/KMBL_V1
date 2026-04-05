@@ -19,7 +19,7 @@ from kmbl_orchestrator.roles.invoke import DefaultRoleInvoker
 
 def test_stub_evaluator_receives_incrementing_iteration_hints() -> None:
     settings = Settings.model_construct(
-        kiloclaw_transport="stub",
+        openclaw_transport="stub",
         graph_max_iterations_default=3,
         habitat_image_generation_enabled=False,
     )

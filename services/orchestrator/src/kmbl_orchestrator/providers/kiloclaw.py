@@ -11,7 +11,9 @@ Prefer importing from the concrete modules directly in new code:
 from __future__ import annotations
 
 from kmbl_orchestrator.providers.kiloclaw_cli import OpenClawCliClient
-from kmbl_orchestrator.providers.kiloclaw_http import KiloClawHttpClient
+from kmbl_orchestrator.providers.kiloclaw_http import OpenClawHttpClient
+
+KiloClawHttpClient = OpenClawHttpClient
 from kmbl_orchestrator.providers.kiloclaw_parsing import extract_role_payload_from_openclaw_output
 from kmbl_orchestrator.providers.kiloclaw_protocol import (
     KiloClawClient,
@@ -28,6 +30,7 @@ from kmbl_orchestrator.providers.kiloclaw_stub import KiloClawStubClient
 
 __all__ = [
     "KiloClawClient",
+    "OpenClawHttpClient",
     "KiloClawHttpClient",
     "KiloClawInvocationError",
     "KiloclawTransportConfigError",

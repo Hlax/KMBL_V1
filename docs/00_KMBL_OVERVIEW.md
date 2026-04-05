@@ -1,12 +1,13 @@
 # KMBL Overview
 
-**Normative product behavior (operators, engineers):** see [`CURRENT_PRODUCT_MODEL.md`](CURRENT_PRODUCT_MODEL.md). This page is **positioning and intent**, not a substitute for runtime semantics.
+**Normative product behavior (operators, engineers):** see `[CURRENT_PRODUCT_MODEL.md](CURRENT_PRODUCT_MODEL.md)`. This page is **positioning and intent**, not a substitute for runtime semantics.
 
 ## What KMBL Is
 
 KMBL is a living, evolving digital entity.
 
 It:
+
 - learns from identity sources
 - develops internal understanding over time
 - expresses itself through a mutable habitat
@@ -20,6 +21,7 @@ It is a system that accumulates continuity.
 ## What KMBL Is Not
 
 KMBL is not:
+
 - a task queue
 - an agent control panel
 - a static profile generator
@@ -90,6 +92,7 @@ Authority is centralized.
 KMBL evolves through a stateful runtime.
 
 It maintains continuity through:
+
 - graph state
 - threads
 - checkpoints

@@ -52,8 +52,8 @@ def _meta_keys() -> set[str]:
 def test_routing_metadata_stable_shape() -> None:
     reset_openai_hourly_budget_guard_for_tests()
     s = Settings.model_construct(
-        kiloclaw_generator_config_key="kmbl-generator",
-        kiloclaw_generator_openai_image_config_key="kmbl-gen-openai",
+        openclaw_generator_config_key="kmbl-generator",
+        openclaw_generator_openai_image_config_key="kmbl-gen-openai",
         kmb_openai_image_hourly_token_cap=1_500_000,
         kmb_openai_image_route_estimated_tokens_per_invocation=10_000,
     )
@@ -111,8 +111,8 @@ def test_hero_banner_artifact_explicit() -> None:
 def test_non_image_generator_payload_default_route() -> None:
     reset_openai_hourly_budget_guard_for_tests()
     s = Settings.model_construct(
-        kiloclaw_generator_config_key="kmbl-generator",
-        kiloclaw_generator_openai_image_config_key="kmbl-gen-openai",
+        openclaw_generator_config_key="kmbl-generator",
+        openclaw_generator_openai_image_config_key="kmbl-gen-openai",
         kmb_openai_image_hourly_token_cap=1_500_000,
         kmb_openai_image_route_estimated_tokens_per_invocation=10_000,
     )
@@ -130,11 +130,11 @@ def test_non_image_generator_payload_default_route() -> None:
     assert meta["image_generation_intent_kind"] == "none"
 
 
-def test_gallery_under_budget_routes_to_kiloclaw_image_agent() -> None:
+def test_gallery_under_budget_routes_to_openclaw_image_agent() -> None:
     reset_openai_hourly_budget_guard_for_tests()
     s = Settings.model_construct(
-        kiloclaw_generator_config_key="kmbl-generator",
-        kiloclaw_generator_openai_image_config_key="kmbl-gen-openai",
+        openclaw_generator_config_key="kmbl-generator",
+        openclaw_generator_openai_image_config_key="kmbl-gen-openai",
         kmb_openai_image_hourly_token_cap=1_500_000,
         kmb_openai_image_route_estimated_tokens_per_invocation=10_000,
     )
@@ -149,8 +149,8 @@ def test_gallery_under_budget_routes_to_kiloclaw_image_agent() -> None:
     )
     assert key == "kmbl-gen-openai"
     assert meta["openai_image_route_applied"] is True
-    assert meta["generator_route_kind"] == "kiloclaw_image_agent"
-    assert meta["route_reason"] == "kiloclaw_image_agent_route_applied"
+    assert meta["generator_route_kind"] == "openclaw_image_agent"
+    assert meta["route_reason"] == "openclaw_image_agent_route_applied"
     assert meta["provider_config_key"] == "kmbl-gen-openai"
     assert meta["image_generation_intent_kind"] == "gallery_strip_image_v1"
 
@@ -158,8 +158,8 @@ def test_gallery_under_budget_routes_to_kiloclaw_image_agent() -> None:
 def test_non_gallery_future_artifact_under_budget() -> None:
     reset_openai_hourly_budget_guard_for_tests()
     s = Settings.model_construct(
-        kiloclaw_generator_config_key="kmbl-generator",
-        kiloclaw_generator_openai_image_config_key="kmbl-gen-openai",
+        openclaw_generator_config_key="kmbl-generator",
+        openclaw_generator_openai_image_config_key="kmbl-gen-openai",
         kmb_openai_image_hourly_token_cap=1_500_000,
         kmb_openai_image_route_estimated_tokens_per_invocation=10_000,
     )
@@ -173,14 +173,14 @@ def test_non_gallery_future_artifact_under_budget() -> None:
     )
     assert key == "kmbl-gen-openai"
     assert meta["image_generation_intent_kind"] == "hero_banner_image_v1"
-    assert meta["generator_route_kind"] == "kiloclaw_image_agent"
+    assert meta["generator_route_kind"] == "openclaw_image_agent"
 
 
 def test_image_intent_raises_when_alt_key_empty() -> None:
     reset_openai_hourly_budget_guard_for_tests()
     s = Settings.model_construct(
-        kiloclaw_generator_config_key="kmbl-generator",
-        kiloclaw_generator_openai_image_config_key="",
+        openclaw_generator_config_key="kmbl-generator",
+        openclaw_generator_openai_image_config_key="",
         kmb_openai_image_hourly_token_cap=1_500_000,
         kmb_openai_image_route_estimated_tokens_per_invocation=10_000,
     )
@@ -198,8 +198,8 @@ def test_image_intent_raises_when_alt_key_empty() -> None:
 def test_budget_blocks_raises() -> None:
     reset_openai_hourly_budget_guard_for_tests()
     s = Settings.model_construct(
-        kiloclaw_generator_config_key="kmbl-generator",
-        kiloclaw_generator_openai_image_config_key="kmbl-gen-openai",
+        openclaw_generator_config_key="kmbl-generator",
+        openclaw_generator_openai_image_config_key="kmbl-gen-openai",
         kmb_openai_image_hourly_token_cap=1_500_000,
         kmb_openai_image_route_estimated_tokens_per_invocation=12_000,
     )

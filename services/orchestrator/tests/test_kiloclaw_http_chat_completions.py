@@ -14,10 +14,10 @@ from kmbl_orchestrator.providers.kiloclaw_parsing import _parse_chat_completion_
 
 def _settings() -> Settings:
     return Settings.model_construct(
-        kiloclaw_base_url="https://gw.example.test",
-        kiloclaw_invoke_path="/v1/chat/completions",
-        kiloclaw_api_key="test-token",
-        kiloclaw_chat_completions_user="kmbl-orchestrator:e2e-test",
+        openclaw_base_url="https://gw.example.test",
+        openclaw_invoke_path="/v1/chat/completions",
+        openclaw_api_key="test-token",
+        openclaw_chat_completions_user="kmbl-orchestrator:e2e-test",
     )
 
 
@@ -84,8 +84,8 @@ def test_http_client_posts_chat_completions_and_parses_planner(mock_client_cls: 
 
 
 @patch("kmbl_orchestrator.providers.kiloclaw_http.httpx.Client")
-def test_http_client_appends_thread_id_to_chat_user(mock_client_cls: MagicMock) -> None:
-    """Isolate OpenClaw session per thread — bare kmbl-orchestrator can 500 on the gateway."""
+def test_http_client_appends_thread_and_graph_run_id_to_chat_user(mock_client_cls: MagicMock) -> None:
+    """Isolate OpenClaw session per thread and graph run (avoids cross-run compaction bleed)."""
     planner_out = {
         "build_spec": {"type": "http_test", "title": "t", "steps": []},
         "constraints": {},
@@ -102,10 +102,15 @@ def test_http_client_appends_thread_id_to_chat_user(mock_client_cls: MagicMock) 
 
     c = KiloClawHttpClient(settings=_settings())
     tid = "11111111-2222-3333-4444-555555555555"
-    c.invoke_role("planner", "kmbl-planner", {"thread_id": tid, "task": "x"})
+    gid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    c.invoke_role(
+        "planner",
+        "kmbl-planner",
+        {"thread_id": tid, "graph_run_id": gid, "task": "x"},
+    )
 
     body = mock_inst.post.call_args[1]["json"]
-    assert body["user"] == f"kmbl-orchestrator:e2e-test:{tid}"
+    assert body["user"] == f"kmbl-orchestrator:e2e-test:{tid}:{gid}"
 
 
 @patch("kmbl_orchestrator.providers.kiloclaw_http.httpx.Client")
@@ -342,3 +347,114 @@ def test_http_client_validates_planner_missing_build_spec(mock_client_cls: Magic
     c = KiloClawHttpClient(settings=_settings())
     with pytest.raises(KiloClawInvocationError, match="build_spec"):
         c.invoke_role("planner", "kmbl-planner", {})
+
+
+def test_parse_chat_completion_detects_openclaw_placeholder_generator() -> None:
+    data = _chat_response("No response from OpenClaw.")
+    with pytest.raises(KiloClawInvocationError) as ei:
+        _parse_chat_completion_json_content(data, role_type="generator")
+    assert "placeholder" in str(ei.value).lower()
+    det = (ei.value.normalized or {}).get("details") or {}
+    assert det.get("kind") == "openclaw_placeholder"
+
+
+def test_parse_chat_completion_detects_no_reply_token() -> None:
+    data = _chat_response("NO_REPLY")
+    with pytest.raises(KiloClawInvocationError) as ei:
+        _parse_chat_completion_json_content(data, role_type="generator")
+    assert "placeholder" in str(ei.value).lower()
+
+
+@patch("kmbl_orchestrator.providers.kiloclaw_http.httpx.Client")
+def test_http_client_sets_max_tokens_for_generator(mock_client_cls: MagicMock) -> None:
+    gen_out = {"updated_state": {"smoke": True}}
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = _chat_response(json.dumps(gen_out))
+    mock_inst = MagicMock()
+    mock_inst.post.return_value = mock_resp
+    mock_client_cls.return_value.__enter__.return_value = mock_inst
+    mock_client_cls.return_value.__exit__.return_value = None
+
+    s = Settings.model_construct(
+        openclaw_base_url="https://gw.example.test",
+        openclaw_invoke_path="/v1/chat/completions",
+        openclaw_api_key="test-token",
+        openclaw_chat_completions_user="kmbl-orchestrator",
+        openclaw_chat_max_tokens_generator=2048,
+    )
+    c = KiloClawHttpClient(settings=s)
+    c.invoke_role("generator", "kmbl-generator", {"thread_id": "00000000-0000-0000-0000-000000000001"})
+    body = mock_inst.post.call_args[1]["json"]
+    assert body["max_tokens"] == 2048
+
+
+@patch("kmbl_orchestrator.providers.kiloclaw_http.httpx.Client")
+def test_http_client_sets_max_tokens_for_evaluator(mock_client_cls: MagicMock) -> None:
+    ev_out = {"status": "pass", "summary": "ok"}
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = _chat_response(json.dumps(ev_out))
+    mock_inst = MagicMock()
+    mock_inst.post.return_value = mock_resp
+    mock_client_cls.return_value.__enter__.return_value = mock_inst
+    mock_client_cls.return_value.__exit__.return_value = None
+
+    s = Settings.model_construct(
+        openclaw_base_url="https://gw.example.test",
+        openclaw_invoke_path="/v1/chat/completions",
+        openclaw_api_key="test-token",
+        openclaw_chat_completions_user="kmbl-orchestrator",
+        openclaw_chat_max_tokens_evaluator=1024,
+    )
+    c = KiloClawHttpClient(settings=s)
+    c.invoke_role("evaluator", "kmbl-evaluator", {"thread_id": "00000000-0000-0000-0000-000000000001"})
+    body = mock_inst.post.call_args[1]["json"]
+    assert body["max_tokens"] == 1024
+
+
+@patch("kmbl_orchestrator.providers.kiloclaw_http.httpx.Client")
+def test_http_client_default_max_tokens_generator_8192(mock_client_cls: MagicMock) -> None:
+    """Schema default sends max_tokens for generator (parity with planner)."""
+    gen_out = {"updated_state": {"smoke": True}}
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = _chat_response(json.dumps(gen_out))
+    mock_inst = MagicMock()
+    mock_inst.post.return_value = mock_resp
+    mock_client_cls.return_value.__enter__.return_value = mock_inst
+    mock_client_cls.return_value.__exit__.return_value = None
+
+    s = Settings.model_construct(
+        openclaw_base_url="https://gw.example.test",
+        openclaw_invoke_path="/v1/chat/completions",
+        openclaw_api_key="test-token",
+        openclaw_chat_completions_user="kmbl-orchestrator",
+    )
+    c = KiloClawHttpClient(settings=s)
+    c.invoke_role("generator", "kmbl-generator", {"thread_id": "00000000-0000-0000-0000-000000000001"})
+    body = mock_inst.post.call_args[1]["json"]
+    assert body["max_tokens"] == 8192
+
+
+@patch("kmbl_orchestrator.providers.kiloclaw_http.httpx.Client")
+def test_http_client_default_max_tokens_evaluator_8192(mock_client_cls: MagicMock) -> None:
+    ev_out = {"status": "pass", "summary": "ok"}
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = _chat_response(json.dumps(ev_out))
+    mock_inst = MagicMock()
+    mock_inst.post.return_value = mock_resp
+    mock_client_cls.return_value.__enter__.return_value = mock_inst
+    mock_client_cls.return_value.__exit__.return_value = None
+
+    s = Settings.model_construct(
+        openclaw_base_url="https://gw.example.test",
+        openclaw_invoke_path="/v1/chat/completions",
+        openclaw_api_key="test-token",
+        openclaw_chat_completions_user="kmbl-orchestrator",
+    )
+    c = KiloClawHttpClient(settings=s)
+    c.invoke_role("evaluator", "kmbl-evaluator", {"thread_id": "00000000-0000-0000-0000-000000000001"})
+    body = mock_inst.post.call_args[1]["json"]
+    assert body["max_tokens"] == 8192

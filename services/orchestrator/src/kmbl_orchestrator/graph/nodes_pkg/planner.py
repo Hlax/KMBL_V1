@@ -25,6 +25,9 @@ from kmbl_orchestrator.graph.helpers import (
 )
 from kmbl_orchestrator.graph.state import GraphState
 from kmbl_orchestrator.normalize import normalize_planner_output
+from kmbl_orchestrator.normalize.planner_canonicalize import canonicalize_planner_raw
+from kmbl_orchestrator.runtime.cool_generation_lane import apply_cool_generation_lane_presets
+from kmbl_orchestrator.runtime.static_vertical_invariants import clamp_experience_mode_for_static_vertical
 from kmbl_orchestrator.runtime.interrupt_checks import raise_if_interrupt_requested
 from kmbl_orchestrator.runtime.run_events import RunEventType, append_graph_run_event
 from kmbl_orchestrator.memory.ops import memory_bias_for_experience_mode
@@ -120,6 +123,7 @@ def planner_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
 
     iteration_idx = int(state.get("iteration_index", 0))
     payload: dict[str, Any] = {
+        "graph_run_id": str(gid),
         "thread_id": state["thread_id"],
         "identity_context": state.get("identity_context") or {},
         "memory_context": state.get("memory_context") or {},
@@ -155,7 +159,7 @@ def planner_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             graph_run_id=gid,
             thread_id=tid,
             role_type="planner",
-            provider_config_key=ctx.settings.kiloclaw_planner_config_key,
+            provider_config_key=ctx.settings.openclaw_planner_config_key,
             input_payload=payload,
             iteration_index=state.get("iteration_index", 0),
         )
@@ -186,6 +190,15 @@ def planner_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     raw = compact_planner_wire_output(raw)
     if not isinstance(raw.get("build_spec"), dict):
         raw["build_spec"] = {}
+    wire_fixes = canonicalize_planner_raw(raw)
+    if wire_fixes:
+        append_graph_run_event(
+            ctx.repo,
+            gid,
+            RunEventType.PLANNER_WIRE_CANONICALIZED,
+            {"fixes": wire_fixes},
+            thread_id=tid,
+        )
     norm_bs, normalized_fields = normalize_build_spec_for_persistence(raw["build_spec"])
     raw["build_spec"] = norm_bs
     if normalized_fields:
@@ -234,6 +247,28 @@ def planner_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             "graph_run graph_run_id=%s experience_mode derived=%s confidence=%.2f archetype=%s",
             gid, bs.get("experience_mode"), mode_result["experience_confidence"], bs.get("site_archetype"),
         )
+
+    clamp_fixes = clamp_experience_mode_for_static_vertical(bs, ei)
+    if clamp_fixes:
+        append_graph_run_event(
+            ctx.repo,
+            gid,
+            RunEventType.STATIC_VERTICAL_EXPERIENCE_MODE_CLAMPED,
+            {"fixes": clamp_fixes},
+            thread_id=tid,
+        )
+
+    ib_lane = state.get("identity_brief") if isinstance(state.get("identity_brief"), dict) else {}
+    si_lane = state.get("structured_identity") if isinstance(state.get("structured_identity"), dict) else {}
+    raw["build_spec"], lane_meta = apply_cool_generation_lane_presets(
+        raw["build_spec"],
+        ei,
+        ib_lane,
+        si_lane,
+    )
+    if lane_meta.get("applied"):
+        raw.setdefault("_kmbl_planner_metadata", {})["cool_generation_lane"] = lane_meta
+
     try:
         validate_role_output_for_persistence("planner", raw)
     except (ValidationError, ValueError) as e:

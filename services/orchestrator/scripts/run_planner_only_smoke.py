@@ -81,8 +81,8 @@ def main() -> int:
     keys = [
         "request_received",
         "graph_run_persisted",
-        "kiloclaw_http_outbound start",
-        "kiloclaw_http_outbound done",
+        "openclaw_http_outbound start",
+        "openclaw_http_outbound done",
         "planner_invocation_finished",
         "smoke_planner_only",
         "response_returning",

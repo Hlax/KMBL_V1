@@ -39,7 +39,7 @@ def test_resolve_evaluator_preview_url_falls_back_to_candidate() -> None:
 
 def test_evaluator_payload_includes_preview_and_iteration_context() -> None:
     settings = Settings.model_construct(
-        kiloclaw_transport="stub",
+        openclaw_transport="stub",
         graph_max_iterations_default=3,
         orchestrator_public_base_url="http://127.0.0.1:8010",
         habitat_image_generation_enabled=False,
@@ -90,7 +90,7 @@ def test_evaluator_payload_includes_preview_and_iteration_context() -> None:
 
 def test_planner_payload_includes_identity_url() -> None:
     settings = Settings.model_construct(
-        kiloclaw_transport="stub",
+        openclaw_transport="stub",
         graph_max_iterations_default=1,
         habitat_image_generation_enabled=False,
     )
@@ -132,7 +132,7 @@ def test_planner_payload_includes_identity_url() -> None:
 
 def test_stub_persisted_build_spec_has_site_archetype() -> None:
     settings = Settings.model_construct(
-        kiloclaw_transport="stub",
+        openclaw_transport="stub",
         graph_max_iterations_default=1,
         habitat_image_generation_enabled=False,
     )
@@ -169,7 +169,7 @@ def test_stub_persisted_build_spec_has_site_archetype() -> None:
 
 def test_stub_generator_persists_primary_move_metadata() -> None:
     settings = Settings.model_construct(
-        kiloclaw_transport="stub",
+        openclaw_transport="stub",
         graph_max_iterations_default=1,
         habitat_image_generation_enabled=False,
     )

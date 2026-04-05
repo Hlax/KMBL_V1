@@ -47,7 +47,7 @@ def _make_role_invocation(gid, tid):
         graph_run_id=gid,
         thread_id=tid,
         role_type="planner",
-        provider="kiloclaw",
+        provider="openclaw",
         provider_config_key="test",
         input_payload_json={},
         routing_metadata_json={},

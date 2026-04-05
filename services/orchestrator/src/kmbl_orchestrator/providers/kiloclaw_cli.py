@@ -36,10 +36,10 @@ class OpenClawCliClient:
         payload: dict[str, Any],
     ) -> dict[str, Any]:
         _ = role_type
-        exe_name = (self._settings.kiloclaw_openclaw_executable or "openclaw").strip()
+        exe_name = (self._settings.openclaw_openclaw_executable or "openclaw").strip()
         exe = shutil.which(exe_name) or exe_name
         msg = json.dumps(payload, ensure_ascii=False)
-        timeout = max(1, int(self._settings.kiloclaw_openclaw_timeout_sec))
+        timeout = max(1, int(self._settings.openclaw_openclaw_timeout_sec))
         cmd: list[str] = [
             exe,
             "agent",

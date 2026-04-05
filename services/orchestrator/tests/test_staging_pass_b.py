@@ -179,7 +179,7 @@ def test_evaluator_fail_stages_after_max_iterations() -> None:
     repo = InMemoryRepository()
     invoker = DefaultRoleInvoker(client=EvalAlwaysFail())
     settings = Settings.model_construct(
-        kiloclaw_transport="stub",
+        openclaw_transport="stub",
         staging_snapshot_policy="always",
     )
     tid, gid = persist_graph_run_start(
@@ -211,12 +211,12 @@ def test_stub_pass_creates_persisted_staging_snapshot() -> None:
     repo = InMemoryRepository()
     invoker = DefaultRoleInvoker(
         settings=Settings.model_construct(
-            kiloclaw_transport="stub",
+            openclaw_transport="stub",
             staging_snapshot_policy="always",
         )
     )
     settings = Settings.model_construct(
-        kiloclaw_transport="stub",
+        openclaw_transport="stub",
         staging_snapshot_policy="always",
     )
     tid, gid = persist_graph_run_start(
@@ -313,7 +313,7 @@ def test_generator_empty_fails_invocation() -> None:
 
     repo = InMemoryRepository()
     invoker = DefaultRoleInvoker(client=GenEmpty())
-    settings = Settings.model_construct(kiloclaw_transport="stub")
+    settings = Settings.model_construct(openclaw_transport="stub")
     tid, gid = persist_graph_run_start(
         repo,
         thread_id=None,
@@ -368,7 +368,7 @@ def test_planner_persists_with_normalized_defaults() -> None:
 
     repo = InMemoryRepository()
     invoker = DefaultRoleInvoker(client=PlannerSparse())
-    settings = Settings.model_construct(kiloclaw_transport="stub")
+    settings = Settings.model_construct(openclaw_transport="stub")
     tid, gid = persist_graph_run_start(
         repo,
         thread_id=None,
@@ -428,7 +428,7 @@ def test_preview_invalid_blocks_staging_graph_fails() -> None:
 
     repo = InMemoryRepository()
     invoker = DefaultRoleInvoker(client=BadPreview())
-    settings = Settings.model_construct(kiloclaw_transport="stub")
+    settings = Settings.model_construct(openclaw_transport="stub")
     tid, gid = persist_graph_run_start(
         repo,
         thread_id=None,

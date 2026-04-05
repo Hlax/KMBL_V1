@@ -41,6 +41,15 @@ class Settings(BaseSettings):
     orchestrator_run_start_sync_timeout_sec: float = 120.0
     # If true: background work runs only one planner role + persist (no generator/evaluator/staging).
     orchestrator_smoke_planner_only: bool = False
+    # Smoke / local OpenClaw: omit evaluator preview_url so agents are nudged toward payload-only review
+    # (no live page URL for Playwright-style tooling). Does not change LangGraph structure.
+    orchestrator_smoke_contract_evaluator: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "KMBL_SMOKE_CONTRACT_EVALUATOR",
+            "orchestrator_smoke_contract_evaluator",
+        ),
+    )
     # When false: POST /orchestrator/invoke-role returns 404 (production uses LangGraph only).
     orchestrator_allow_dev_role_invoke: bool = Field(
         default=False,
@@ -167,28 +176,71 @@ class Settings(BaseSettings):
         ),
     )
 
-    kiloclaw_base_url: str = "https://kiloclaw.example.invalid"
-    # KiloClaw gateway OpenAI-compatible chat: POST {base}{path} (default /v1/chat/completions).
-    kiloclaw_invoke_path: str = "/v1/chat/completions"
-    # OpenAI ``user`` field (gateway session routing). HTTP client appends ``:{thread_id}``
-    # from the role payload when present; bare ``kmbl-orchestrator`` alone can trigger
-    # gateway 500 on some OpenClaw builds.
-    kiloclaw_chat_completions_user: str = "kmbl-orchestrator"
-    # auto | stub | http | openclaw_cli — auto: use http when KILOCLAW_API_KEY set, else stub.
-    kiloclaw_transport: str = "auto"
-    kiloclaw_api_key: str = ""
-    # OpenClaw CLI (when kiloclaw_transport=openclaw_cli): executable on PATH, e.g. openclaw
-    kiloclaw_openclaw_executable: str = "openclaw"
-    kiloclaw_openclaw_timeout_sec: int = 300
-    # Must match OpenClaw agents.list ids (see root .env.example — kmbl-planner, not "planner").
-    kiloclaw_planner_config_key: str = "kmbl-planner"
-    kiloclaw_generator_config_key: str = "kmbl-generator"
-    kiloclaw_evaluator_config_key: str = "kmbl-evaluator"
-    # OpenClaw agent id for generator when KMBL routes explicit image-generation work (required for image intent).
-    # Default kmbl-image-gen; set empty only if image routes must be disabled (will fail closed when intent matches).
-    kiloclaw_generator_openai_image_config_key: str = Field(
+    # Local OpenClaw gateway (OpenAI-compatible). KILOCLAW_* env names remain accepted aliases.
+    openclaw_base_url: str = Field(
+        default="http://127.0.0.1:18789",
+        validation_alias=AliasChoices("OPENCLAW_BASE_URL", "KILOCLAW_BASE_URL"),
+    )
+    openclaw_invoke_path: str = Field(
+        default="/v1/chat/completions",
+        validation_alias=AliasChoices("OPENCLAW_INVOKE_PATH", "KILOCLAW_INVOKE_PATH"),
+    )
+    # OpenAI ``user`` field (gateway session routing). HTTP client appends ``:{thread_id}``.
+    openclaw_chat_completions_user: str = Field(
+        default="kmbl-orchestrator",
+        validation_alias=AliasChoices(
+            "OPENCLAW_CHAT_COMPLETIONS_USER",
+            "KILOCLAW_CHAT_COMPLETIONS_USER",
+        ),
+    )
+    # auto | stub | http | openclaw_cli
+    openclaw_transport: str = Field(
+        default="auto",
+        validation_alias=AliasChoices("OPENCLAW_TRANSPORT", "KILOCLAW_TRANSPORT"),
+    )
+    openclaw_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("OPENCLAW_API_KEY", "KILOCLAW_API_KEY"),
+    )
+    openclaw_openclaw_executable: str = Field(
+        default="openclaw",
+        validation_alias=AliasChoices(
+            "OPENCLAW_OPENCLAW_EXECUTABLE",
+            "KILOCLAW_OPENCLAW_EXECUTABLE",
+        ),
+    )
+    openclaw_openclaw_timeout_sec: int = Field(
+        default=300,
+        validation_alias=AliasChoices(
+            "OPENCLAW_OPENCLAW_TIMEOUT_SEC",
+            "KILOCLAW_OPENCLAW_TIMEOUT_SEC",
+        ),
+    )
+    openclaw_planner_config_key: str = Field(
+        default="kmbl-planner",
+        validation_alias=AliasChoices(
+            "OPENCLAW_PLANNER_CONFIG_KEY",
+            "KILOCLAW_PLANNER_CONFIG_KEY",
+        ),
+    )
+    openclaw_generator_config_key: str = Field(
+        default="kmbl-generator",
+        validation_alias=AliasChoices(
+            "OPENCLAW_GENERATOR_CONFIG_KEY",
+            "KILOCLAW_GENERATOR_CONFIG_KEY",
+        ),
+    )
+    openclaw_evaluator_config_key: str = Field(
+        default="kmbl-evaluator",
+        validation_alias=AliasChoices(
+            "OPENCLAW_EVALUATOR_CONFIG_KEY",
+            "KILOCLAW_EVALUATOR_CONFIG_KEY",
+        ),
+    )
+    openclaw_generator_openai_image_config_key: str = Field(
         default="kmbl-image-gen",
         validation_alias=AliasChoices(
+            "OPENCLAW_GENERATOR_OPENAI_IMAGE_CONFIG_KEY",
             "KILOCLAW_GENERATOR_OPENAI_IMAGE_CONFIG_KEY",
             "kiloclaw_generator_openai_image_config_key",
         ),
@@ -207,16 +259,42 @@ class Settings(BaseSettings):
             "kmb_openai_image_route_estimated_tokens_per_invocation",
         ),
     )
-    # httpx client for KILOCLAW_TRANSPORT=http (chat completions POST).
-    kiloclaw_http_connect_timeout_sec: float = 30.0
-    kiloclaw_http_read_timeout_sec: float = 300.0
-    # OpenAI-style chat completion cap (sent as ``max_tokens``). Planner JSON can be large;
-    # omit or lower if your gateway rejects high values.
-    kiloclaw_chat_max_tokens_planner: int | None = Field(
+    openclaw_http_connect_timeout_sec: float = Field(
+        default=30.0,
+        validation_alias=AliasChoices(
+            "OPENCLAW_HTTP_CONNECT_TIMEOUT_SEC",
+            "KILOCLAW_HTTP_CONNECT_TIMEOUT_SEC",
+        ),
+    )
+    openclaw_http_read_timeout_sec: float = Field(
+        default=300.0,
+        validation_alias=AliasChoices(
+            "OPENCLAW_HTTP_READ_TIMEOUT_SEC",
+            "KILOCLAW_HTTP_READ_TIMEOUT_SEC",
+        ),
+    )
+    openclaw_chat_max_tokens_planner: int | None = Field(
         default=8192,
         validation_alias=AliasChoices(
+            "OPENCLAW_CHAT_MAX_TOKENS_PLANNER",
             "KILOCLAW_CHAT_MAX_TOKENS_PLANNER",
             "kiloclaw_chat_max_tokens_planner",
+        ),
+    )
+    openclaw_chat_max_tokens_generator: int | None = Field(
+        default=8192,
+        validation_alias=AliasChoices(
+            "OPENCLAW_CHAT_MAX_TOKENS_GENERATOR",
+            "KILOCLAW_CHAT_MAX_TOKENS_GENERATOR",
+            "kiloclaw_chat_max_tokens_generator",
+        ),
+    )
+    openclaw_chat_max_tokens_evaluator: int | None = Field(
+        default=8192,
+        validation_alias=AliasChoices(
+            "OPENCLAW_CHAT_MAX_TOKENS_EVALUATOR",
+            "KILOCLAW_CHAT_MAX_TOKENS_EVALUATOR",
+            "kiloclaw_chat_max_tokens_evaluator",
         ),
     )
 
@@ -243,11 +321,11 @@ class Settings(BaseSettings):
         ),
     )
 
-    # Image generation via habitat assembly (uses KiloClaw kmbl-image-gen agent).
+    # Image generation via habitat assembly (uses OpenClaw kmbl-image-gen agent).
     # Set to False in tests/CI to skip image generation and use placeholder mode.
     habitat_image_generation_enabled: bool = Field(
         default=True,
-        description="Enable image generation during habitat assembly (uses KiloClaw kmbl-image-gen).",
+        description="Enable image generation during habitat assembly (uses OpenClaw kmbl-image-gen).",
         validation_alias=AliasChoices(
             "HABITAT_IMAGE_GENERATION_ENABLED", "habitat_image_generation_enabled"
         ),
@@ -280,22 +358,26 @@ class Settings(BaseSettings):
         return self
 
     def effective_allow_stub_transport(self) -> bool:
-        """Whether stub KiloClaw transport is permitted (handles model_construct without validator)."""
+        """Whether stub role-gateway transport is permitted (handles model_construct without validator)."""
         if self.allow_stub_transport is None:
             return self.kmbl_env != "production"
         return bool(self.allow_stub_transport)
 
-    def effective_kiloclaw_transport(self) -> str:
+    def effective_openclaw_transport(self) -> str:
         """Resolved transport name, or ``invalid`` if configuration fails validation."""
         from kmbl_orchestrator.providers.kiloclaw_protocol import (
             KiloclawTransportConfigError,
-            compute_kiloclaw_resolution,
+            compute_openclaw_resolution,
         )
 
         try:
-            return compute_kiloclaw_resolution(self).resolved
+            return compute_openclaw_resolution(self).resolved
         except KiloclawTransportConfigError:
             return "invalid"
+
+    def effective_kiloclaw_transport(self) -> str:
+        """Deprecated alias for :meth:`effective_openclaw_transport`."""
+        return self.effective_openclaw_transport()
 
 
 @lru_cache

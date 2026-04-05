@@ -139,12 +139,12 @@ class ImageService:
                     status="failed",
                     error=f"transport_forbidden: {e} {e.operator_hint}".strip(),
                 )
-            config_key = self._settings.kiloclaw_generator_openai_image_config_key
-            
+            config_key = self._settings.openclaw_generator_openai_image_config_key
+
             if not config_key:
                 return HabitatImageResult(
                     status="failed",
-                    error="KILOCLAW_GENERATOR_OPENAI_IMAGE_CONFIG_KEY not configured",
+                    error="OPENCLAW_GENERATOR_OPENAI_IMAGE_CONFIG_KEY not configured",
                 )
 
             # Build payload for image generation agent

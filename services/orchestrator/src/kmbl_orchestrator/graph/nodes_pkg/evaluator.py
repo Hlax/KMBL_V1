@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
@@ -14,7 +15,7 @@ from kmbl_orchestrator.contracts.evaluator_nomination import extract_evaluator_n
 from kmbl_orchestrator.contracts.persistence_validate import (
     validate_role_output_for_persistence,
 )
-from kmbl_orchestrator.domain import CheckpointRecord
+from kmbl_orchestrator.domain import CheckpointRecord, RoleInvocationRecord
 from kmbl_orchestrator.errors import KiloclawRoleInvocationForbiddenError, RoleInvocationFailed
 from kmbl_orchestrator.graph.helpers import (
     _persist_invocation_failure,
@@ -27,7 +28,16 @@ from kmbl_orchestrator.normalize.gallery_strip_harness import (
     merge_gallery_strip_harness_checks,
 )
 from kmbl_orchestrator.runtime.evaluation_surface_gate import apply_preview_surface_gate
+from kmbl_orchestrator.runtime.cool_generation_lane import apply_cool_lane_execution_acknowledgment_gates
+from kmbl_orchestrator.runtime.literal_success_gate import (
+    apply_cool_lane_motion_signal_gate,
+    apply_literal_success_checks,
+)
 from kmbl_orchestrator.runtime.interrupt_checks import raise_if_interrupt_requested
+from kmbl_orchestrator.runtime.evaluator_preflight import (
+    should_skip_evaluator_llm,
+    synthetic_skipped_evaluator_raw,
+)
 from kmbl_orchestrator.runtime.run_events import RunEventType, append_graph_run_event
 from kmbl_orchestrator.runtime.session_staging_links import resolve_evaluator_preview_url
 from kmbl_orchestrator.staging.duplicate_rejection import apply_duplicate_staging_rejection
@@ -117,7 +127,15 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         thread_id=str(tid),
         build_candidate=bc,
     )
+    if getattr(ctx.settings, "orchestrator_smoke_contract_evaluator", False):
+        _log.info(
+            "evaluator smoke_contract_evaluator graph_run_id=%s — clearing preview_url "
+            "(contract-only evaluation; no live staging URL for browser tooling)",
+            gid,
+        )
+        preview_url = None
     payload = {
+        "graph_run_id": str(gid),
         "thread_id": state["thread_id"],
         "build_candidate": bc,
         "success_criteria": success,
@@ -139,40 +157,72 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         # Prior evaluator JSON (same thread run) for visual-delta / sameness checks
         "previous_evaluation_report": prev_ev if iter_hint > 0 else None,
     }
+    bs_for_skip = state.get("build_spec") if isinstance(state.get("build_spec"), dict) else {}
+    ei_for_skip = state.get("event_input") if isinstance(state.get("event_input"), dict) else {}
+    skip_llm, skip_reason = should_skip_evaluator_llm(bc, bs_for_skip, ei_for_skip)
     t_ev = time.perf_counter()
-    try:
-        inv, raw = ctx.invoker.invoke(
+    if skip_llm:
+        append_graph_run_event(
+            ctx.repo,
+            gid,
+            RunEventType.EVALUATOR_SKIPPED_NO_ARTIFACTS,
+            {"reason": skip_reason},
+            thread_id=tid,
+        )
+        raw = synthetic_skipped_evaluator_raw(skip_reason)
+        ended = datetime.now(timezone.utc).isoformat()
+        inv = RoleInvocationRecord(
+            role_invocation_id=uuid4(),
             graph_run_id=gid,
             thread_id=tid,
             role_type="evaluator",
-            provider_config_key=ctx.settings.kiloclaw_evaluator_config_key,
-            input_payload=payload,
+            provider_config_key=ctx.settings.openclaw_evaluator_config_key,
+            input_payload_json=payload,
+            output_payload_json=raw,
+            status="completed",
             iteration_index=int(state.get("iteration_index", 0)),
+            ended_at=ended,
         )
-    except KiloclawRoleInvocationForbiddenError as e:
-        raise RoleInvocationFailed(
-            phase="evaluator",
-            graph_run_id=gid,
-            thread_id=tid,
-            detail={
-                "error_kind": "transport_forbidden",
-                "message": str(e),
-                "operator_hint": e.operator_hint,
-            },
-        ) from e
-    _log.info(
-        "graph_run graph_run_id=%s stage=evaluator_invocation_finished elapsed_ms=%.1f",
-        gid,
-        (time.perf_counter() - t_ev) * 1000,
-    )
-    if inv.status == "failed":
-        ctx.repo.save_role_invocation(inv)
-        raise RoleInvocationFailed(
-            phase="evaluator",
-            graph_run_id=gid,
-            thread_id=tid,
-            detail=raw,
+        _log.info(
+            "graph_run graph_run_id=%s evaluator_llm_skipped reason=%s elapsed_ms=%.1f",
+            gid,
+            skip_reason,
+            (time.perf_counter() - t_ev) * 1000,
         )
+    else:
+        try:
+            inv, raw = ctx.invoker.invoke(
+                graph_run_id=gid,
+                thread_id=tid,
+                role_type="evaluator",
+                provider_config_key=ctx.settings.openclaw_evaluator_config_key,
+                input_payload=payload,
+                iteration_index=int(state.get("iteration_index", 0)),
+            )
+        except KiloclawRoleInvocationForbiddenError as e:
+            raise RoleInvocationFailed(
+                phase="evaluator",
+                graph_run_id=gid,
+                thread_id=tid,
+                detail={
+                    "error_kind": "transport_forbidden",
+                    "message": str(e),
+                    "operator_hint": e.operator_hint,
+                },
+            ) from e
+        _log.info(
+            "graph_run graph_run_id=%s stage=evaluator_invocation_finished elapsed_ms=%.1f",
+            gid,
+            (time.perf_counter() - t_ev) * 1000,
+        )
+        if inv.status == "failed":
+            ctx.repo.save_role_invocation(inv)
+            raise RoleInvocationFailed(
+                phase="evaluator",
+                graph_run_id=gid,
+                thread_id=tid,
+                detail=raw,
+            )
     try:
         validate_role_output_for_persistence("evaluator", raw)
     except (ValidationError, ValueError) as e:
@@ -240,10 +290,30 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             )
     report = apply_preview_surface_gate(report, is_static_vertical=is_static_vertical)
 
+    bs_from_state = state.get("build_spec") or {}
+    if not isinstance(bs_from_state, dict):
+        bs_from_state = {}
+
+    # Planner-authored substring checks against artifact bodies (deterministic).
+    report = apply_literal_success_checks(
+        report,
+        build_spec=bs_from_state,
+        build_candidate=bc if isinstance(bc, dict) else {},
+    )
+    report = apply_cool_lane_motion_signal_gate(
+        report,
+        build_spec=bs_from_state,
+        event_input=ev_input if isinstance(ev_input, dict) else {},
+        build_candidate=bc if isinstance(bc, dict) else {},
+    )
+    report = apply_cool_lane_execution_acknowledgment_gates(
+        report,
+        build_candidate=bc if isinstance(bc, dict) else {},
+    )
+
     # ── 3D content guardrail for spatial experience modes ────────────────
     # Soft policy: do not force fail when the LLM evaluator already passed — use partial + metrics
     # so the graph can iterate without a hard dead-end before the generator adds Three/WebGL.
-    bs_from_state = state.get("build_spec") or {}
     exp_mode = bs_from_state.get("experience_mode", "")
     if exp_mode in ("immersive_spatial_portfolio", "webgl_3d_portfolio"):
         _3d_keywords = {"three", "webgl", "3d"}

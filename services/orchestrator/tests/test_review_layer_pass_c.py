@@ -281,12 +281,12 @@ def test_stub_run_timeline_includes_preview_on_staging_created() -> None:
     repo = InMemoryRepository()
     invoker = DefaultRoleInvoker(
         settings=Settings.model_construct(
-            kiloclaw_transport="stub",
+            openclaw_transport="stub",
             staging_snapshot_policy="always",
         )
     )
     settings = Settings.model_construct(
-        kiloclaw_transport="stub",
+        openclaw_transport="stub",
         staging_snapshot_policy="always",
     )
     tid, gid = persist_graph_run_start(

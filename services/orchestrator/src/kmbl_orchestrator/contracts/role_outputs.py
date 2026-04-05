@@ -37,7 +37,7 @@ def _is_non_empty(value: Any) -> bool:
 
 
 class GeneratorRoleOutput(BaseModel):
-    """Generator must include at least one non-empty primary field."""
+    """Generator must include at least one non-empty primary field **or** a structured failure."""
 
     model_config = ConfigDict(extra="allow")
 
@@ -46,19 +46,32 @@ class GeneratorRoleOutput(BaseModel):
     artifact_outputs: Any | None = None
     sandbox_ref: str | None = None
     preview_url: str | None = None
+    # Machine-readable failure when the model cannot produce artifacts (no prose fallback).
+    # When present with non-empty ``code`` and ``message``, primary fields may be empty.
+    contract_failure: dict[str, Any] | None = None
+    # Cool lane: explicit status (orchestrator validates vocabulary when lane is on).
+    # ``status`` must be one of: executed | downgraded | cannot_fulfill (lowercase).
+    execution_acknowledgment: dict[str, Any] | None = None
 
     @model_validator(mode="after")
-    def at_least_one_primary_field(self) -> GeneratorRoleOutput:
-        # Check for at least one non-empty primary field
+    def at_least_one_primary_field_or_contract_failure(self) -> GeneratorRoleOutput:
+        cf = self.contract_failure
+        if isinstance(cf, dict):
+            code = cf.get("code")
+            msg = cf.get("message")
+            if isinstance(code, str) and code.strip() and isinstance(msg, str) and msg.strip():
+                return self
+
         has_proposed = _is_non_empty(self.proposed_changes)
         has_state = _is_non_empty(self.updated_state)
         has_artifacts = _is_non_empty(self.artifact_outputs)
-        
+
         if not (has_proposed or has_state or has_artifacts):
             raise ValueError(
                 "generator output must include at least one non-empty field: "
                 "proposed_changes, updated_state, or artifact_outputs "
-                "(empty dict/list or list of empty dicts not accepted)"
+                "(empty dict/list or list of empty dicts not accepted), "
+                "or contract_failure with string code and message"
             )
         return self
 

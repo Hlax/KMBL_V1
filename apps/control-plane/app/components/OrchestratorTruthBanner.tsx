@@ -21,14 +21,14 @@ type SystemModePayload = {
   detail: string;
 };
 
-function readKiloclawStub(body: unknown): boolean | null {
+function readOpenclawStub(body: unknown): boolean | null {
   if (!body || typeof body !== "object") return null;
   const o = body as Record<string, unknown>;
-  const res = o.kiloclaw_resolution;
+  const res = o.openclaw_resolution ?? o.kiloclaw_resolution;
   if (!res || typeof res !== "object") return null;
   const r = res as Record<string, unknown>;
   if (r.configuration_valid === false) return null;
-  if (r.kiloclaw_stub_mode === true) return true;
+  if (r.openclaw_stub_mode === true || r.kiloclaw_stub_mode === true) return true;
   return false;
 }
 
@@ -90,7 +90,7 @@ export function OrchestratorTruthBanner() {
     });
 
   const modeInfo = systemModeLabel(derivedMode);
-  const stub = readKiloclawStub(probe.body);
+  const stub = readOpenclawStub(probe.body);
 
   const bannerClass =
     derivedMode === "fully_connected" && stub !== true
@@ -117,8 +117,9 @@ export function OrchestratorTruthBanner() {
       )}
       {probe.reachable && stub === true && (
         <div className="cp-truth-banner__sub">
-          <strong>Stub KiloClaw transport.</strong> Planner/generator/evaluator are not real OpenClaw HTTP
-          calls until you configure <code>KILOCLAW_API_KEY</code> and gateway URL (see orchestrator{" "}
+          <strong>Stub role-gateway transport.</strong> Planner/generator/evaluator are not real OpenClaw HTTP
+          calls until you configure <code>OPENCLAW_API_KEY</code> (if required) and{" "}
+          <code>OPENCLAW_BASE_URL</code> (see orchestrator{" "}
           <code>/health</code>).
         </div>
       )}

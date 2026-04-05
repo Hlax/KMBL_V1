@@ -23,10 +23,14 @@ class RunEventType:
     CHECKPOINT_WRITTEN = "checkpoint_written"
     PLANNER_INVOCATION_STARTED = "planner_invocation_started"
     PLANNER_INVOCATION_COMPLETED = "planner_invocation_completed"
+    PLANNER_WIRE_CANONICALIZED = "planner_wire_canonicalized"
+    STATIC_VERTICAL_EXPERIENCE_MODE_CLAMPED = "static_vertical_experience_mode_clamped"
     GENERATOR_INVOCATION_STARTED = "generator_invocation_started"
     GENERATOR_INVOCATION_COMPLETED = "generator_invocation_completed"
+    GENERATOR_STATIC_BUNDLE_REJECTED = "generator_static_bundle_rejected"
     EVALUATOR_INVOCATION_STARTED = "evaluator_invocation_started"
     EVALUATOR_INVOCATION_COMPLETED = "evaluator_invocation_completed"
+    EVALUATOR_SKIPPED_NO_ARTIFACTS = "evaluator_skipped_no_artifacts"
     DECISION_MADE = "decision_made"
     GRAPH_RUN_COMPLETED = "graph_run_completed"
     GRAPH_RUN_FAILED = "graph_run_failed"
@@ -44,7 +48,7 @@ class RunEventType:
     OPERATOR_REVIEW_SNAPSHOT_MATERIALIZED = "operator_review_snapshot_materialized"
 
     # Hardening events
-    KILOCLAW_RETRY = "kiloclaw_retry"
+    OPENCLAW_RETRY = "openclaw_retry"
     CONTRACT_WARNING = "contract_warning"
     PERSISTENCE_RETRY = "persistence_retry"
     POST_INVOKE_FAILURE = "post_invoke_failure"

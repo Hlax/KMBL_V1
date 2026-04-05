@@ -206,3 +206,24 @@ def build_identity_url_static_frontend_event_input(
             "planner_is_creative_director": True,
         },
     }
+
+
+# Keys owned by build_identity_url_static_frontend_event_input — extras must not replace them.
+IDENTITY_URL_PRESET_CANONICAL_KEYS: Final = frozenset(
+    ("scenario", "task", "identity_url", "constraints")
+)
+
+
+def merge_identity_url_static_frontend_extras(
+    built: dict[str, Any],
+    event_input: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Merge caller extras (e.g. cool_generation_lane) without replacing the canonical seed dict."""
+    if not event_input:
+        return built
+    extras = {
+        k: v
+        for k, v in event_input.items()
+        if k not in IDENTITY_URL_PRESET_CANONICAL_KEYS
+    }
+    return {**built, **extras}

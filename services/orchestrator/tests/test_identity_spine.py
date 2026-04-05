@@ -126,7 +126,7 @@ def test_run_without_identity_id_empty_identity_context() -> None:
     cap = Cap()
     repo = InMemoryRepository()
     invoker = DefaultRoleInvoker(client=cap)
-    settings = Settings.model_construct(kiloclaw_transport="stub")
+    settings = Settings.model_construct(openclaw_transport="stub")
     tid, gid = persist_graph_run_start(
         repo,
         thread_id=None,
@@ -194,7 +194,7 @@ def test_run_with_identity_id_planner_gets_hydrated_context() -> None:
         )
     )
     invoker = DefaultRoleInvoker(client=cap)
-    settings = Settings.model_construct(kiloclaw_transport="stub")
+    settings = Settings.model_construct(openclaw_transport="stub")
     tid, gid = persist_graph_run_start(
         repo,
         thread_id=None,

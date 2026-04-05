@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from typing import TYPE_CHECKING, Any
@@ -23,6 +24,11 @@ from kmbl_orchestrator.graph.helpers import (
 )
 from kmbl_orchestrator.graph.state import GraphState
 from kmbl_orchestrator.normalize import normalize_generator_output
+from kmbl_orchestrator.runtime.cool_generation_lane import (
+    annotate_cool_lane_generator_compliance,
+    cool_generation_lane_active,
+    summarize_execution_contract_for_generator,
+)
 from kmbl_orchestrator.runtime.kilo_model_routing import (
     ImageRouteBudgetExceededError,
     ImageRouteConfigurationError,
@@ -35,7 +41,11 @@ from kmbl_orchestrator.staging.facts import (
     build_working_staging_facts,
     working_staging_facts_to_payload,
 )
-from kmbl_orchestrator.staging.integrity import validate_generator_output_for_candidate
+from kmbl_orchestrator.staging.integrity import (
+    StaticVerticalBundleRejected,
+    validate_generator_output_for_candidate,
+    validate_static_frontend_bundle_requirement,
+)
 
 if TYPE_CHECKING:
     from kmbl_orchestrator.graph.app import GraphContext
@@ -135,7 +145,10 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         else None
     )
 
+    ei0 = state.get("event_input") if isinstance(state.get("event_input"), dict) else {}
+    bs0 = state.get("build_spec") if isinstance(state.get("build_spec"), dict) else {}
     payload = {
+        "graph_run_id": str(gid),
         "thread_id": state["thread_id"],
         "build_spec": state.get("build_spec") or {},
         "current_working_state": state.get("current_state") or {},
@@ -148,6 +161,9 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         # Structured identity profile: themes, tone, visual_tendencies, content_types,
         # complexity, notable_entities — enables identity-shaped generation.
         "structured_identity": state.get("structured_identity"),
+        # Cool lane: compact execution surface + explicit flag (see docs/PLANNER_GENERATOR_COOL_LANE.md)
+        "cool_generation_lane_active": cool_generation_lane_active(ei0, bs0),
+        "kmbl_execution_contract": summarize_execution_contract_for_generator(bs0),
         # Fix 3: retry_context carries orchestrator-selected direction on iterations
         # Generator must use retry_context.retry_direction to determine approach
     }
@@ -172,6 +188,16 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         if payload["iteration_plan"] is None:
             payload["iteration_plan"] = {}
         payload["iteration_plan"] = {**payload["iteration_plan"], **rc}
+    try:
+        payload_json_chars = len(json.dumps(payload, ensure_ascii=False, default=str))
+    except Exception:
+        payload_json_chars = -1
+    _log.info(
+        "generator_payload graph_run_id=%s iteration_index=%s payload_json_chars=%s",
+        gid,
+        iteration,
+        payload_json_chars,
+    )
     try:
         gen_key, routing_meta = select_generator_provider_config(
             ctx.settings,
@@ -222,6 +248,13 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             detail=detail,
         ) from e
     t_gen = time.perf_counter()
+    _log.info(
+        "generator_invoke graph_run_id=%s iteration_index=%s provider_config_key=%s payload_json_chars=%s",
+        gid,
+        iteration,
+        gen_key,
+        payload_json_chars,
+    )
     try:
         inv, raw = ctx.invoker.invoke(
             graph_run_id=gid,
@@ -256,13 +289,40 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             thread_id=tid,
             detail=raw,
         )
+    raw = annotate_cool_lane_generator_compliance(
+        raw,
+        build_spec=state.get("build_spec") if isinstance(state.get("build_spec"), dict) else {},
+        event_input=state.get("event_input") if isinstance(state.get("event_input"), dict) else {},
+    )
     try:
         validate_generator_output_for_candidate(raw)
+        validate_static_frontend_bundle_requirement(
+            state.get("build_spec") if isinstance(state.get("build_spec"), dict) else {},
+            state.get("event_input") if isinstance(state.get("event_input"), dict) else {},
+            raw,
+        )
     except ValueError as e:
+        xdetails: dict[str, Any] = {"static_frontend_bundle_gate": True}
+        if isinstance(e, StaticVerticalBundleRejected) and getattr(e, "output_class", None):
+            xdetails["output_class"] = e.output_class
         detail = contract_validation_failure(
             phase="generator",
             message=str(e),
             pydantic_errors=None,
+            extra_details=xdetails,
+        )
+        ev_payload: dict[str, Any] = {
+            "message": str(e)[:800],
+            "error_kind": "static_frontend_bundle_requirement",
+        }
+        if isinstance(e, StaticVerticalBundleRejected) and getattr(e, "output_class", None):
+            ev_payload["output_class"] = e.output_class
+        append_graph_run_event(
+            ctx.repo,
+            gid,
+            RunEventType.GENERATOR_STATIC_BUNDLE_REJECTED,
+            ev_payload,
+            thread_id=tid,
         )
         _persist_invocation_failure(
             inv=inv,
@@ -272,6 +332,25 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             thread_id=tid,
             repo=ctx.repo,
         )
+
+    cf = raw.get("contract_failure")
+    if isinstance(cf, dict) and isinstance(cf.get("code"), str) and cf["code"].strip():
+        if isinstance(cf.get("message"), str) and cf["message"].strip():
+            detail = {
+                "status": "failed",
+                "error_kind": "contract_failure",
+                "message": cf["message"],
+                "details": {"code": cf["code"], "contract_failure": cf},
+            }
+            _persist_invocation_failure(
+                inv=inv,
+                raw_detail=detail,
+                phase="generator",
+                graph_run_id=gid,
+                thread_id=tid,
+                repo=ctx.repo,
+            )
+
     persist_validation_failed = False
     try:
         validate_role_output_for_persistence("generator", raw)
@@ -386,6 +465,8 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             "sandbox_ref": raw.get("sandbox_ref"),
             "preview_url": raw.get("preview_url"),
             "block_anchors": block_anchors if block_anchors else None,
+            "execution_acknowledgment": raw.get("execution_acknowledgment"),
+            "_kmbl_compliance": raw.get("_kmbl_compliance"),
         },
         "build_candidate_id": str(cand.build_candidate_id),
         "current_state": raw.get("updated_state") or state.get("current_state") or {},

@@ -3,6 +3,11 @@
 import Link from "next/link";
 import { useCallback, useState } from "react";
 
+import {
+  fetchRunStartExclusive,
+  isRunStartBlocked,
+} from "@/lib/run-start-single-flight";
+
 const POLL_MS = 1500;
 const POLL_MAX = 200;
 
@@ -112,11 +117,13 @@ export function VerificationSmokePanel() {
           ? { scenario_preset: preset, identity_url: urlForIdentity }
           : { scenario_preset: preset };
         
-        const startRes = await fetch("/api/orchestrator/runs/start", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
+        const startRes = await fetchRunStartExclusive(
+          "/api/orchestrator/runs/start",
+          body,
+        );
+        if (isRunStartBlocked(startRes)) {
+          throw new Error(startRes.message);
+        }
         const startWrap = (await startRes.json()) as {
           ok?: boolean;
           data?: unknown;

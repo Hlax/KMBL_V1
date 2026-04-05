@@ -311,11 +311,24 @@ def _run_graph_inner(
                     context_compaction_json=None,
                 ),
             )
+            fail_ev: dict[str, Any] = {
+                "phase": e.phase,
+                "error_kind": ek,
+            }
+            msg = e.detail.get("message")
+            if isinstance(msg, str) and msg.strip():
+                fail_ev["message_preview"] = msg.strip()[:500]
+            det = e.detail.get("details")
+            if isinstance(det, dict) and det.get("static_frontend_bundle_gate") is True:
+                fail_ev["static_frontend_bundle_gate"] = True
+                oc = det.get("output_class")
+                if isinstance(oc, str) and oc.strip():
+                    fail_ev["output_class"] = oc.strip()
             append_graph_run_event(
                 repo,
                 gid_u,
                 RunEventType.GRAPH_RUN_FAILED,
-                {"phase": e.phase, "error_kind": ek},
+                fail_ev,
             )
             repo.update_graph_run_status(
                 gid_u,

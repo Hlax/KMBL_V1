@@ -64,11 +64,13 @@ export function deriveSystemMode(input: {
   if (!input.healthReachable) return "degraded";
 
   const body = input.healthBody;
-  const res = body && typeof body === "object" ? (body as { kiloclaw_resolution?: unknown }).kiloclaw_resolution : null;
+  const raw = body && typeof body === "object" ? (body as Record<string, unknown>) : null;
+  const res = raw?.openclaw_resolution ?? raw?.kiloclaw_resolution;
   const kr = res && typeof res === "object" ? (res as { configuration_valid?: unknown }) : null;
   if (kr?.configuration_valid === false) return "degraded";
 
-  const eff = body && typeof body === "object" ? (body as { kiloclaw_transport_effective?: unknown }).kiloclaw_transport_effective : null;
+  const eff =
+    raw?.openclaw_transport_effective ?? raw?.kiloclaw_transport_effective;
   if (eff === "invalid") return "degraded";
 
   // Control-plane /api/runs is the browser-facing path; check it before direct orchestrator probes.

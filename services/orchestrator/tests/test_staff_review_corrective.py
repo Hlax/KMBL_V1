@@ -85,7 +85,7 @@ class TestDegradedStagingEvent:
         client = _IteratingClient(evaluator_status="partial")
         invoker = DefaultRoleInvoker(client=client)
         settings = Settings.model_construct(
-            kiloclaw_transport="stub",
+            openclaw_transport="stub",
             graph_max_iterations_default=1,  # Only 1 retry allowed
         )
         tid, gid = persist_graph_run_start(
@@ -111,7 +111,7 @@ class TestDegradedStagingEvent:
         repo = InMemoryRepository()
         client = _IteratingClient(evaluator_status="pass")
         invoker = DefaultRoleInvoker(client=client)
-        settings = Settings.model_construct(kiloclaw_transport="stub")
+        settings = Settings.model_construct(openclaw_transport="stub")
         tid, gid = persist_graph_run_start(
             repo, thread_id=None, graph_run_id=None,
             identity_id=None, trigger_type="prompt", event_input={},
@@ -130,7 +130,7 @@ class TestDegradedStagingEvent:
         client = _IteratingClient(evaluator_status="fail")
         invoker = DefaultRoleInvoker(client=client)
         settings = Settings.model_construct(
-            kiloclaw_transport="stub",
+            openclaw_transport="stub",
             graph_max_iterations_default=1,
         )
         tid, gid = persist_graph_run_start(

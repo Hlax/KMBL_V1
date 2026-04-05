@@ -314,7 +314,10 @@ def _row_to_role_invocation(row: dict[str, Any]) -> RoleInvocationRecord:
         graph_run_id=UUID(row["graph_run_id"]),
         thread_id=UUID(row["thread_id"]),
         role_type=cast(Literal["planner", "generator", "evaluator"], row["role_type"]),
-        provider=cast(Literal["kiloclaw"], row.get("provider", "kiloclaw")),
+        provider=cast(
+            Literal["kiloclaw", "openclaw"],
+            row.get("provider", "openclaw"),
+        ),
         provider_config_key=str(row.get("provider_config_key", "")),
         input_payload_json=row.get("input_payload_json") or {},
         output_payload_json=out if isinstance(out, dict) else None,

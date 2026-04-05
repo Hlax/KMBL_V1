@@ -124,7 +124,7 @@ class TestIdentityReusedOnSameThread:
         )
         cap = _CapturingClient()
         invoker = DefaultRoleInvoker(client=cap)
-        settings = Settings.model_construct(kiloclaw_transport="stub")
+        settings = Settings.model_construct(openclaw_transport="stub")
 
         # First run
         tid1, gid1 = _make_run(
@@ -162,7 +162,7 @@ class TestIdentityReusedOnSameThread:
         )
         cap = _CapturingClient()
         invoker = DefaultRoleInvoker(client=cap)
-        settings = Settings.model_construct(kiloclaw_transport="stub")
+        settings = Settings.model_construct(openclaw_transport="stub")
 
         tid, gid = _make_run(repo, invoker, settings, identity_id=str(iid))
 
@@ -182,7 +182,7 @@ class TestMissingIdentityEmitsEvent:
         cap = _CapturingClient()
         repo = InMemoryRepository()
         invoker = DefaultRoleInvoker(client=cap)
-        settings = Settings.model_construct(kiloclaw_transport="stub")
+        settings = Settings.model_construct(openclaw_transport="stub")
 
         tid, gid = _make_run(repo, invoker, settings, identity_id=None)
 
@@ -194,7 +194,7 @@ class TestMissingIdentityEmitsEvent:
         cap = _CapturingClient()
         repo = InMemoryRepository()
         invoker = DefaultRoleInvoker(client=cap)
-        settings = Settings.model_construct(kiloclaw_transport="stub")
+        settings = Settings.model_construct(openclaw_transport="stub")
 
         _make_run(repo, invoker, settings, identity_id=None)
 
@@ -207,7 +207,7 @@ class TestMissingIdentityEmitsEvent:
         cap = _CapturingClient()
         repo = InMemoryRepository()
         invoker = DefaultRoleInvoker(client=cap)
-        settings = Settings.model_construct(kiloclaw_transport="stub")
+        settings = Settings.model_construct(openclaw_transport="stub")
 
         tid, gid = _make_run(repo, invoker, settings, identity_id=None)
 

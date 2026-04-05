@@ -51,7 +51,7 @@ from kmbl_orchestrator.staging.facts import (
 
 def _make_settings() -> Settings:
     return Settings.model_construct(
-        kiloclaw_transport="stub",
+        openclaw_transport="stub",
         graph_max_iterations_default=3,
         habitat_image_generation_enabled=False,
         # Integration expects a review snapshot row each pass; product default is on_nomination.

@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+import threading
 from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
 
-from kmbl_orchestrator.api.main import app
+from kmbl_orchestrator.api.main import app, get_repo
 from kmbl_orchestrator.config import get_settings
 from kmbl_orchestrator.domain import GraphRunRecord, ThreadRecord
 from kmbl_orchestrator.errors import RunInterrupted
+from kmbl_orchestrator.persistence.exceptions import ActiveGraphRunPerThreadConflictError
 from kmbl_orchestrator.persistence.factory import reset_repository_singleton_for_tests
 from kmbl_orchestrator.persistence.repository import InMemoryRepository
 from kmbl_orchestrator.runtime.interrupt_checks import raise_if_interrupt_requested
@@ -20,7 +22,7 @@ from kmbl_orchestrator.runtime.interrupt_checks import raise_if_interrupt_reques
 def clear_singleton(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SUPABASE_URL", "")
     monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "")
-    monkeypatch.setenv("KILOCLAW_TRANSPORT", "stub")
+    monkeypatch.setenv("OPENCLAW_TRANSPORT", "stub")
     get_settings.cache_clear()
     reset_repository_singleton_for_tests()
 
@@ -124,3 +126,69 @@ def test_raise_if_interrupt_requested_raises() -> None:
     )
     with pytest.raises(RunInterrupted):
         raise_if_interrupt_requested(repo, gid, tid)
+
+
+def test_in_memory_rejects_second_active_graph_run_same_thread() -> None:
+    tid = uuid4()
+    repo = InMemoryRepository()
+    repo.ensure_thread(ThreadRecord(thread_id=tid, thread_kind="build", status="active"))
+    g1 = uuid4()
+    g2 = uuid4()
+    repo.save_graph_run(
+        GraphRunRecord(
+            graph_run_id=g1,
+            thread_id=tid,
+            trigger_type="prompt",
+            status="starting",
+        )
+    )
+    with pytest.raises(ActiveGraphRunPerThreadConflictError):
+        repo.save_graph_run(
+            GraphRunRecord(
+                graph_run_id=g2,
+                thread_id=tid,
+                trigger_type="prompt",
+                status="starting",
+            )
+        )
+
+
+def test_concurrent_post_start_same_thread_one_409(
+    clear_singleton: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Races two POSTs after the read-check; persistence must reject the loser (or read-check wins)."""
+    monkeypatch.setattr(
+        "kmbl_orchestrator.api.main._run_graph_background",
+        lambda **kwargs: None,
+    )
+    tid = uuid4()
+    repo = InMemoryRepository()
+    repo.ensure_thread(ThreadRecord(thread_id=tid, thread_kind="build", status="active"))
+
+    def _ov() -> InMemoryRepository:
+        return repo
+
+    app.dependency_overrides[get_repo] = _ov
+    try:
+        client = TestClient(app)
+        codes: list[int] = []
+        barrier = threading.Barrier(2)
+
+        def post_start() -> None:
+            barrier.wait()
+            codes.append(
+                client.post(
+                    "/orchestrator/runs/start",
+                    json={"thread_id": str(tid), "trigger_type": "prompt", "event_input": {}},
+                ).status_code
+            )
+
+        t1 = threading.Thread(target=post_start)
+        t2 = threading.Thread(target=post_start)
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+        assert sorted(codes) == [200, 409]
+    finally:
+        app.dependency_overrides.clear()

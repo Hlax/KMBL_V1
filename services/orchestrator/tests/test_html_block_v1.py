@@ -465,7 +465,7 @@ class TestGeneratorNodeBlockApplication:
         from kmbl_orchestrator.config import Settings
 
         return Settings.model_construct(
-            kiloclaw_transport="stub",
+            openclaw_transport="stub",
             graph_max_iterations_default=3,
             habitat_image_generation_enabled=False,
         )

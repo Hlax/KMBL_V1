@@ -9,7 +9,7 @@ Canon architecture and naming live under [`docs/`](docs/). **Current product beh
 | Path | Purpose |
 |------|---------|
 | [`docs/`](docs/) | Canon specifications (source of truth) |
-| [`docs/kiloclaw-agents/`](docs/kiloclaw-agents/) | Agent role definitions (SOUL.md etc.) — reference docs, NOT runtime wired. Agents are hosted externally in KiloClaw/OpenClaw and invoked via HTTP. |
+| [`docs/openclaw-agents/`](docs/openclaw-agents/) | Agent role definitions (SOUL.md etc.) — reference docs, NOT runtime wired. Agents are hosted in OpenClaw and invoked via HTTP. |
 | [`services/orchestrator/`](services/orchestrator/) | FastAPI service, LangGraph runtime, role invocation, normalization, Supabase or in-memory persistence |
 | [`packages/contracts/`](packages/contracts/) | Shared TypeScript schemas (Zod) for API and persistence shapes (TS consumers) |
 | [`packages/config/`](packages/config/) | Typed environment parsing for JS/TS consumers |
@@ -116,7 +116,7 @@ Open `http://localhost:3000` — **Autonomous** (`/autonomous`) is the default h
 - Local dev may use **stub** KiloClaw transport when no API key is set (`KILOCLAW_TRANSPORT` / `KILOCLAW_API_KEY`); use HTTP/OpenClaw for real role execution.
 - `packages/storage` remains a TS package for future app-side Supabase use; the orchestrator uses `supabase-py` today.
 - Production hardening (auth on the orchestrator, deployment manifests) follows your environment—see [`docs/16_DEPLOYMENT_ARCHITECTURE.md`](docs/16_DEPLOYMENT_ARCHITECTURE.md).
-- `docs/kiloclaw-agents/` contains agent SOUL.md definitions and instructions. These are **reference documentation** — the actual agent runtime is hosted externally in OpenClaw/KiloClaw. Do not treat this folder as a wired local dependency.
+- `docs/openclaw-agents/` contains agent SOUL.md definitions and instructions. These are **reference documentation** — the actual agent runtime is hosted in OpenClaw. Do not treat this folder as a wired local dependency.
 
 ## Running tests
 

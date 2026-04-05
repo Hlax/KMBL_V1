@@ -31,6 +31,7 @@ from kmbl_orchestrator.domain import (
     ThreadRecord,
     WorkingStagingRecord,
 )
+from kmbl_orchestrator.persistence.exceptions import ActiveGraphRunPerThreadConflictError
 
 _log = logging.getLogger(__name__)
 
@@ -65,9 +66,10 @@ class Repository(Protocol):
         status: str | None = None,
         trigger_type: str | None = None,
         identity_id: UUID | None = None,
+        thread_id: UUID | None = None,
         limit: int = 50,
     ) -> list[GraphRunRecord]:
-        """Newest ``started_at`` first. Optional filters; ``identity_id`` via ``thread`` rows."""
+        """Newest ``started_at`` first. Optional filters; ``identity_id`` via ``thread`` rows; ``thread_id`` scopes to one thread."""
 
     def get_active_graph_run_for_thread(self, thread_id: UUID) -> GraphRunRecord | None:
         """Most recent graph_run for ``thread_id`` whose status is starting/running/interrupt_requested, else None."""
@@ -513,7 +515,19 @@ class InMemoryRepository:
         )
 
     def save_graph_run(self, record: GraphRunRecord) -> None:
-        self._graph_runs[str(record.graph_run_id)] = record
+        gid = str(record.graph_run_id)
+        if record.status in ACTIVE_GRAPH_RUN_STATUSES:
+            for oid, other in self._graph_runs.items():
+                if oid == gid:
+                    continue
+                if (
+                    other.thread_id == record.thread_id
+                    and other.status in ACTIVE_GRAPH_RUN_STATUSES
+                ):
+                    raise ActiveGraphRunPerThreadConflictError(
+                        "graph_run_one_active_per_thread"
+                    )
+        self._graph_runs[gid] = record
 
     def get_graph_run(self, graph_run_id: UUID) -> GraphRunRecord | None:
         return self._graph_runs.get(str(graph_run_id))
@@ -524,9 +538,12 @@ class InMemoryRepository:
         status: str | None = None,
         trigger_type: str | None = None,
         identity_id: UUID | None = None,
+        thread_id: UUID | None = None,
         limit: int = 50,
     ) -> list[GraphRunRecord]:
         rows = list(self._graph_runs.values())
+        if thread_id is not None:
+            rows = [r for r in rows if r.thread_id == thread_id]
         if status is not None:
             rows = [r for r in rows if r.status == status]
         if trigger_type is not None:

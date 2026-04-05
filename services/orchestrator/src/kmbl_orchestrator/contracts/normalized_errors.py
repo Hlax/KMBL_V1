@@ -72,13 +72,19 @@ def contract_validation_failure(
     phase: str,
     message: str,
     pydantic_errors: list[dict[str, Any]] | None = None,
+    extra_details: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    details: dict[str, Any] = {}
+    if pydantic_errors:
+        details["pydantic_errors"] = pydantic_errors
+    if extra_details:
+        details.update(extra_details)
     return normalized_failure(
         error_kind="contract_validation",
         message=message,
         error_type="contract_validation",
         failure_phase=phase,
-        details={"pydantic_errors": pydantic_errors} if pydantic_errors else None,
+        details=details if details else None,
     )
 
 

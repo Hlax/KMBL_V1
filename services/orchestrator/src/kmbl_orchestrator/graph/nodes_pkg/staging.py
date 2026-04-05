@@ -195,19 +195,19 @@ def staging_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         prior_on_thread[0].staging_snapshot_id if prior_on_thread else None
     )
 
-        nom_state = state.get("evaluator_nomination")
-        raw_ev = ev.raw_payload_json if isinstance(ev.raw_payload_json, dict) else None
-        # Always normalize via extract — same rules for checkpoint state dicts and raw evaluator JSON
-        # (avoids unsafe bool() on ad-hoc dict values).
-        nom_src = nom_state if isinstance(nom_state, dict) and nom_state else raw_ev
-        nomination = extract_evaluator_nomination(nom_src if isinstance(nom_src, dict) else None)
+    nom_state = state.get("evaluator_nomination")
+    raw_ev = ev.raw_payload_json if isinstance(ev.raw_payload_json, dict) else None
+    # Always normalize via extract — same rules for checkpoint state dicts and raw evaluator JSON
+    # (avoids unsafe bool() on ad-hoc dict values).
+    nom_src = nom_state if isinstance(nom_state, dict) and nom_state else raw_ev
+    nomination = extract_evaluator_nomination(nom_src if isinstance(nom_src, dict) else None)
 
-        marked = nomination["marked_for_review"]
-        mark_reason = nomination["mark_reason"]
-        review_tags: list[str] = list(nomination["review_tags"])
+    marked = nomination["marked_for_review"]
+    mark_reason = nomination["mark_reason"]
+    review_tags: list[str] = list(nomination["review_tags"])
 
-        policy = getattr(ctx.settings, "staging_snapshot_policy", "on_nomination")
-        should_snapshot = _should_create_staging_snapshot(policy, marked)
+    policy = getattr(ctx.settings, "staging_snapshot_policy", "on_nomination")
+    should_snapshot = _should_create_staging_snapshot(policy, marked)
 
     ssid: UUID | None = None
     snap: StagingSnapshotRecord | None = None

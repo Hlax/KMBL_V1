@@ -25,6 +25,7 @@ from kmbl_orchestrator.contracts.planner_normalize import (
 from kmbl_orchestrator.domain import CheckpointRecord
 from kmbl_orchestrator.identity.hydrate import build_planner_identity_context
 from kmbl_orchestrator.normalize import normalize_planner_output
+from kmbl_orchestrator.normalize.planner_canonicalize import canonicalize_planner_raw
 from kmbl_orchestrator.persistence.repository import Repository
 from kmbl_orchestrator.roles.invoke import DefaultRoleInvoker
 from kmbl_orchestrator.runtime.run_events import RunEventType, append_graph_run_event
@@ -74,7 +75,7 @@ def run_smoke_planner_only(
         graph_run_id=gid,
         thread_id=tid,
         role_type="planner",
-        provider_config_key=settings.kiloclaw_planner_config_key,
+        provider_config_key=settings.openclaw_planner_config_key,
         input_payload=payload,
         iteration_index=0,
     )
@@ -103,6 +104,7 @@ def run_smoke_planner_only(
     raw = compact_planner_wire_output(raw)
     if not isinstance(raw.get("build_spec"), dict):
         raw["build_spec"] = {}
+    canonicalize_planner_raw(raw)
     norm_bs, normalized_fields = normalize_build_spec_for_persistence(raw["build_spec"])
     raw["build_spec"] = norm_bs
     if normalized_fields:

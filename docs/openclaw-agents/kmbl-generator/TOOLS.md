@@ -2,7 +2,7 @@
 
 ## Role
 
-KMBL orchestrates; KiloClaw runs this workspace. The generator **implements within scope**: it maps **build_spec** (+ **current_working_state**, **iteration_feedback**) to **proposed_changes**, **artifact_outputs**, **updated_state**, and references (**sandbox_ref**, **preview_url**) when applicable. It does not replan, pass/fail the run, publish, or invoke other roles.
+KMBL orchestrates; KiloClaw runs this workspace. The generator **implements within scope**: it maps **build_spec** (+ **current_working_state**, **iteration_feedback**) to **`artifact_outputs` (primary for static sites)** and **`updated_state`**, with **`proposed_changes`** as optional traceability. For static vertical, **`proposed_changes` must not replace** real files — it can supplement them. It does not replan, pass/fail the run, publish, or invoke other roles.
 
 ## Tooling stance
 

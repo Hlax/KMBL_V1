@@ -82,7 +82,7 @@ def test_full_graph_direct_repo_lists_multiple_evaluations(
     clear_singleton_and_settings: None,
 ) -> None:
     settings = Settings.model_construct(
-        kiloclaw_transport="stub",
+        openclaw_transport="stub",
         graph_max_iterations_default=3,
         habitat_image_generation_enabled=False,
     )

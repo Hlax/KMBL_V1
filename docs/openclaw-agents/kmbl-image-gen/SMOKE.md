@@ -42,7 +42,7 @@ python scripts/run_graph_smoke.py --preset kiloclaw_image_only_test_v1 --port 80
 
 OpenClaw **`workspace`** for **`kmbl-image-gen`** must match this folder. After any **SOUL.md** / instruction change, **re-sync the entire directory** and **restart the gateway** (or reload agents) so the model sees the updated contract.
 
-**Re-sync these files** (repo paths under **`docs/kiloclaw-agents/kmbl-image-gen/`**):
+**Re-sync these files** (repo paths under **`docs/openclaw-agents/kmbl-image-gen/`**):
 
 | File | Purpose |
 |------|--------|

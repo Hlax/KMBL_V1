@@ -3,6 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 
+import {
+  fetchRunStartExclusive,
+  isRunStartBlocked,
+} from "@/lib/run-start-single-flight";
+
 const LS_URL = "kmbl_autonomous_url";
 const LS_THREAD = "kmbl_autonomous_thread_id";
 const LS_IDENTITY = "kmbl_autonomous_identity_id";
@@ -74,6 +79,8 @@ export default function AutonomousPage() {
   const messagesRef = useRef<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const stopRef = useRef(false);
+  /** Prevents double "Start loop" before React applies `running` (avoids overlapping POST /runs/start). */
+  const loopStartGateRef = useRef(false);
   const runsEndRef = useRef<HTMLDivElement>(null);
   /** Latest session staging links from start or run-detail poll (updates during a run). */
   const [sessionStaging, setSessionStaging] = useState<SessionStagingLinks | null>(null);
@@ -189,15 +196,72 @@ export default function AutonomousPage() {
         body.user_instructions = instructionSnapshot.join("\n");
       }
 
-      const res = await fetch("/api/runs/start", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
+      const res = await fetchRunStartExclusive("/api/runs/start", body);
+      if (isRunStartBlocked(res)) {
+        return {
+          time: new Date().toLocaleTimeString(),
+          error: res.message,
+        };
+      }
 
       const data = (await res.json()) as Record<string, unknown>;
 
+      const pollRunToTerminal = async (graphRunId: string) => {
+        let status = "running";
+        let stagingId: string | null = null;
+        for (let i = 0; i < 120; i++) {
+          await new Promise((r) => setTimeout(r, 2000));
+          if (stopRef.current) break;
+
+          try {
+            const pollRes = await fetch(`/api/runs/${graphRunId}`);
+            const pollData = (await pollRes.json()) as Record<string, unknown>;
+            const polled = pickSessionStaging(pollData);
+            if (polled) setSessionStaging(polled);
+
+            const s =
+              pollData?.summary && typeof pollData.summary === "object"
+                ? (pollData.summary as { status?: string }).status
+                : pollData.status;
+            status = typeof s === "string" ? s : "running";
+            const ao = pollData.associated_outputs as { staging_snapshot_id?: string } | undefined;
+            stagingId = ao?.staging_snapshot_id ?? (pollData.staging_snapshot_id as string | undefined) ?? null;
+
+            if (GRAPH_RUN_TERMINAL_STATUSES.has(status)) {
+              break;
+            }
+          } catch {
+            // Keep polling
+          }
+        }
+        return { status, stagingId };
+      };
+
       if (!res.ok) {
+        const detail = data.detail as Record<string, unknown> | string | unknown[] | undefined;
+        if (
+          res.status === 409 &&
+          detail &&
+          typeof detail === "object" &&
+          !Array.isArray(detail) &&
+          detail.error_kind === "active_graph_run" &&
+          typeof detail.active_graph_run_id === "string"
+        ) {
+          const activeGid = detail.active_graph_run_id;
+          setCurrentRun(activeGid);
+          currentRunRef.current = activeGid;
+          const { status, stagingId } = await pollRunToTerminal(activeGid);
+          if (instructionSnapshot.length > 0) {
+            setMessages([]);
+          }
+          return {
+            time: new Date().toLocaleTimeString(),
+            graph_run_id: activeGid,
+            status,
+            staging_snapshot_id: stagingId ?? undefined,
+          };
+        }
+
         let errorMsg = `HTTP ${res.status}`;
         if (typeof data.detail === "string") {
           errorMsg = data.detail;
@@ -240,31 +304,9 @@ export default function AutonomousPage() {
       let stagingId: string | null = null;
 
       if (graphRunId) {
-        for (let i = 0; i < 120; i++) {
-          await new Promise((r) => setTimeout(r, 2000));
-          if (stopRef.current) break;
-
-          try {
-            const pollRes = await fetch(`/api/runs/${graphRunId}`);
-            const pollData = (await pollRes.json()) as Record<string, unknown>;
-            const polled = pickSessionStaging(pollData);
-            if (polled) setSessionStaging(polled);
-
-            const s =
-              pollData?.summary && typeof pollData.summary === "object"
-                ? (pollData.summary as { status?: string }).status
-                : pollData.status;
-            status = typeof s === "string" ? s : "running";
-            const ao = pollData.associated_outputs as { staging_snapshot_id?: string } | undefined;
-            stagingId = ao?.staging_snapshot_id ?? (pollData.staging_snapshot_id as string | undefined) ?? null;
-
-            if (GRAPH_RUN_TERMINAL_STATUSES.has(status)) {
-              break;
-            }
-          } catch {
-            // Keep polling
-          }
-        }
+        const polled = await pollRunToTerminal(graphRunId);
+        status = polled.status;
+        stagingId = polled.stagingId;
       }
 
       if (instructionSnapshot.length > 0) {
@@ -286,29 +328,36 @@ export default function AutonomousPage() {
   };
 
   const startLoop = async () => {
+    if (loopStartGateRef.current) {
+      return;
+    }
     if (!savedUrl && !url.trim()) {
       setError("Enter a URL first");
       return;
     }
-    if (!savedUrl) saveUrl();
+    loopStartGateRef.current = true;
+    try {
+      if (!savedUrl) saveUrl();
 
-    setRunning(true);
-    setError(null);
-    stopRef.current = false;
+      setRunning(true);
+      setError(null);
+      stopRef.current = false;
 
-    while (!stopRef.current) {
-      const result = await triggerRun();
-      setRuns((prev) => [...prev.slice(-49), result]);
-      setRunCount((c) => c + 1);
-      setCurrentRun(null);
-      currentRunRef.current = null;
+      while (!stopRef.current) {
+        const result = await triggerRun();
+        setRuns((prev) => [...prev.slice(-49), result]);
+        setRunCount((c) => c + 1);
+        setCurrentRun(null);
+        currentRunRef.current = null;
 
-      if (stopRef.current) break;
+        if (stopRef.current) break;
 
-      await new Promise((r) => setTimeout(r, 3000));
+        await new Promise((r) => setTimeout(r, 3000));
+      }
+    } finally {
+      loopStartGateRef.current = false;
+      setRunning(false);
     }
-
-    setRunning(false);
   };
 
   const stopLoop = () => {

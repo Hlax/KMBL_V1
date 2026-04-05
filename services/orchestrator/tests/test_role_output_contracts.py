@@ -48,6 +48,16 @@ def test_generator_rejects_all_empty_fields() -> None:
     # Empty dict/list or list of empty dicts should be rejected
     with pytest.raises(ValidationError):
         GeneratorRoleOutput.model_validate({"proposed_changes": {}, "artifact_outputs": [], "updated_state": {}})
-    
+
     with pytest.raises(ValidationError):
         GeneratorRoleOutput.model_validate({"proposed_changes": None, "artifact_outputs": [{}], "updated_state": None})
+
+
+def test_generator_accepts_contract_failure_without_primary_fields() -> None:
+    raw = {
+        "contract_failure": {"code": "context_too_large", "message": "Cannot complete within limits."},
+        "proposed_changes": None,
+        "artifact_outputs": None,
+        "updated_state": None,
+    }
+    assert validate_role_contract("generator", raw) == raw

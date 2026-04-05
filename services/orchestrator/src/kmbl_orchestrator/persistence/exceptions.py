@@ -1,6 +1,10 @@
 """Persistence-layer errors with explicit semantics (no silent PostgREST fallbacks)."""
 
 
+class ActiveGraphRunPerThreadConflictError(RuntimeError):
+    """Insert/update would create a second active graph_run for the same thread (DB unique index)."""
+
+
 class WriteSnapshotNotSupportedError(RuntimeError):
     """Entering ``in_memory_write_snapshot()`` on a Supabase-backed repository.
 

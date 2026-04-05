@@ -73,7 +73,8 @@ async def run_graph_for_loop(
 
     Returns the dict shape expected by ``tick_loop._tick_graph_run``:
         graph_run_id, thread_id, staging_snapshot_id,
-        evaluator_status, evaluator_score, last_alignment_score.
+        evaluator_status, evaluator_score, last_alignment_score,
+        build_spec, build_spec_id.
 
     ``retry_context`` is forwarded into graph initial state so the
     decision_router's direction selection actually reaches the generator.
@@ -114,6 +115,10 @@ async def run_graph_for_loop(
             "evaluator_status": ev_status,
             "evaluator_score": alignment_score,
             "last_alignment_score": alignment_score,
+            # Pass build_spec + id through so the crawl feedback loop can
+            # extract URLs the planner actually referenced (grounded crawl).
+            "build_spec": final.get("build_spec"),
+            "build_spec_id": final.get("build_spec_id"),
         }
 
     loop_ev = asyncio.get_event_loop()

@@ -483,6 +483,11 @@ def _advance_crawl_frontier(
     the planner didn't reference any (to ensure forward progress).
 
     Optionally fetches real page data for visited URLs when possible.
+
+    URL extraction sources (in order of priority):
+    1. build_spec from graph result (structured planner output)
+    2. raw_payload_json from BuildSpecRecord (full planner response including
+       success_criteria, evaluation_targets, constraints, reasoning)
     """
     from kmbl_orchestrator.identity.crawl_state import (
         get_next_urls_to_crawl,
@@ -508,6 +513,13 @@ def _advance_crawl_frontier(
         # Extract URLs the planner actually referenced in build_spec
         build_spec = graph_result.get("build_spec") or {}
         planner_referenced = extract_urls_from_build_spec(build_spec)
+
+        # Also extract from the full raw planner payload (success_criteria,
+        # evaluation_targets, constraints, reasoning) stored in BuildSpecRecord.
+        planner_referenced = _enrich_urls_from_raw_payload(
+            repo, graph_result, planner_referenced,
+        )
+
         actually_used = filter_crawl_urls(planner_referenced, offered_urls)
 
         # Fallback: if planner didn't reference any offered URL, mark the first
@@ -561,6 +573,45 @@ def _advance_crawl_frontier(
             loop.loop_id,
             str(exc)[:200],
         )
+
+
+def _enrich_urls_from_raw_payload(
+    repo: "Repository",
+    graph_result: dict[str, Any],
+    existing_urls: list[str],
+) -> list[str]:
+    """Enrich URL list with URLs from the full raw planner payload.
+
+    Loads BuildSpecRecord.raw_payload_json (which contains success_criteria,
+    evaluation_targets, constraints, and any reasoning text) and extracts
+    additional URLs not already found in the build_spec.
+    """
+    from kmbl_orchestrator.identity.page_fetch import extract_urls_from_build_spec
+
+    build_spec_id = graph_result.get("build_spec_id")
+    if not build_spec_id:
+        return existing_urls
+
+    try:
+        record = repo.get_build_spec(UUID(build_spec_id) if not isinstance(build_spec_id, UUID) else build_spec_id)
+        if record is None or not record.raw_payload_json:
+            return existing_urls
+
+        raw_urls = extract_urls_from_build_spec(record.raw_payload_json)
+        seen = set(existing_urls)
+        merged = list(existing_urls)
+        for u in raw_urls:
+            if u not in seen:
+                seen.add(u)
+                merged.append(u)
+        return merged
+    except Exception as exc:
+        _log.debug(
+            "raw_payload URL enrichment failed build_spec_id=%s: %s",
+            build_spec_id,
+            str(exc)[:200],
+        )
+        return existing_urls
 
 
 def _try_fetch_page(url: str) -> dict[str, Any] | None:

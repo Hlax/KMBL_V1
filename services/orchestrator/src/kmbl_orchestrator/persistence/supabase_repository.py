@@ -19,6 +19,7 @@ from kmbl_orchestrator.domain import (
     BuildCandidateRecord,
     BuildSpecRecord,
     CheckpointRecord,
+    CrawlStateRecord,
     EvaluationReportRecord,
     GraphRunEventRecord,
     GraphRunRecord,
@@ -48,6 +49,7 @@ from kmbl_orchestrator.persistence.supabase_deserializers import (
     _row_to_build_candidate,
     _row_to_build_spec,
     _row_to_checkpoint,
+    _row_to_crawl_state,
     _row_to_evaluation_report,
     _row_to_graph_run,
     _row_to_graph_run_event,
@@ -1699,6 +1701,46 @@ class SupabaseRepository(SupabaseRepositoryAutonomousLoopMixin):
                 .execute(),
                 identity_id=str(record.identity_id),
             )
+
+    # ---- Crawl State ----
+
+    def get_crawl_state(self, identity_id: UUID) -> CrawlStateRecord | None:
+        res = self._run(
+            "get_crawl_state",
+            "crawl_state",
+            lambda: self._client.table("crawl_state")
+            .select("*")
+            .eq("identity_id", str(identity_id))
+            .limit(1)
+            .execute(),
+            identity_id=str(identity_id),
+        )
+        if not res.data:
+            return None
+        return _row_to_crawl_state(res.data[0])
+
+    def upsert_crawl_state(self, record: CrawlStateRecord) -> None:
+        row: dict[str, Any] = {
+            "identity_id": str(record.identity_id),
+            "root_url": record.root_url,
+            "visited_urls": record.visited_urls,
+            "unvisited_urls": record.unvisited_urls,
+            "page_summaries": record.page_summaries,
+            "crawl_status": record.crawl_status,
+            "external_inspiration_urls": record.external_inspiration_urls,
+            "total_pages_crawled": record.total_pages_crawled,
+            "last_crawled_at": record.last_crawled_at,
+            "created_at": record.created_at,
+            "updated_at": record.updated_at,
+        }
+        self._run(
+            "upsert_crawl_state",
+            "crawl_state",
+            lambda: self._client.table("crawl_state")
+            .upsert(row, on_conflict="identity_id")
+            .execute(),
+            identity_id=str(record.identity_id),
+        )
 
     # ---- Working staging ----
 

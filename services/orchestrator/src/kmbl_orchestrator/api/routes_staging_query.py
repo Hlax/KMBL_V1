@@ -50,6 +50,7 @@ from kmbl_orchestrator.staging.review_action import derive_review_action_state
 from kmbl_orchestrator.staging.static_preview_assembly import (
     assemble_static_preview_html,
     resolve_static_preview_entry_path,
+    static_file_map_from_payload,
 )
 
 router = APIRouter()
@@ -291,8 +292,80 @@ def get_staging_static_preview(
             "X-Content-Type-Options": "nosniff",
             "Content-Security-Policy": (
                 "default-src 'none'; img-src data: https:; font-src data:; "
-                "style-src 'unsafe-inline'; script-src 'unsafe-inline'"
+                "style-src 'unsafe-inline'; script-src 'unsafe-inline'; "
+                "connect-src 'self'"
             ),
+            "Cache-Control": "private, no-store",
+        },
+    )
+
+
+# MIME types for individual file serving
+_FILE_MIME_TYPES: dict[str, str] = {
+    ".html": "text/html; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".js": "application/javascript; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".glsl": "text/plain; charset=utf-8",
+    ".wgsl": "text/plain; charset=utf-8",
+}
+
+
+@router.get("/orchestrator/staging/{staging_snapshot_id}/file/{file_path:path}")
+def get_staging_file(
+    staging_snapshot_id: str,
+    file_path: str,
+    repo: Repository = Depends(get_repo),
+) -> Response:
+    """
+    Serve an individual file from a staging snapshot's ``static_frontend_file_v1`` artifacts.
+
+    Supports .html, .css, .js, .json, .glsl, .wgsl with correct MIME types.
+    Used by WebGL/shader previews that need to fetch config and shader files at runtime.
+    """
+    try:
+        sid = UUID(staging_snapshot_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="invalid staging_snapshot_id") from e
+    rec = repo.get_staging_snapshot(sid)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="staging_snapshot not found")
+    p = dict(rec.snapshot_payload_json)
+    files = static_file_map_from_payload(p)
+
+    # Normalize requested path and prevent directory traversal
+    normalized_path = file_path.strip().replace("\\", "/")
+    if not normalized_path.startswith("component/"):
+        normalized_path = f"component/{normalized_path}"
+
+    # Resolve ".." and "." segments to prevent path traversal attacks
+    import posixpath
+    resolved = posixpath.normpath(normalized_path)
+    if not resolved.startswith("component/") or ".." in resolved:
+        raise HTTPException(
+            status_code=400,
+            detail={"error_kind": "invalid_path", "reason": "path traversal not allowed"},
+        )
+
+    if resolved not in files:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_kind": "file_not_found", "path": resolved},
+        )
+
+    content = files[resolved]
+    # Determine MIME type from extension
+    ext = ""
+    dot_idx = resolved.rfind(".")
+    if dot_idx != -1:
+        ext = resolved[dot_idx:]
+    mime_type = _FILE_MIME_TYPES.get(ext, "text/plain; charset=utf-8")
+
+    return Response(
+        content=content.encode("utf-8"),
+        media_type=mime_type,
+        headers={
+            "X-Content-Type-Options": "nosniff",
             "Cache-Control": "private, no-store",
         },
     )

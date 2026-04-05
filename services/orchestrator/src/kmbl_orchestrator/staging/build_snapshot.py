@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Literal
 from uuid import UUID
 
@@ -13,6 +14,8 @@ from kmbl_orchestrator.domain import (
     EvaluationReportRecord,
     ThreadRecord,
 )
+
+_log = logging.getLogger(__name__)
 
 # --- Explicit v1 contract (stable for review consumers; no raw provider blobs) ---
 
@@ -66,7 +69,7 @@ class StagingPayloadFrontendStaticFileV1(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     path: str
-    language: Literal["html", "css", "js"]
+    language: Literal["html", "css", "js", "json", "glsl", "wgsl"]
     bundle_id: str | None = None
     previewable: bool
     entry_for_preview: bool
@@ -202,7 +205,8 @@ def derive_frontend_static_v1(
     for row in sorted(static_rows, key=lambda r: str(r.get("path", ""))):
         path = str(row["path"])
         lang = row.get("language")
-        if lang not in ("html", "css", "js"):
+        if lang not in ("html", "css", "js", "json", "glsl", "wgsl"):
+            _log.warning("derive_frontend_static_v1: skipping artifact with unknown language=%s path=%s", lang, path)
             continue
         bid = row.get("bundle_id")
         bkey = bid if isinstance(bid, str) else None

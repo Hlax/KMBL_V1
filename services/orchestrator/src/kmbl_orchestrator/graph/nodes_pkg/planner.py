@@ -41,6 +41,25 @@ if TYPE_CHECKING:
 
 _log = logging.getLogger(__name__)
 
+# Experience mode → surface type mapping
+_WEBGL_MODES = frozenset({
+    "webgl_3d_portfolio",
+    "immersive_spatial_portfolio",
+    "model_centric_experience",
+})
+
+
+def _derive_surface_type(experience_mode: str) -> str:
+    """Map experience_mode to a surface_type for generator guidance.
+
+    surface_type tells the generator what output shape to produce:
+    - ``static_html``: standard HTML/CSS/JS (default)
+    - ``webgl_experience``: canvas-based rendering with shader/config files
+    """
+    if experience_mode in _WEBGL_MODES:
+        return "webgl_experience"
+    return "static_html"
+
 
 def planner_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     """Invoke the planner role and persist the resulting build spec."""
@@ -262,6 +281,12 @@ def planner_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             {"fixes": clamp_fixes},
             thread_id=tid,
         )
+
+    # Derive surface_type from experience_mode so generator knows what output shape to produce.
+    # This is a simple mapping — no over-engineering.
+    if not isinstance(bs.get("surface_type"), str) or not bs.get("surface_type", "").strip():
+        bs["surface_type"] = _derive_surface_type(bs.get("experience_mode", ""))
+        raw.setdefault("_kmbl_planner_metadata", {})["surface_type_derived"] = True
 
     ib_lane = state.get("identity_brief") if isinstance(state.get("identity_brief"), dict) else {}
     si_lane = state.get("structured_identity") if isinstance(state.get("structured_identity"), dict) else {}

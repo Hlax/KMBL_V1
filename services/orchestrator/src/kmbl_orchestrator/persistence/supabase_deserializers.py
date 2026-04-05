@@ -17,6 +17,7 @@ from kmbl_orchestrator.domain import (
     BuildCandidateRecord,
     BuildSpecRecord,
     CheckpointRecord,
+    CrawlStateRecord,
     EvaluationReportRecord,
     GraphRunEventRecord,
     GraphRunRecord,
@@ -401,6 +402,26 @@ def _row_to_staging_checkpoint(row: dict[str, Any]) -> StagingCheckpointRecord:
         created_at=_ts_to_iso(row.get("created_at")) or "",
         reason_category=rc if isinstance(rc, str) else None,
         reason_explanation=re if isinstance(re, str) else None,
+    )
+
+
+def _row_to_crawl_state(row: dict[str, Any]) -> CrawlStateRecord:
+    vu = row.get("visited_urls")
+    uu = row.get("unvisited_urls")
+    ps = row.get("page_summaries")
+    ei = row.get("external_inspiration_urls")
+    return CrawlStateRecord(
+        identity_id=UUID(row["identity_id"]),
+        root_url=str(row["root_url"]),
+        visited_urls=list(vu) if isinstance(vu, list) else [],
+        unvisited_urls=list(uu) if isinstance(uu, list) else [],
+        page_summaries=dict(ps) if isinstance(ps, dict) else {},
+        crawl_status=str(row.get("crawl_status", "in_progress")),  # type: ignore[arg-type]
+        external_inspiration_urls=list(ei) if isinstance(ei, list) else [],
+        total_pages_crawled=int(row.get("total_pages_crawled", 0)),
+        last_crawled_at=_ts_to_iso(row.get("last_crawled_at")),
+        created_at=_ts_to_iso(row.get("created_at")) or "",
+        updated_at=_ts_to_iso(row.get("updated_at")) or "",
     )
 
 

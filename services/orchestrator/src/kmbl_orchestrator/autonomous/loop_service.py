@@ -298,6 +298,12 @@ async def _tick_graph_run(
         # last_evaluator_score is alignment_score when present, else None
         evaluator_score = alignment_score  # this is the real score now
 
+        # --- Close the crawl feedback loop ---
+        # After each graph run, advance the crawl frontier so the next run
+        # sees updated visited/unvisited state.  This is the orchestrator's
+        # responsibility — we do NOT rely on the LLM to manage crawl state.
+        _advance_crawl_frontier(repo, loop, result)
+
         staging_count = loop.total_staging_count
         if staging_snapshot_id:
             staging_count += 1
@@ -459,3 +465,209 @@ async def _tick_idle(
         phase_after="graph_cycle",
         iteration=loop.iteration_count,
     )
+
+
+# ---------------------------------------------------------------------------
+# Crawl feedback helpers (FIX 2 + FIX 3)
+# ---------------------------------------------------------------------------
+
+def _advance_crawl_frontier(
+    repo: "Repository",
+    loop: AutonomousLoopRecord,
+    graph_result: dict[str, Any],
+) -> None:
+    """Advance the crawl frontier after a graph run — grounded in reality.
+
+    Only marks URLs as visited if they were actually referenced by the planner
+    in the build_spec output. Falls back to marking the first offered URL if
+    the planner didn't reference any (to ensure forward progress).
+
+    Optionally fetches real page data for visited URLs when possible.
+    """
+    from kmbl_orchestrator.identity.crawl_state import (
+        get_next_urls_to_crawl,
+        record_page_visit,
+    )
+    from kmbl_orchestrator.identity.page_fetch import (
+        extract_urls_from_build_spec,
+        filter_crawl_urls,
+    )
+
+    try:
+        state = repo.get_crawl_state(loop.identity_id)
+        if state is None:
+            return
+
+        # Get the URLs that were offered to the planner
+        offered_urls = get_next_urls_to_crawl(state, batch_size=5)
+        if not offered_urls:  # empty list is falsy — covers both None and []
+            _maybe_seed_external(repo, loop)
+            return
+
+        # --- Grounded URL selection ---
+        # Extract URLs the planner actually referenced in build_spec
+        build_spec = graph_result.get("build_spec") or {}
+        planner_referenced = extract_urls_from_build_spec(build_spec)
+        actually_used = filter_crawl_urls(planner_referenced, offered_urls)
+
+        # Fallback: if planner didn't reference any offered URL, mark the first
+        # one as visited to guarantee forward progress (prevents infinite loops)
+        if not actually_used:
+            actually_used = [offered_urls[0]]
+            _log.info(
+                "Loop %s: planner did not reference any offered URLs; "
+                "marking first offered URL for forward progress: %s",
+                loop.loop_id,
+                offered_urls[0],
+            )
+
+        _log.info(
+            "Loop %s: grounded crawl advance — offered=%d, planner_referenced=%d, marking=%d",
+            loop.loop_id,
+            len(offered_urls),
+            len(planner_referenced),
+            len(actually_used),
+        )
+
+        # --- Visit each URL with real page data when possible ---
+        for url in actually_used:
+            page_data = _try_fetch_page(url)
+            if page_data is not None:
+                state = record_page_visit(
+                    repo,
+                    loop.identity_id,
+                    url,
+                    summary=_build_page_summary(page_data),
+                    design_signals=page_data.get("design_signals"),
+                    tone_keywords=page_data.get("tone_keywords"),
+                    discovered_links=page_data.get("links"),
+                )
+            else:
+                # No real fetch possible — record with synthetic summary
+                state = record_page_visit(
+                    repo,
+                    loop.identity_id,
+                    url,
+                    summary=f"Referenced in build_spec (run_id={graph_result.get('graph_run_id', 'unknown')})",
+                )
+
+        # Activate external inspiration when internal crawl is exhausted
+        if state.crawl_status == "exhausted":
+            _maybe_seed_external(repo, loop)
+
+    except Exception as exc:
+        _log.warning(
+            "Loop %s: crawl frontier advance failed: %s",
+            loop.loop_id,
+            str(exc)[:200],
+        )
+
+
+def _try_fetch_page(url: str) -> dict[str, Any] | None:
+    """Attempt to fetch real page data, returning None on any failure.
+
+    This is best-effort — network failures, timeouts, non-HTML pages
+    all result in None. The crawl loop still advances regardless.
+    """
+    from kmbl_orchestrator.identity.page_fetch import fetch_page_data
+
+    try:
+        return fetch_page_data(url, timeout=5.0)
+    except Exception:
+        return None
+
+
+def _build_page_summary(page_data: dict[str, Any]) -> str:
+    """Build a one-line page summary from fetched page data."""
+    title = page_data.get("title", "")
+    desc = page_data.get("description", "")
+    if title and desc:
+        return f"{title} — {desc}"[:300]
+    return (title or desc or "Page fetched")[:300]
+
+
+def _maybe_seed_external(
+    repo: "Repository",
+    loop: AutonomousLoopRecord,
+) -> None:
+    """Seed external inspiration URLs when internal crawl is exhausted.
+
+    Derives inspiration sources from the identity profile when available,
+    falling back to defaults only if needed.
+    """
+    from kmbl_orchestrator.identity.crawl_state import seed_external_inspiration
+
+    try:
+        state = repo.get_crawl_state(loop.identity_id)
+        if state is None or state.crawl_status != "exhausted":
+            return
+        # Already seeded?
+        if state.external_inspiration_urls:
+            return
+
+        # Try to derive identity-aware inspiration URLs
+        inspiration_urls = _derive_inspiration_urls_for_identity(repo, loop.identity_id)
+        seed_external_inspiration(repo, loop.identity_id, urls=inspiration_urls or None)
+        _log.info(
+            "Loop %s: seeded external inspiration for identity %s (%d urls)",
+            loop.loop_id,
+            loop.identity_id,
+            len(inspiration_urls) if inspiration_urls else 3,  # 3 = default count
+        )
+    except Exception as exc:
+        _log.warning(
+            "Loop %s: external inspiration seeding failed: %s",
+            loop.loop_id,
+            str(exc)[:200],
+        )
+
+
+def _derive_inspiration_urls_for_identity(
+    repo: "Repository",
+    identity_id: UUID,
+) -> list[str] | None:
+    """Derive inspiration URLs from identity profile themes.
+
+    Returns None to use defaults if no identity-specific URLs can be derived.
+    """
+    try:
+        profile = repo.get_identity_profile(identity_id)
+        if profile is None:
+            return None
+        facets = profile.facets_json or {}
+        themes: list[str] = facets.get("themes", [])
+        if not themes:
+            return None
+
+        # Map identity themes to relevant inspiration sources
+        _THEME_INSPIRATION: dict[str, list[str]] = {
+            "editorial": [
+                "https://www.typewolf.com",
+                "https://www.readymag.com/explore",
+            ],
+            "artistic": [
+                "https://www.behance.net",
+                "https://www.are.na",
+            ],
+            "cinematic": [
+                "https://www.studiomaertens.com",
+                "https://www.awwwards.com/websites/film/",
+            ],
+            "experimental": [
+                "https://experiments.withgoogle.com",
+                "https://www.are.na",
+            ],
+            "minimal": [
+                "https://www.siteinspire.com",
+                "https://minimalissimo.com",
+            ],
+        }
+
+        urls: list[str] = []
+        for theme in themes:
+            for key, theme_urls in _THEME_INSPIRATION.items():
+                if key in theme.lower():
+                    urls.extend(u for u in theme_urls if u not in urls)
+        return urls if urls else None
+    except Exception:
+        return None

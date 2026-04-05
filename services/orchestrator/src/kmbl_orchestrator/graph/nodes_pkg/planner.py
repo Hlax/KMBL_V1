@@ -422,6 +422,35 @@ def planner_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         RunEventType.PLANNER_INVOCATION_COMPLETED,
         {"build_spec_id": str(spec.build_spec_id)},
     )
+
+    # Planner type-selection observability: log why the planner chose the vertical it did.
+    _bs_final = raw.get("build_spec") if isinstance(raw.get("build_spec"), dict) else {}
+    _md_final = raw.get("_kmbl_planner_metadata") if isinstance(raw.get("_kmbl_planner_metadata"), dict) else {}
+    _planner_type = str(_bs_final.get("type") or "").strip() or "unset"
+    _vertical_event: dict[str, Any] = {
+        "build_spec_type": _planner_type,
+        "experience_mode": str(_bs_final.get("experience_mode") or ""),
+        "surface_type": str(_bs_final.get("surface_type") or ""),
+        "site_archetype": str(_bs_final.get("site_archetype") or ""),
+        "experience_mode_derived": bool(_md_final.get("experience_mode_derived")),
+        "experience_mode_source": str(_md_final.get("experience_mode_source") or "planner_authored"),
+        "experience_confidence": _md_final.get("experience_confidence"),
+        "has_creative_brief": isinstance(_bs_final.get("creative_brief"), dict),
+        "has_execution_contract": isinstance(_bs_final.get("execution_contract"), dict),
+        "kmbl_frontend_vertical_policy": (
+            ei.get("constraints", {}).get("kmbl_frontend_vertical_policy")
+            if isinstance(ei.get("constraints"), dict)
+            else None
+        ),
+    }
+    append_graph_run_event(
+        ctx.repo,
+        gid,
+        RunEventType.PLANNER_VERTICAL_SELECTED,
+        _vertical_event,
+        thread_id=tid,
+    )
+
     return {
         "build_spec": raw.get("build_spec"),
         "build_spec_id": str(spec.build_spec_id),

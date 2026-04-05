@@ -86,6 +86,9 @@ class RunEventType:
     CRAWL_FRONTIER_ADVANCED = "crawl_frontier_advanced"
     PLANNER_CRAWL_COMPLIANCE = "planner_crawl_compliance"
 
+    # Planner type-selection observability (compact why-did-planner-choose signal)
+    PLANNER_VERTICAL_SELECTED = "planner_vertical_selected"
+
     # Habitat session / working surface
     HABITAT_SURFACE_CLEARED = "habitat_surface_cleared"
     HABITAT_STRATEGY_ENFORCED = "habitat_strategy_enforced"

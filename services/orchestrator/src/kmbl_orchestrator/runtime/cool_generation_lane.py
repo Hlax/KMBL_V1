@@ -91,7 +91,11 @@ def literal_success_checks_preview_strings(
 
 
 def summarize_execution_contract_for_generator(build_spec: dict[str, Any]) -> dict[str, Any]:
-    """Compact obligations for generator payload (avoid resending full identity blobs)."""
+    """Compact obligations for generator payload (avoid resending full identity blobs).
+
+    Includes creative direction fields so the generator has rich context without
+    needing to parse the full build_spec.
+    """
     if not isinstance(build_spec, dict):
         return {}
     ec = build_spec.get("execution_contract")
@@ -100,6 +104,7 @@ def summarize_execution_contract_for_generator(build_spec: dict[str, Any]) -> di
     lsc = build_spec.get("literal_success_checks")
     n_lit = len(lsc) if isinstance(lsc, list) else 0
     cb = build_spec.get("creative_brief")
+    cb_d = cb if isinstance(cb, dict) else {}
     return {
         "lane": ec.get("lane"),
         "surface_type": ec.get("surface_type"),
@@ -109,7 +114,20 @@ def summarize_execution_contract_for_generator(build_spec: dict[str, Any]) -> di
         "required_sections": ec.get("required_sections"),
         "literal_success_checks_count": n_lit,
         "literal_success_checks_preview": literal_success_checks_preview_strings(lsc),
-        "creative_brief_mood": (cb.get("mood") if isinstance(cb, dict) else None),
+        # Creative direction — surfaced explicitly so generator does not have to dig into build_spec
+        "creative_brief_mood": cb_d.get("mood"),
+        "creative_brief_direction_summary": cb_d.get("direction_summary"),
+        "creative_brief_color_strategy": cb_d.get("color_strategy"),
+        "creative_brief_layout_concept": cb_d.get("layout_concept"),
+        "creative_brief_interaction_goals": cb_d.get("interaction_goals"),
+        # Allowed libraries for the generator to know what CDN imports are blessed
+        "allowed_libraries": ec.get("allowed_libraries"),
+        # Required interactions preview for generator awareness
+        "required_interactions_count": (
+            len(ec["required_interactions"])
+            if isinstance(ec.get("required_interactions"), list)
+            else 0
+        ),
     }
 
 

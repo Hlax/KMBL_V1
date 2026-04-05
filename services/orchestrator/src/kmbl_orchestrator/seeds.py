@@ -228,12 +228,17 @@ def build_identity_url_bundle_event_input(
 
     task = (
         f"Build a frontend reflecting the identity from {identity_url}{seed_hint}. "
-        "Planner: analyze identity_context and crawl_context; choose build_spec.type: "
-        "use static_frontend_file_v1 for a single-page or minimal-JS editorial surface; "
-        "use interactive_frontend_app_v1 when a small multi-file bundle (e.g. organized JS/CSS, "
-        "light Three.js or motion) clearly improves the product without exploding scope. "
-        "Generator: honor build_spec.type — static_frontend_file_v1 or interactive_frontend_app_v1 "
-        "artifact_outputs (and/or workspace ingest). Prefer static when a single HTML file suffices."
+        "Planner: analyze identity_context, crawl_context, and structured_identity to choose "
+        "the build_spec.type that best serves the identity's goals, visual ambition, and "
+        "interaction needs — while keeping scope controlled. "
+        "Use static_frontend_file_v1 for text-first editorial or portfolio pages where layout "
+        "and typography carry the design. "
+        "Use interactive_frontend_app_v1 when the identity signals spatial/motion/3D ambition, "
+        "meaningful user interaction, or a multi-file component structure (organized JS/CSS, "
+        "light Three.js, canvas, or scroll-driven motion) that clearly improves the product. "
+        "Generator: honor build_spec.type — produce artifact_outputs (and/or workspace ingest) "
+        "matching the chosen vertical. Include build_spec.creative_brief with design_direction, "
+        "color_strategy, layout_concept, and interaction_goals so the generator has rich context."
     )
     return {
         "scenario": IDENTITY_URL_BUNDLE_TAG,

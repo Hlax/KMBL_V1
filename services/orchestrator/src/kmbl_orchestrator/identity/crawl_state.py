@@ -57,6 +57,10 @@ _DEFAULT_INSPIRATION_CATEGORIES = [
     "https://www.awwwards.com",
     "https://www.siteinspire.com",
     "https://dribbble.com",
+    # Technical / interactive reference (three.js ecosystem) — second-phase inspiration
+    "https://threejs.org/docs/",
+    "https://threejs.org/examples/",
+    "https://github.com/mrdoob/three.js",
 ]
 
 

@@ -560,11 +560,22 @@ async def start_run(
                     ),
                     "value": {"scenario_preset": "kiloclaw_image_only_test_v1"},
                 },
-                "identity_url_cool_generation_lane": {
-                    "summary": "Identity URL vertical + cool_generation_v1 lane (merge into preset)",
+                "identity_url_bundle_v1": {
+                    "summary": "Identity URL — planner may choose static or interactive bundle",
                     "description": (
-                        "Sets identity_url and merges event_input.cool_generation_lane into the canonical "
-                        "kmbl_identity_url_static_v1 seed — required for planner literal/pattern presets."
+                        "Default identity vertical: does not pin canonical_vertical before planning. "
+                        "Use identity_url_static_v1 to force static_frontend_file_v1."
+                    ),
+                    "value": {
+                        "identity_url": "https://example.com/",
+                        "scenario_preset": "identity_url_bundle_v1",
+                    },
+                },
+                "identity_url_cool_generation_lane": {
+                    "summary": "Identity URL + cool_generation_v1 lane (merge into preset)",
+                    "description": (
+                        "Sets identity_url and merges event_input.cool_generation_lane into the identity URL "
+                        "seed (default bundle-capable; use scenario_preset identity_url_static_v1 to pin static)."
                     ),
                     "value": {
                         "identity_url": "https://example.com/",

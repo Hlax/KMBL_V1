@@ -14,6 +14,7 @@ from kmbl_orchestrator.contracts.persistence_validate import (
     validate_role_output_for_persistence,
 )
 from kmbl_orchestrator.contracts.planner_normalize import (
+    apply_first_iteration_literal_cap,
     compact_planner_wire_output,
     normalize_build_spec_for_persistence,
 )
@@ -217,6 +218,15 @@ def planner_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     raw = compact_planner_wire_output(raw)
     if not isinstance(raw.get("build_spec"), dict):
         raw["build_spec"] = {}
+
+    bs0 = raw["build_spec"]
+    if isinstance(bs0, dict):
+        bs0, literal_capped = apply_first_iteration_literal_cap(bs0, iteration_idx)
+        raw["build_spec"] = bs0
+        if literal_capped:
+            raw.setdefault("_kmbl_planner_metadata", {})[
+                "first_iteration_literal_checks_capped"
+            ] = True
 
     # FIX 3: Hoist top-level selected_urls into build_spec so
     # extract_planner_selected_urls() can find them regardless of where

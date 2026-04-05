@@ -19,6 +19,7 @@ def test_scenario_tag_from_run_state() -> None:
 
 
 def test_scenario_badge() -> None:
+    assert scenario_badge_from_tag("kmbl_identity_url_bundle_v1") == "identity_url_bundle"
     assert scenario_badge_from_tag("kmbl_identity_url_static_v1") == "identity_url_static"
     assert scenario_badge_from_tag("kmbl_seeded_gallery_strip_v1") == "gallery_strip"
     assert (

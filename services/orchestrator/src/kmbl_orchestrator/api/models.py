@@ -58,6 +58,7 @@ class StartRunBody(BaseModel):
     )
     scenario_preset: (
         Literal[
+            "identity_url_bundle_v1",
             "identity_url_static_v1",
             "seeded_local_v1",
             "seeded_gallery_strip_v1",
@@ -68,7 +69,9 @@ class StartRunBody(BaseModel):
     ) = Field(
         default=None,
         description=(
-            "identity_url_static_v1: canonical vertical — requires identity_url field. "
+            "identity_url_bundle_v1: default identity URL path — planner may choose static or "
+            "interactive_frontend_app_v1 (requires identity_url). "
+            "identity_url_static_v1: pins static_frontend_file_v1 (legacy / explicit static). "
             "When set to seeded_local_v1 or seeded_gallery_strip_v1, event_input is replaced "
             "with the canonical seeded scenario (deterministic tag in event_input.scenario). "
             "seeded_gallery_strip_varied_v1 replaces event_input with a non-deterministic "

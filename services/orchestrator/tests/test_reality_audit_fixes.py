@@ -203,13 +203,13 @@ class TestAdvanceCrawlFrontier:
         state = get_or_create_crawl_state(repo, iid, "https://example.com")
         record_page_visit(repo, iid, "https://example.com")  # exhaust
 
-        _maybe_seed_external(repo, loop)
+        _maybe_seed_external(repo, iid, context_label=str(loop.loop_id))
         state = repo.get_crawl_state(iid)
         external_count = len(state.external_inspiration_urls)
         assert external_count > 0
 
         # Second call should not add more
-        _maybe_seed_external(repo, loop)
+        _maybe_seed_external(repo, iid, context_label=str(loop.loop_id))
         state = repo.get_crawl_state(iid)
         assert len(state.external_inspiration_urls) == external_count
 

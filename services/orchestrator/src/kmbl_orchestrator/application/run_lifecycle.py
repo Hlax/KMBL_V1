@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID, uuid4
 
-from kmbl_orchestrator.api.models import StartRunBody
 from kmbl_orchestrator.config import get_settings
 from kmbl_orchestrator.domain import CheckpointRecord
 from kmbl_orchestrator.errors import RoleInvocationFailed, StagingIntegrityFailed
@@ -16,52 +15,9 @@ from kmbl_orchestrator.graph.app import run_graph
 from kmbl_orchestrator.persistence.factory import get_repository
 from kmbl_orchestrator.roles.invoke import DefaultRoleInvoker
 from kmbl_orchestrator.runtime.smoke_planner import run_smoke_planner_only
-from kmbl_orchestrator.seeds import (
-    IDENTITY_URL_STATIC_FRONTEND_PRESET,
-    KILOCLAW_IMAGE_ONLY_TEST_EVENT_INPUT,
-    KILOCLAW_IMAGE_ONLY_TEST_SCENARIO_PRESET,
-    SEEDED_GALLERY_STRIP_EVENT_INPUT,
-    SEEDED_GALLERY_STRIP_SCENARIO_PRESET,
-    SEEDED_GALLERY_STRIP_VARIED_SCENARIO_PRESET,
-    SEEDED_LOCAL_EVENT_INPUT,
-    SEEDED_LOCAL_SCENARIO_PRESET,
-    build_identity_url_static_frontend_event_input,
-    build_seeded_gallery_strip_varied_v1_event_input,
-    merge_identity_url_static_frontend_extras,
-)
+from kmbl_orchestrator.application.start_event_input_resolution import resolve_start_event_input
 
 _log = logging.getLogger(__name__)
-
-
-def resolve_start_event_input(
-    body: StartRunBody,
-    *,
-    identity_seed_summary: str | None = None,
-) -> tuple[dict[str, Any], str | None]:
-    """Map ``StartRunBody`` + optional identity summary to ``event_input`` and optional preset tag."""
-    if body.identity_url or body.scenario_preset == IDENTITY_URL_STATIC_FRONTEND_PRESET:
-        url = body.identity_url or ""
-        built = build_identity_url_static_frontend_event_input(
-            identity_url=url,
-            seed_summary=identity_seed_summary,
-        )
-        merged = merge_identity_url_static_frontend_extras(built, body.event_input)
-        return merged, IDENTITY_URL_STATIC_FRONTEND_PRESET
-    if body.scenario_preset == SEEDED_LOCAL_SCENARIO_PRESET:
-        return dict(SEEDED_LOCAL_EVENT_INPUT), SEEDED_LOCAL_SCENARIO_PRESET
-    if body.scenario_preset == SEEDED_GALLERY_STRIP_SCENARIO_PRESET:
-        return dict(SEEDED_GALLERY_STRIP_EVENT_INPUT), SEEDED_GALLERY_STRIP_SCENARIO_PRESET
-    if body.scenario_preset == SEEDED_GALLERY_STRIP_VARIED_SCENARIO_PRESET:
-        return (
-            build_seeded_gallery_strip_varied_v1_event_input(),
-            SEEDED_GALLERY_STRIP_VARIED_SCENARIO_PRESET,
-        )
-    if body.scenario_preset == KILOCLAW_IMAGE_ONLY_TEST_SCENARIO_PRESET:
-        return (
-            dict(KILOCLAW_IMAGE_ONLY_TEST_EVENT_INPUT),
-            KILOCLAW_IMAGE_ONLY_TEST_SCENARIO_PRESET,
-        )
-    return dict(body.event_input), None
 
 
 def run_graph_background(
@@ -123,7 +79,7 @@ def run_graph_background(
         return
     try:
         mi = max_iterations if max_iterations is not None else settings.graph_max_iterations_default
-        run_graph(
+        final = run_graph(
             repo=repo,
             invoker=invoker,
             settings=settings,
@@ -186,3 +142,24 @@ def run_graph_background(
             graph_run_id,
             (time.perf_counter() - t_bg) * 1000,
         )
+        # Same crawl closure as autonomous loop tick: advance frontier + optional Playwright
+        # so Autonomous page ``POST /runs/start`` loops see durable crawl progress.
+        if identity_id and isinstance(final, dict):
+            try:
+                from kmbl_orchestrator.autonomous.loop_service import (
+                    advance_crawl_frontier_after_graph,
+                )
+
+                advance_crawl_frontier_after_graph(
+                    repo,
+                    dict(final),
+                    identity_id=UUID(identity_id),
+                    thread_id=tid_u,
+                    context_label=f"runs_start/{graph_run_id}",
+                )
+            except Exception as exc:
+                _log.warning(
+                    "crawl frontier advance after runs/start failed graph_run_id=%s: %s",
+                    graph_run_id,
+                    str(exc)[:200],
+                )

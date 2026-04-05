@@ -17,6 +17,18 @@ class PlannerRoleOutput(BaseModel):
     top-level output or inside ``build_spec``.  ``selected_urls`` must be a
     list of absolute HTTP(S) URLs chosen from the offered ``next_urls_to_crawl``.
     If no URLs were used, return an empty list rather than omitting the field.
+
+    **build_spec conventions (orchestrator-aware, not all validated here):**
+
+    - ``creative_brief`` — freeform creative direction (mood, direction_summary,
+      identity_interpretation). Prefer this for exploratory language; the
+      orchestrator compacts long strings in ``compact_planner_wire_output``.
+    - ``machine_constraints`` — optional dict for stable, machine-readable caps
+      (e.g. vertical ids, feature flags). Use alongside top-level ``constraints``;
+      normalizers may merge or prefer one source; keep prose out of this object.
+    - ``literal_success_checks`` — on **iteration_index 0**, the orchestrator may
+      cap how many checks apply so the first generator pass is not over-constrained
+      (see ``apply_first_iteration_literal_cap`` in ``planner_normalize``).
     """
 
     model_config = ConfigDict(extra="allow")

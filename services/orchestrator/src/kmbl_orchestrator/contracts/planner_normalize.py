@@ -103,6 +103,32 @@ def _compact_execution_contract_fields(bs: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+# First graph iteration: avoid evaluator literal gates dominating before any artifact exists.
+_FIRST_ITERATION_LITERAL_CHECKS_MAX = 8
+
+
+def apply_first_iteration_literal_cap(
+    build_spec: dict[str, Any],
+    iteration_index: int,
+) -> tuple[dict[str, Any], bool]:
+    """Cap ``literal_success_checks`` length on iteration 0 to reduce over-constraint.
+
+    Returns (possibly updated build_spec, True if capped).
+    """
+    if iteration_index != 0:
+        return build_spec, False
+    raw = build_spec.get("literal_success_checks")
+    if not isinstance(raw, list) or len(raw) <= _FIRST_ITERATION_LITERAL_CHECKS_MAX:
+        return build_spec, False
+    out = dict(build_spec)
+    out["literal_success_checks"] = list(raw[:_FIRST_ITERATION_LITERAL_CHECKS_MAX])
+    meta = out.setdefault("_kmbl_iteration_literal_meta", {})
+    if isinstance(meta, dict):
+        meta["capped_from"] = len(raw)
+        meta["capped_to"] = _FIRST_ITERATION_LITERAL_CHECKS_MAX
+    return out, True
+
+
 def _compact_literal_success_checks_in_build_spec(bs: dict[str, Any]) -> dict[str, Any]:
     raw = bs.get("literal_success_checks")
     if not isinstance(raw, list):

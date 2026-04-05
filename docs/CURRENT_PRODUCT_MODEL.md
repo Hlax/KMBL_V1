@@ -6,6 +6,7 @@ This document describes **how the system behaves today** in code (LangGraph orch
 
 - **Graph runs** (`graph_run`) are the primary execution unit: **planner → generator → evaluator → decision → staging**, with iteration until limits or routing ends the loop.
 - State is **persisted** (thread, checkpoints, role invocations, build artifacts, evaluation reports, `graph_run_event` timeline). Operators use **graph run detail** and **runs list** as the main record of what happened.
+- **Crawl closure** after each successful graph (identity URL scenarios): **`advance_crawl_frontier_after_graph`** runs for both **`POST /runs/start`** (e.g. Autonomous page loop) and **server loop ticks**. Details: [RUNTIME_CRAWL_AND_AUTONOMOUS_PATHS.md](RUNTIME_CRAWL_AND_AUTONOMOUS_PATHS.md).
 
 ## Mutable surface: working staging and Live Habitat
 
@@ -34,6 +35,7 @@ This document describes **how the system behaves today** in code (LangGraph orch
 ## Output path today (extensible)
 
 - The **primary production vertical** in v1 is **static frontend** (`static_frontend_file_v1`, identity URL scenarios). Other artifact families (composable UI, habitat manifests, routed **kmbl-image-gen**) exist in contracts and can expand without changing the core **working → optional review snapshot → operator publication** model.
+- **Multi-file / app-like output:** see [PREVIEW_PROTOCOL_MULTI_FILE.md](PREVIEW_PROTOCOL_MULTI_FILE.md) for the shared protocol (entry URL, ingest, preview, evaluator alignment).
 
 ## Terminology quick reference
 

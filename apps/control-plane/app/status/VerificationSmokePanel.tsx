@@ -88,7 +88,7 @@ export function VerificationSmokePanel() {
     emptyRow("Image artifact path", "seeded_gallery_strip_v1"),
   );
   const [identityRow, setIdentityRow] = useState(() =>
-    emptyRow("Identity URL vertical", "identity_url_static_v1"),
+    emptyRow("Identity URL (bundle-capable)", "identity_url_bundle_v1"),
   );
   const [identityUrl, setIdentityUrl] = useState("");
   const [busy, setBusy] = useState<"static" | "image" | "identity" | null>(null);
@@ -100,7 +100,7 @@ export function VerificationSmokePanel() {
           ? "seeded_local_v1" 
           : kind === "image"
           ? "seeded_gallery_strip_v1"
-          : "identity_url_static_v1";
+          : "identity_url_bundle_v1";
       const setRow = kind === "static" ? setStaticRow : kind === "image" ? setImageRow : setIdentityRow;
       setBusy(kind);
       setRow((r) => ({

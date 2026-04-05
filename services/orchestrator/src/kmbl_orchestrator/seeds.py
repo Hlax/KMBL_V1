@@ -6,9 +6,13 @@ import hashlib
 import secrets
 from typing import Any, Final
 
-# --- Canonical vertical: identity URL → static frontend ---
+# --- Canonical vertical: identity URL → static frontend (explicit opt-in) ---
 IDENTITY_URL_STATIC_FRONTEND_PRESET: Final = "identity_url_static_v1"
 IDENTITY_URL_STATIC_FRONTEND_TAG: Final = "kmbl_identity_url_static_v1"
+
+# --- Default identity URL path: planner may choose static or interactive bundle (no early canonical_vertical pin) ---
+IDENTITY_URL_BUNDLE_PRESET: Final = "identity_url_bundle_v1"
+IDENTITY_URL_BUNDLE_TAG: Final = "kmbl_identity_url_bundle_v1"
 
 # API: POST /orchestrator/runs/start with {"scenario_preset": "seeded_local_v1"}
 SEEDED_LOCAL_SCENARIO_PRESET: Final = "seeded_local_v1"
@@ -208,6 +212,46 @@ def build_identity_url_static_frontend_event_input(
     }
 
 
+def build_identity_url_bundle_event_input(
+    *, identity_url: str, seed_summary: str | None = None
+) -> dict[str, Any]:
+    """
+    Identity URL vertical without pinning ``canonical_vertical`` to static.
+
+    The planner sets ``build_spec.type`` to ``static_frontend_file_v1`` or
+    ``interactive_frontend_app_v1`` (and matching constraints when needed) based on
+    identity_context, crawl_context, and creative intent. The orchestrator does not
+    force static before planning; ``clamp_experience_mode_for_static_vertical`` applies
+    only when the effective vertical is static.
+    """
+    seed_hint = f" ({seed_summary})" if seed_summary else ""
+
+    task = (
+        f"Build a frontend reflecting the identity from {identity_url}{seed_hint}. "
+        "Planner: analyze identity_context and crawl_context; choose build_spec.type: "
+        "use static_frontend_file_v1 for a single-page or minimal-JS editorial surface; "
+        "use interactive_frontend_app_v1 when a small multi-file bundle (e.g. organized JS/CSS, "
+        "light Three.js or motion) clearly improves the product without exploding scope. "
+        "Generator: honor build_spec.type — static_frontend_file_v1 or interactive_frontend_app_v1 "
+        "artifact_outputs (and/or workspace ingest). Prefer static when a single HTML file suffices."
+    )
+    return {
+        "scenario": IDENTITY_URL_BUNDLE_TAG,
+        "task": task,
+        "identity_url": identity_url,
+        "constraints": {
+            "scope": "identity_url_vertical",
+            "deterministic": False,
+            "planner_is_creative_director": True,
+            "kmbl_frontend_vertical_policy": "planner_choice",
+            "kmbl_interactive_bundle_guardrails": {
+                "max_component_files_soft_cap": 24,
+                "avoid_heavy_runtime": True,
+            },
+        },
+    }
+
+
 # Keys owned by build_identity_url_static_frontend_event_input — extras must not replace them.
 IDENTITY_URL_PRESET_CANONICAL_KEYS: Final = frozenset(
     ("scenario", "task", "identity_url", "constraints")
@@ -219,6 +263,21 @@ def merge_identity_url_static_frontend_extras(
     event_input: dict[str, Any] | None,
 ) -> dict[str, Any]:
     """Merge caller extras (e.g. cool_generation_lane) without replacing the canonical seed dict."""
+    if not event_input:
+        return built
+    extras = {
+        k: v
+        for k, v in event_input.items()
+        if k not in IDENTITY_URL_PRESET_CANONICAL_KEYS
+    }
+    return {**built, **extras}
+
+
+def merge_identity_url_bundle_extras(
+    built: dict[str, Any],
+    event_input: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Merge caller extras for the bundle identity seed (same canonical-key protection as static)."""
     if not event_input:
         return built
     extras = {

@@ -423,7 +423,10 @@ class Settings(BaseSettings):
         ),
     )
     kmbl_playwright_inspiration_domains: str = Field(
-        default="www.awwwards.com,www.siteinspire.com,dribbble.com",
+        default=(
+            "www.awwwards.com,www.siteinspire.com,dribbble.com,"
+            "threejs.org,github.com"
+        ),
         validation_alias=AliasChoices(
             "KMBL_PLAYWRIGHT_INSPIRATION_DOMAINS",
             "kmbl_playwright_inspiration_domains",

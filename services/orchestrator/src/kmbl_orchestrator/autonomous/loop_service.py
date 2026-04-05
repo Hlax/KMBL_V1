@@ -16,7 +16,7 @@ from kmbl_orchestrator.config import get_settings
 from kmbl_orchestrator.domain import AutonomousLoopRecord
 from kmbl_orchestrator.identity.extract import extract_identity_from_url
 from kmbl_orchestrator.identity.hydrate import persist_identity_from_seed
-from kmbl_orchestrator.seeds import build_identity_url_static_frontend_event_input
+from kmbl_orchestrator.seeds import build_identity_url_bundle_event_input
 from kmbl_orchestrator.autonomous.directions import (
     build_initial_directions_for_identity,
     direction_to_retry_context,
@@ -254,7 +254,7 @@ async def _tick_graph_run(
 
     _log.info("Loop %s: starting graph iteration %d", loop.loop_id, iteration)
 
-    event_input = build_identity_url_static_frontend_event_input(
+    event_input = build_identity_url_bundle_event_input(
         identity_url=loop.identity_url,
     )
 
@@ -506,12 +506,15 @@ def _build_page_summary_from_wrapper_parts(parts: dict[str, Any]) -> str:
     return (title or desc or "Page fetched")[:300]
 
 
-def _advance_crawl_frontier(
+def advance_crawl_frontier_after_graph(
     repo: "Repository",
-    loop: AutonomousLoopRecord,
     graph_result: dict[str, Any],
+    *,
+    identity_id: UUID,
+    thread_id: UUID | None = None,
+    context_label: str | None = None,
 ) -> None:
-    """Advance the crawl frontier after a graph run — grounded in reality.
+    """Advance the crawl frontier after any completed graph run (loop tick or ``POST /runs/start``).
 
     Uses tiered evidence to decide which URLs to mark visited:
       1. verified_fetch        (strongest — requires successful HTTP fetch)
@@ -548,15 +551,17 @@ def _advance_crawl_frontier(
         append_graph_run_event,
     )
 
+    _label = context_label or str(identity_id)
+
     try:
-        state = repo.get_crawl_state(loop.identity_id)
+        state = repo.get_crawl_state(identity_id)
         if state is None:
             return
 
         # Get the URLs that were offered to the planner
         offered_urls = get_next_urls_to_crawl(state, batch_size=5)
         if not offered_urls:  # empty list is falsy — covers both None and []
-            _maybe_seed_external(repo, loop)
+            _maybe_seed_external(repo, identity_id, context_label=_label)
             return
 
         # --- Collect evidence from each source ---
@@ -605,9 +610,9 @@ def _advance_crawl_frontier(
 
         if compliance.get("omitted_despite_frontier"):
             _log.warning(
-                "Loop %s: planner omitted selected_urls despite %d offered frontier URLs — "
+                "Crawl context=%s: planner omitted selected_urls despite %d offered frontier URLs — "
                 "crawl evidence degraded to %s",
-                loop.loop_id,
+                _label,
                 len(offered_urls),
                 report.evidence_tier_used,
             )
@@ -646,9 +651,9 @@ def _advance_crawl_frontier(
                 gid_u = None
             thread_id_raw = graph_result.get("thread_id")
             try:
-                tid_u = UUID(str(thread_id_raw)) if thread_id_raw else loop.current_thread_id
+                tid_u = UUID(str(thread_id_raw)) if thread_id_raw else thread_id
             except Exception:
-                tid_u = loop.current_thread_id
+                tid_u = thread_id
             rid = _latest_planner_invocation_id(repo, gid_u)
 
             for visit_url in urls_batch:
@@ -662,7 +667,7 @@ def _advance_crawl_frontier(
                 if not ok_policy:
                     repo.append_page_visit_log(
                         PageVisitLogRecord(
-                            identity_id=loop.identity_id,
+                            identity_id=identity_id,
                             thread_id=tid_u,
                             run_id=run_id,
                             graph_run_id=gid_u,
@@ -678,7 +683,7 @@ def _advance_crawl_frontier(
                     continue
 
                 payload = {
-                    "identity_id": str(loop.identity_id),
+                    "identity_id": str(identity_id),
                     "thread_id": str(tid_u) if tid_u else "",
                     "run_id": run_id,
                     "role_invocation_id": str(rid) if rid else "",
@@ -701,7 +706,7 @@ def _advance_crawl_frontier(
 
                 repo.append_page_visit_log(
                     PageVisitLogRecord(
-                        identity_id=loop.identity_id,
+                        identity_id=identity_id,
                         thread_id=tid_u,
                         run_id=run_id,
                         graph_run_id=gid_u,
@@ -732,7 +737,7 @@ def _advance_crawl_frontier(
                     report.verified_urls.append(visit_url)
                     state = record_page_visit(
                         repo,
-                        loop.identity_id,
+                        identity_id,
                         visit_url,
                         summary=_build_page_summary_from_wrapper_parts(parts),
                         design_signals=parts.get("design_signals") or None,
@@ -754,7 +759,7 @@ def _advance_crawl_frontier(
                 if vf.success:
                     state = record_page_visit(
                         repo,
-                        loop.identity_id,
+                        identity_id,
                         upgraded_ev.url,
                         summary=_build_page_summary_from_verification(vf),
                         design_signals=vf.design_signals or None,
@@ -767,7 +772,7 @@ def _advance_crawl_frontier(
                 else:
                     state = record_page_visit(
                         repo,
-                        loop.identity_id,
+                        identity_id,
                         upgraded_ev.url,
                         summary=f"Referenced in build_spec (run_id={run_id})",
                         provenance_source=upgraded_ev.source,
@@ -776,9 +781,9 @@ def _advance_crawl_frontier(
                     )
 
         _log.info(
-            "Loop %s: crawl advance — offered=%d, planner_selected=%d, "
+            "Crawl context=%s: crawl advance — offered=%d, planner_selected=%d, "
             "mentioned=%d, final=%d, verified=%d, tier=%s, playwright=%s",
-            loop.loop_id,
+            _label,
             len(report.offered_urls),
             len(report.planner_selected_urls),
             len(report.mentioned_urls),
@@ -823,14 +828,29 @@ def _advance_crawl_frontier(
 
         # Activate external inspiration when internal crawl is exhausted
         if state.crawl_status == "exhausted":
-            _maybe_seed_external(repo, loop)
+            _maybe_seed_external(repo, identity_id, context_label=_label)
 
     except Exception as exc:
         _log.warning(
-            "Loop %s: crawl frontier advance failed: %s",
-            loop.loop_id,
+            "Crawl context=%s: crawl frontier advance failed: %s",
+            _label,
             str(exc)[:200],
         )
+
+
+def _advance_crawl_frontier(
+    repo: "Repository",
+    loop: AutonomousLoopRecord,
+    graph_result: dict[str, Any],
+) -> None:
+    """Backward-compatible wrapper: autonomous loop tick uses ``AutonomousLoopRecord``."""
+    advance_crawl_frontier_after_graph(
+        repo,
+        graph_result,
+        identity_id=loop.identity_id,
+        thread_id=loop.current_thread_id,
+        context_label=str(loop.loop_id),
+    )
 
 
 def _to_uuid(value: Any) -> UUID:
@@ -891,7 +911,9 @@ def _build_page_summary_from_verification(vf: "FetchVerification") -> str:
 
 def _maybe_seed_external(
     repo: "Repository",
-    loop: AutonomousLoopRecord,
+    identity_id: UUID,
+    *,
+    context_label: str | None = None,
 ) -> None:
     """Seed external inspiration URLs when internal crawl is exhausted.
 
@@ -900,8 +922,9 @@ def _maybe_seed_external(
     """
     from kmbl_orchestrator.identity.crawl_state import seed_external_inspiration
 
+    label = context_label or str(identity_id)
     try:
-        state = repo.get_crawl_state(loop.identity_id)
+        state = repo.get_crawl_state(identity_id)
         if state is None:
             return
         # Inspiration URLs are only seeded after internal grounding completes (phase gate).
@@ -913,18 +936,18 @@ def _maybe_seed_external(
             return
 
         # Try to derive identity-aware inspiration URLs
-        inspiration_urls = _derive_inspiration_urls_for_identity(repo, loop.identity_id)
-        seed_external_inspiration(repo, loop.identity_id, urls=inspiration_urls or None)
+        inspiration_urls = _derive_inspiration_urls_for_identity(repo, identity_id)
+        seed_external_inspiration(repo, identity_id, urls=inspiration_urls or None)
         _log.info(
-            "Loop %s: seeded external inspiration for identity %s (%d urls)",
-            loop.loop_id,
-            loop.identity_id,
+            "Crawl context=%s: seeded external inspiration for identity %s (%d urls)",
+            label,
+            identity_id,
             len(inspiration_urls) if inspiration_urls else 3,  # 3 = default count
         )
     except Exception as exc:
         _log.warning(
-            "Loop %s: external inspiration seeding failed: %s",
-            loop.loop_id,
+            "Crawl context=%s: external inspiration seeding failed: %s",
+            label,
             str(exc)[:200],
         )
 
@@ -968,13 +991,34 @@ def _derive_inspiration_urls_for_identity(
                 "https://www.siteinspire.com",
                 "https://minimalissimo.com",
             ],
+            # WebGL / creative-code adjacent — three.js docs + examples as reference crawl targets
+            "technical": [
+                "https://threejs.org/docs/",
+                "https://threejs.org/examples/",
+                "https://github.com/mrdoob/three.js",
+            ],
         }
 
         urls: list[str] = []
         for theme in themes:
+            tl = theme.lower()
             for key, theme_urls in _THEME_INSPIRATION.items():
-                if key in theme.lower():
+                if key in tl:
                     urls.extend(u for u in theme_urls if u not in urls)
+            if any(
+                k in tl
+                for k in (
+                    "3d",
+                    "webgl",
+                    "three.js",
+                    "threejs",
+                    "spatial",
+                    "immersive",
+                )
+            ):
+                for u in _THEME_INSPIRATION["technical"]:
+                    if u not in urls:
+                        urls.append(u)
         return urls if urls else None
     except Exception:
         return None

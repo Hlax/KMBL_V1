@@ -500,7 +500,7 @@ def _advance_crawl_frontier(
 
         # Get the URLs that were offered to the planner
         offered_urls = get_next_urls_to_crawl(state, batch_size=5)
-        if not offered_urls:
+        if not offered_urls:  # empty list is falsy — covers both None and []
             _maybe_seed_external(repo, loop)
             return
 

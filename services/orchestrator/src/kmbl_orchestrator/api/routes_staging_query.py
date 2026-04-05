@@ -333,23 +333,32 @@ def get_staging_file(
     p = dict(rec.snapshot_payload_json)
     files = static_file_map_from_payload(p)
 
-    # Normalize requested path
+    # Normalize requested path and prevent directory traversal
     normalized_path = file_path.strip().replace("\\", "/")
     if not normalized_path.startswith("component/"):
         normalized_path = f"component/{normalized_path}"
 
-    if normalized_path not in files:
+    # Resolve ".." and "." segments to prevent path traversal attacks
+    import posixpath
+    resolved = posixpath.normpath(normalized_path)
+    if not resolved.startswith("component/") or ".." in resolved:
         raise HTTPException(
-            status_code=404,
-            detail={"error_kind": "file_not_found", "path": normalized_path},
+            status_code=400,
+            detail={"error_kind": "invalid_path", "reason": "path traversal not allowed"},
         )
 
-    content = files[normalized_path]
+    if resolved not in files:
+        raise HTTPException(
+            status_code=404,
+            detail={"error_kind": "file_not_found", "path": resolved},
+        )
+
+    content = files[resolved]
     # Determine MIME type from extension
     ext = ""
-    dot_idx = normalized_path.rfind(".")
+    dot_idx = resolved.rfind(".")
     if dot_idx != -1:
-        ext = normalized_path[dot_idx:]
+        ext = resolved[dot_idx:]
     mime_type = _FILE_MIME_TYPES.get(ext, "text/plain; charset=utf-8")
 
     return Response(

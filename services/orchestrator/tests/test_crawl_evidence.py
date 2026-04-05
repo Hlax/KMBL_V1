@@ -548,3 +548,531 @@ class TestAdvanceCrawlFrontierEvidence:
         # Should visit at most MAX_RAW_PAYLOAD_CREDITS_PER_RUN URLs
         newly_visited = [u for u in state.visited_urls if u in many_urls]
         assert len(newly_visited) <= MAX_RAW_PAYLOAD_CREDITS_PER_RUN
+
+
+# ---------------------------------------------------------------------------
+# FIX 1: selected_by_planner — real tier-2 evidence
+# ---------------------------------------------------------------------------
+
+
+class TestPlannerSelectedUrls:
+    """Tests that explicit planner-selected URLs (tier 2) work as real evidence."""
+
+    def test_extract_from_top_level_selected_urls(self) -> None:
+        from kmbl_orchestrator.identity.crawl_evidence import extract_planner_selected_urls
+
+        bs = {"selected_urls": ["https://example.com/about", "https://example.com/work"]}
+        urls = extract_planner_selected_urls(bs)
+        assert urls == ["https://example.com/about", "https://example.com/work"]
+
+    def test_extract_from_crawl_actions_nested(self) -> None:
+        from kmbl_orchestrator.identity.crawl_evidence import extract_planner_selected_urls
+
+        bs = {"crawl_actions": {"selected_urls": ["https://example.com/x"]}}
+        urls = extract_planner_selected_urls(bs)
+        assert urls == ["https://example.com/x"]
+
+    def test_deduplicates_across_locations(self) -> None:
+        from kmbl_orchestrator.identity.crawl_evidence import extract_planner_selected_urls
+
+        bs = {
+            "selected_urls": ["https://example.com/a"],
+            "crawl_actions": {"selected_urls": ["https://example.com/a", "https://example.com/b"]},
+        }
+        urls = extract_planner_selected_urls(bs)
+        assert urls.count("https://example.com/a") == 1
+        assert "https://example.com/b" in urls
+
+    def test_ignores_non_http(self) -> None:
+        from kmbl_orchestrator.identity.crawl_evidence import extract_planner_selected_urls
+
+        bs = {"selected_urls": ["not-a-url", "ftp://bad.com", "https://good.com/y"]}
+        urls = extract_planner_selected_urls(bs)
+        assert urls == ["https://good.com/y"]
+
+    def test_empty_when_absent(self) -> None:
+        from kmbl_orchestrator.identity.crawl_evidence import extract_planner_selected_urls
+
+        assert extract_planner_selected_urls({}) == []
+        assert extract_planner_selected_urls({"other": "stuff"}) == []
+
+    def test_selected_beats_build_spec_structured(self) -> None:
+        """selected_by_planner (tier 2) outranks build_spec_structured (tier 3)."""
+        report = resolve_evidence(
+            offered_urls=["https://example.com/a", "https://example.com/b"],
+            planner_selected_urls=["https://example.com/a"],
+            build_spec_urls=["https://example.com/b"],
+            raw_payload_urls=[],
+            root_url="https://example.com",
+        )
+        assert report.evidence_tier_used == "selected_by_planner"
+        assert len(report.final_visited) == 1
+        assert report.final_visited[0].url == "https://example.com/a"
+        assert report.final_visited[0].tier == EvidenceTier.SELECTED_BY_PLANNER
+
+    def test_selected_beats_raw_payload(self) -> None:
+        """selected_by_planner (tier 2) outranks raw_payload_text (tier 4)."""
+        report = resolve_evidence(
+            offered_urls=["https://example.com/a", "https://example.com/b"],
+            planner_selected_urls=["https://example.com/a"],
+            build_spec_urls=[],
+            raw_payload_urls=["https://example.com/b"],
+            root_url="https://example.com",
+        )
+        assert report.evidence_tier_used == "selected_by_planner"
+
+    def test_fallback_not_fired_when_selected_exists(self) -> None:
+        """When planner selects URLs, fallback is NOT used."""
+        report = resolve_evidence(
+            offered_urls=["https://example.com/a", "https://example.com/b"],
+            planner_selected_urls=["https://example.com/b"],
+            build_spec_urls=[],
+            raw_payload_urls=[],
+            root_url="https://example.com",
+        )
+        assert report.evidence_tier_used == "selected_by_planner"
+        assert report.final_visited[0].url == "https://example.com/b"
+
+    def test_selected_only_if_in_offered(self) -> None:
+        """Planner-selected URLs must also be in the offered set."""
+        report = resolve_evidence(
+            offered_urls=["https://example.com/a"],
+            planner_selected_urls=["https://example.com/NOT_OFFERED"],
+            build_spec_urls=[],
+            raw_payload_urls=[],
+            root_url="https://example.com",
+        )
+        # Should fall through to fallback
+        assert report.evidence_tier_used == "frontier_fallback"
+
+    def test_planner_selected_urls_in_report(self) -> None:
+        """Report captures planner_selected_urls for observability."""
+        report = resolve_evidence(
+            offered_urls=["https://example.com/a"],
+            planner_selected_urls=["https://example.com/a"],
+            build_spec_urls=[],
+            raw_payload_urls=[],
+            root_url="https://example.com",
+        )
+        assert report.planner_selected_urls == ["https://example.com/a"]
+        d = report.to_dict()
+        assert d["planner_selected_urls"] == ["https://example.com/a"]
+
+    def test_integration_selected_by_planner_provenance(self) -> None:
+        """End-to-end: planner selected_urls get tier-2 provenance."""
+        from kmbl_orchestrator.autonomous.loop_service import _advance_crawl_frontier
+
+        repo = InMemoryRepository()
+        iid = uuid4()
+        loop = _make_loop(identity_id=iid)
+        state = get_or_create_crawl_state(repo, iid, "https://example.com")
+        updated = state.model_copy(
+            update={"unvisited_urls": ["https://example.com/a", "https://example.com/b"]},
+        )
+        repo.upsert_crawl_state(updated)
+
+        graph_result = {
+            "build_spec": {
+                "selected_urls": ["https://example.com/b"],
+                "note": "chose /b explicitly",
+            },
+            "graph_run_id": str(uuid4()),
+        }
+
+        with patch(
+            "kmbl_orchestrator.identity.page_fetch.fetch_page_data",
+            return_value=None,
+        ):
+            _advance_crawl_frontier(repo, loop, graph_result)
+
+        state = repo.get_crawl_state(iid)
+        assert "https://example.com/b" in state.visited_urls
+        prov = state.visit_provenance.get("https://example.com/b", {})
+        assert prov.get("source") == "selected_by_planner"
+        assert prov.get("tier") == EvidenceTier.SELECTED_BY_PLANNER
+
+
+# ---------------------------------------------------------------------------
+# FIX 2: verified_fetch — real tier-1 evidence
+# ---------------------------------------------------------------------------
+
+
+class TestVerifiedFetch:
+    """Tests that real HTTP fetch upgrades evidence to verified_fetch (tier 1)."""
+
+    def test_verify_url_fetch_success(self) -> None:
+        from kmbl_orchestrator.identity.crawl_evidence import verify_url_fetch
+
+        fake_page = {
+            "url": "https://example.com/about",
+            "title": "About Us",
+            "description": "Our story",
+            "links": ["https://example.com/team"],
+            "design_signals": ["minimal"],
+            "tone_keywords": ["professional"],
+            "status_code": 200,
+        }
+        with patch(
+            "kmbl_orchestrator.identity.page_fetch.fetch_page_data",
+            return_value=fake_page,
+        ):
+            vf = verify_url_fetch("https://example.com/about")
+
+        assert vf.success is True
+        assert vf.title == "About Us"
+        assert vf.description == "Our story"
+        assert vf.resolved_url == "https://example.com/about"
+        assert vf.discovered_links == ["https://example.com/team"]
+
+    def test_verify_url_fetch_failure_returns_false(self) -> None:
+        from kmbl_orchestrator.identity.crawl_evidence import verify_url_fetch
+
+        with patch(
+            "kmbl_orchestrator.identity.page_fetch.fetch_page_data",
+            return_value=None,
+        ):
+            vf = verify_url_fetch("https://example.com/bad")
+
+        assert vf.success is False
+        assert vf.failure_reason != ""
+
+    def test_verify_url_fetch_exception_returns_false(self) -> None:
+        from kmbl_orchestrator.identity.crawl_evidence import verify_url_fetch
+
+        with patch(
+            "kmbl_orchestrator.identity.page_fetch.fetch_page_data",
+            side_effect=RuntimeError("network down"),
+        ):
+            vf = verify_url_fetch("https://example.com/err")
+
+        assert vf.success is False
+        assert "network down" in vf.failure_reason
+
+    def test_try_upgrade_success_promotes_to_tier_1(self) -> None:
+        from kmbl_orchestrator.identity.crawl_evidence import try_upgrade_to_verified
+
+        ev = UrlEvidence("https://example.com/x", EvidenceTier.BUILD_SPEC_STRUCTURED, "build_spec_structured")
+        report = CrawlAdvancementReport()
+
+        with patch(
+            "kmbl_orchestrator.identity.page_fetch.fetch_page_data",
+            return_value={"url": "https://example.com/x", "title": "X", "description": "", "links": [], "design_signals": [], "tone_keywords": [], "status_code": 200},
+        ):
+            upgraded, vf = try_upgrade_to_verified(ev, report)
+
+        assert upgraded.tier == EvidenceTier.VERIFIED_FETCH
+        assert upgraded.source == "verified_fetch"
+        assert vf.success is True
+        assert "https://example.com/x" in report.verified_urls
+        assert len(report.downgraded_urls) == 0
+
+    def test_try_upgrade_failure_keeps_original_tier(self) -> None:
+        from kmbl_orchestrator.identity.crawl_evidence import try_upgrade_to_verified
+
+        ev = UrlEvidence("https://example.com/y", EvidenceTier.SELECTED_BY_PLANNER, "selected_by_planner")
+        report = CrawlAdvancementReport()
+
+        with patch(
+            "kmbl_orchestrator.identity.page_fetch.fetch_page_data",
+            return_value=None,
+        ):
+            kept, vf = try_upgrade_to_verified(ev, report)
+
+        # Original tier preserved
+        assert kept.tier == EvidenceTier.SELECTED_BY_PLANNER
+        assert kept.source == "selected_by_planner"
+        assert vf.success is False
+        assert len(report.downgraded_urls) == 1
+        assert report.downgraded_urls[0]["url"] == "https://example.com/y"
+        assert report.downgraded_urls[0]["kept_tier"] == "selected_by_planner"
+        assert len(report.fetch_failures) == 1
+
+    def test_integration_verified_fetch_provenance(self) -> None:
+        """End-to-end: successful fetch upgrades to verified_fetch provenance."""
+        from kmbl_orchestrator.autonomous.loop_service import _advance_crawl_frontier
+
+        repo = InMemoryRepository()
+        iid = uuid4()
+        loop = _make_loop(identity_id=iid)
+        state = get_or_create_crawl_state(repo, iid, "https://example.com")
+        updated = state.model_copy(
+            update={"unvisited_urls": ["https://example.com/a"]},
+        )
+        repo.upsert_crawl_state(updated)
+
+        fake_page = {
+            "url": "https://example.com/a",
+            "title": "Page A",
+            "description": "Desc A",
+            "links": [],
+            "design_signals": ["grid"],
+            "tone_keywords": ["modern"],
+            "status_code": 200,
+        }
+
+        graph_result = {
+            "build_spec": {"selected_urls": ["https://example.com/a"]},
+            "graph_run_id": str(uuid4()),
+        }
+
+        with patch(
+            "kmbl_orchestrator.identity.page_fetch.fetch_page_data",
+            return_value=fake_page,
+        ):
+            _advance_crawl_frontier(repo, loop, graph_result)
+
+        state = repo.get_crawl_state(iid)
+        assert "https://example.com/a" in state.visited_urls
+        prov = state.visit_provenance.get("https://example.com/a", {})
+        assert prov.get("source") == "verified_fetch"
+        assert prov.get("tier") == EvidenceTier.VERIFIED_FETCH
+
+    def test_integration_failed_fetch_keeps_lower_tier(self) -> None:
+        """End-to-end: failed fetch degrades gracefully to original tier."""
+        from kmbl_orchestrator.autonomous.loop_service import _advance_crawl_frontier
+
+        repo = InMemoryRepository()
+        iid = uuid4()
+        loop = _make_loop(identity_id=iid)
+        state = get_or_create_crawl_state(repo, iid, "https://example.com")
+        updated = state.model_copy(
+            update={"unvisited_urls": ["https://example.com/a"]},
+        )
+        repo.upsert_crawl_state(updated)
+
+        graph_result = {
+            "build_spec": {"selected_urls": ["https://example.com/a"]},
+            "graph_run_id": str(uuid4()),
+        }
+
+        # Fetch fails — returns None
+        with patch(
+            "kmbl_orchestrator.identity.page_fetch.fetch_page_data",
+            return_value=None,
+        ):
+            _advance_crawl_frontier(repo, loop, graph_result)
+
+        state = repo.get_crawl_state(iid)
+        assert "https://example.com/a" in state.visited_urls
+        prov = state.visit_provenance.get("https://example.com/a", {})
+        # Should be the original tier, NOT verified_fetch
+        assert prov.get("source") == "selected_by_planner"
+        assert prov.get("tier") == EvidenceTier.SELECTED_BY_PLANNER
+
+
+# ---------------------------------------------------------------------------
+# FIX 3: Normalized URL matching
+# ---------------------------------------------------------------------------
+
+
+class TestNormalizedUrlMatching:
+    """Tests that URL normalization prevents false negatives in evidence matching."""
+
+    def test_trailing_slash_mismatch_resolved(self) -> None:
+        """Offered URL has trailing slash, planner omits it — still matches."""
+        report = resolve_evidence(
+            offered_urls=["https://example.com/about/"],
+            planner_selected_urls=["https://example.com/about"],
+            build_spec_urls=[],
+            raw_payload_urls=[],
+            root_url="https://example.com",
+        )
+        assert report.evidence_tier_used == "selected_by_planner"
+        # Returns the offered form of the URL
+        assert report.final_visited[0].url == "https://example.com/about/"
+
+    def test_fragment_stripped_for_matching(self) -> None:
+        """Fragment (#section) in planner URL doesn't break matching."""
+        report = resolve_evidence(
+            offered_urls=["https://example.com/page"],
+            planner_selected_urls=[],
+            build_spec_urls=["https://example.com/page#section2"],
+            raw_payload_urls=[],
+            root_url="https://example.com",
+        )
+        assert report.evidence_tier_used == "build_spec_structured"
+
+    def test_tracking_params_stripped_for_matching(self) -> None:
+        """UTM params in planner URL don't break matching."""
+        report = resolve_evidence(
+            offered_urls=["https://example.com/work"],
+            planner_selected_urls=[],
+            build_spec_urls=["https://example.com/work?utm_source=crawl&utm_medium=bot"],
+            raw_payload_urls=[],
+            root_url="https://example.com",
+        )
+        assert report.evidence_tier_used == "build_spec_structured"
+
+    def test_scheme_case_normalization(self) -> None:
+        """HTTP vs HTTPS or case differences don't break matching."""
+        report = resolve_evidence(
+            offered_urls=["https://example.com/page"],
+            planner_selected_urls=["HTTPS://EXAMPLE.COM/page"],
+            build_spec_urls=[],
+            raw_payload_urls=[],
+            root_url="https://example.com",
+        )
+        assert report.evidence_tier_used == "selected_by_planner"
+
+    def test_default_port_stripped(self) -> None:
+        """Port 443 on HTTPS doesn't break matching."""
+        report = resolve_evidence(
+            offered_urls=["https://example.com/page"],
+            planner_selected_urls=["https://example.com:443/page"],
+            build_spec_urls=[],
+            raw_payload_urls=[],
+            root_url="https://example.com",
+        )
+        assert report.evidence_tier_used == "selected_by_planner"
+
+    def test_fetched_resolved_url_credits_original(self) -> None:
+        """Fetched URL redirects but same domain — still verified."""
+        from kmbl_orchestrator.identity.crawl_evidence import verify_url_fetch
+
+        # Fetch returns a slightly different resolved URL (same domain, different path)
+        fake_page = {
+            "url": "https://example.com/about-us",  # redirect from /about
+            "title": "About",
+            "description": "",
+            "links": [],
+            "design_signals": [],
+            "tone_keywords": [],
+            "status_code": 200,
+        }
+        with patch(
+            "kmbl_orchestrator.identity.page_fetch.fetch_page_data",
+            return_value=fake_page,
+        ):
+            vf = verify_url_fetch("https://example.com/about")
+
+        # Same domain redirect is still considered success
+        assert vf.success is True
+        assert vf.resolved_url == "https://example.com/about-us"
+
+    def test_cross_domain_redirect_fails_verification(self) -> None:
+        """Fetch redirecting to different domain fails verification."""
+        from kmbl_orchestrator.identity.crawl_evidence import verify_url_fetch
+
+        fake_page = {
+            "url": "https://different-domain.com/page",
+            "title": "X",
+            "description": "",
+            "links": [],
+            "design_signals": [],
+            "tone_keywords": [],
+            "status_code": 200,
+        }
+        with patch(
+            "kmbl_orchestrator.identity.page_fetch.fetch_page_data",
+            return_value=fake_page,
+        ):
+            vf = verify_url_fetch("https://example.com/page")
+
+        assert vf.success is False
+        assert "different domain" in vf.failure_reason
+
+
+# ---------------------------------------------------------------------------
+# FIX 4: Observability / honesty
+# ---------------------------------------------------------------------------
+
+
+class TestObservabilityEnhancements:
+    """Tests that the report clearly distinguishes earned vs degraded evidence."""
+
+    def test_report_includes_downgraded_urls(self) -> None:
+        """Report captures fetch failures as downgraded_urls."""
+        from kmbl_orchestrator.identity.crawl_evidence import try_upgrade_to_verified
+
+        ev = UrlEvidence("https://example.com/z", EvidenceTier.BUILD_SPEC_STRUCTURED, "build_spec_structured")
+        report = CrawlAdvancementReport()
+
+        with patch(
+            "kmbl_orchestrator.identity.page_fetch.fetch_page_data",
+            return_value=None,
+        ):
+            try_upgrade_to_verified(ev, report)
+
+        d = report.to_dict()
+        assert len(d["downgraded_urls"]) == 1
+        assert d["downgraded_urls"][0]["kept_tier"] == "build_spec_structured"
+        assert len(d["fetch_failures"]) == 1
+
+    def test_report_includes_verified_urls(self) -> None:
+        """Report captures successfully verified URLs."""
+        from kmbl_orchestrator.identity.crawl_evidence import try_upgrade_to_verified
+
+        ev = UrlEvidence("https://example.com/v", EvidenceTier.SELECTED_BY_PLANNER, "selected_by_planner")
+        report = CrawlAdvancementReport()
+
+        with patch(
+            "kmbl_orchestrator.identity.page_fetch.fetch_page_data",
+            return_value={"url": "https://example.com/v", "title": "V", "description": "", "links": [], "design_signals": [], "tone_keywords": [], "status_code": 200},
+        ):
+            try_upgrade_to_verified(ev, report)
+
+        d = report.to_dict()
+        assert "https://example.com/v" in d["verified_urls"]
+        assert len(d["downgraded_urls"]) == 0
+
+    def test_report_to_dict_has_all_fields(self) -> None:
+        """to_dict includes all new observability fields."""
+        report = CrawlAdvancementReport(
+            planner_selected_urls=["https://a.com"],
+            downgraded_urls=[{"url": "https://b.com", "kept_tier": "build_spec_structured", "reason": "timeout"}],
+            fetch_failures=[{"url": "https://b.com", "reason": "timeout"}],
+        )
+        d = report.to_dict()
+        assert "planner_selected_urls" in d
+        assert "downgraded_urls" in d
+        assert "fetch_failures" in d
+
+    def test_integration_event_shows_verified_tier(self) -> None:
+        """End-to-end: CRAWL_FRONTIER_ADVANCED event reflects verified tier."""
+        from kmbl_orchestrator.autonomous.loop_service import _advance_crawl_frontier
+
+        repo = InMemoryRepository()
+        iid = uuid4()
+        loop = _make_loop(identity_id=iid)
+        state = get_or_create_crawl_state(repo, iid, "https://example.com")
+        updated = state.model_copy(
+            update={"unvisited_urls": ["https://example.com/a"]},
+        )
+        repo.upsert_crawl_state(updated)
+
+        grun_id = uuid4()
+        repo.save_graph_run(GraphRunRecord(
+            graph_run_id=grun_id,
+            thread_id=uuid4(),
+            identity_id=iid,
+            trigger_type="autonomous_loop",
+            status="completed",
+        ))
+
+        fake_page = {
+            "url": "https://example.com/a",
+            "title": "A",
+            "description": "test",
+            "links": [],
+            "design_signals": [],
+            "tone_keywords": [],
+            "status_code": 200,
+        }
+
+        graph_result = {
+            "build_spec": {"selected_urls": ["https://example.com/a"]},
+            "graph_run_id": grun_id,
+        }
+
+        with patch(
+            "kmbl_orchestrator.identity.page_fetch.fetch_page_data",
+            return_value=fake_page,
+        ):
+            _advance_crawl_frontier(repo, loop, graph_result)
+
+        events = repo.list_graph_run_events(grun_id)
+        crawl_events = [e for e in events if e.event_type == RunEventType.CRAWL_FRONTIER_ADVANCED]
+        assert len(crawl_events) == 1
+        payload = crawl_events[0].payload_json
+        assert payload["evidence_tier_used"] == "verified_fetch"
+        assert "https://example.com/a" in payload["verified_urls"]

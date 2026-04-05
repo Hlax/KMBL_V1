@@ -281,7 +281,7 @@ _SELECTED_URLS_CONTRACT: dict[str, Any] = {
         "from `next_urls_to_crawl` that you actually consulted or whose content "
         "influenced your plan.  Rules:\n"
         "1. ONLY include URLs from `next_urls_to_crawl` or explicitly allowed "
-        "external inspiration URLs.  Do NOT invent URLs.\n"
+        "external inspiration URLs. Do NOT invent URLs.\n"
         "2. Prefer the exact absolute URL as listed in `next_urls_to_crawl`.\n"
         "3. Relative paths (e.g. /about, ./contact) are accepted but absolute "
         "URLs are preferred.\n"

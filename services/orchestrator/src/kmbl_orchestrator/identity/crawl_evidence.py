@@ -461,6 +461,9 @@ def _resolve_planner_url(raw: str, root_url: str | None) -> str | None:
         from kmbl_orchestrator.identity.url_normalize import resolve_url
         return resolve_url(raw, root_url)
 
+    # No root_url to resolve against — relative path cannot be converted
+    return None
+
 
 # ---------------------------------------------------------------------------
 # Planner compliance validation + consistency check (FIX 2 + FIX 3)

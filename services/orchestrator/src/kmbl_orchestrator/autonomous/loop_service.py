@@ -484,7 +484,6 @@ def _advance_crawl_frontier(
     from kmbl_orchestrator.identity.crawl_state import (
         get_next_urls_to_crawl,
         record_page_visit,
-        seed_external_inspiration,
     )
 
     try:

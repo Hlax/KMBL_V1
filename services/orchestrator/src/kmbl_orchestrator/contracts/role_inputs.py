@@ -147,6 +147,14 @@ class GeneratorRoleInput(BaseModel):
             "literal_success_checks_preview (first needles, truncated), creative_brief_mood."
         ),
     )
+    surface_type: str = Field(
+        default="static_html",
+        description=(
+            "Output surface shape for the generator: 'static_html' (standard HTML/CSS/JS) "
+            "or 'webgl_experience' (canvas-based rendering with shader/config files). "
+            "Derived from build_spec.experience_mode by the orchestrator."
+        ),
+    )
 
 
 class EvaluatorRoleInput(BaseModel):

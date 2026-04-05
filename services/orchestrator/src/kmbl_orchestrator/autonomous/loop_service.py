@@ -495,6 +495,7 @@ def _advance_crawl_frontier(
     CRAWL_FRONTIER_ADVANCED event for full observability.
     """
     from kmbl_orchestrator.identity.crawl_evidence import (
+        compute_planner_compliance,
         extract_planner_selected_urls,
         resolve_evidence,
         try_upgrade_to_verified,
@@ -506,6 +507,7 @@ def _advance_crawl_frontier(
     from kmbl_orchestrator.identity.page_fetch import (
         extract_urls_from_build_spec,
     )
+    from kmbl_orchestrator.identity.url_normalize import normalize_url
     from kmbl_orchestrator.runtime.run_events import (
         RunEventType,
         append_graph_run_event,
@@ -525,8 +527,14 @@ def _advance_crawl_frontier(
         # --- Collect evidence from each source ---
         build_spec = graph_result.get("build_spec") or {}
 
+        # Capture raw selected_urls before resolution for compliance tracking
+        raw_planner_selected = list(build_spec.get("selected_urls") or [])
+
         # FIX 1: extract explicit planner-selected URLs
-        planner_selected = extract_planner_selected_urls(build_spec)
+        # FIX 2: resolve relative URLs against root_url before matching
+        planner_selected = extract_planner_selected_urls(
+            build_spec, root_url=state.root_url,
+        )
 
         build_spec_urls = extract_urls_from_build_spec(build_spec)
         raw_payload_urls = _extract_raw_payload_urls(repo, graph_result)
@@ -542,6 +550,32 @@ def _advance_crawl_frontier(
         )
 
         run_id = str(graph_result.get("graph_run_id", "unknown"))
+
+        # --- Planner compliance metrics (FIX 2 + FIX 3) ---
+        # Count how many resolved planner-selected URLs actually matched offered
+        offered_norm = {normalize_url(u) for u in offered_urls}
+        ps_matched_count = sum(
+            1 for u in planner_selected if normalize_url(u) in offered_norm
+        )
+        compliance = compute_planner_compliance(
+            offered_urls=offered_urls,
+            raw_planner_selected=raw_planner_selected,
+            resolved_planner_selected=planner_selected,
+            matched_count=ps_matched_count,
+            build_spec_urls=build_spec_urls,
+            evidence_tier_used=report.evidence_tier_used,
+            root_url=state.root_url,
+        )
+        report.planner_compliance = compliance
+
+        if compliance.get("omitted_despite_frontier"):
+            _log.warning(
+                "Loop %s: planner omitted selected_urls despite %d offered frontier URLs — "
+                "crawl evidence degraded to %s",
+                loop.loop_id,
+                len(offered_urls),
+                report.evidence_tier_used,
+            )
 
         # --- FIX 2: attempt verified fetch for each resolved URL ---
         upgraded_visited: list[tuple] = []
@@ -591,7 +625,7 @@ def _advance_crawl_frontier(
         if report.verified_urls:
             report.evidence_tier_used = "verified_fetch"
 
-        # --- Observability: emit event ---
+        # --- Observability: emit events ---
         graph_run_id = graph_result.get("graph_run_id")
         if graph_run_id:
             try:
@@ -601,6 +635,13 @@ def _advance_crawl_frontier(
                     gid,
                     RunEventType.CRAWL_FRONTIER_ADVANCED,
                     payload=report.to_dict(),
+                )
+                # Emit planner compliance event for monitoring
+                append_graph_run_event(
+                    repo,
+                    gid,
+                    RunEventType.PLANNER_CRAWL_COMPLIANCE,
+                    payload=compliance,
                 )
             except Exception as exc:
                 _log.debug("crawl frontier event emit failed: %s", str(exc)[:200])

@@ -10,11 +10,27 @@ RoleType = Literal["planner", "generator", "evaluator"]
 
 
 class PlannerRoleOutput(BaseModel):
-    """Planner must return a structured plan; `build_spec` is required."""
+    """Planner must return a structured plan; `build_spec` is required.
+
+    When ``crawl_context`` is present in the input (i.e. the orchestrator offered
+    frontier URLs), the planner **should** include ``selected_urls`` in the
+    top-level output or inside ``build_spec``.  ``selected_urls`` must be a
+    list of absolute HTTP(S) URLs chosen from the offered ``next_urls_to_crawl``.
+    If no URLs were used, return an empty list rather than omitting the field.
+    """
 
     model_config = ConfigDict(extra="allow")
 
     build_spec: dict[str, Any]
+    selected_urls: list[str] = Field(
+        default_factory=list,
+        description=(
+            "URLs the planner actually used from crawl_context.next_urls_to_crawl. "
+            "Must only contain URLs from the offered frontier or explicitly allowed "
+            "external inspiration URLs. Return [] when no URLs were consulted. "
+            "Orchestrator uses this for tier-2 (selected_by_planner) evidence."
+        ),
+    )
     constraints: dict[str, Any] = Field(default_factory=dict)
     success_criteria: list[Any] = Field(default_factory=list)
     evaluation_targets: list[Any] = Field(default_factory=list)

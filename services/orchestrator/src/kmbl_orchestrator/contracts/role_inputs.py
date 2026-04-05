@@ -67,10 +67,16 @@ class PlannerRoleInput(BaseModel):
     crawl_context: dict[str, Any] | None = Field(
         default=None,
         description=(
-            "Durable crawl state for cross-session resumption. Includes: crawl_status, "
-            "root_url, total_pages_crawled, visited_count, unvisited_count, "
-            "next_urls_to_crawl, recent_page_summaries, is_exhausted. "
-            "Use to decide what pages to inspect next via Playwright MCP."
+            "Durable crawl state for cross-session resumption. Includes: crawl_available, "
+            "crawl_status, root_url, total_pages_crawled, visited_count, unvisited_count, "
+            "next_urls_to_crawl (offered frontier URLs), recent_page_summaries, is_exhausted. "
+            "\n\n"
+            "When crawl_context is present and next_urls_to_crawl is non-empty, the planner "
+            "MUST return `selected_urls` — the subset of next_urls_to_crawl URLs it actually "
+            "consulted or used. Prefer exact absolute URLs from next_urls_to_crawl; relative "
+            "paths (e.g. /about) are accepted and will be resolved against root_url. Do not "
+            "invent URLs not in the offered set. Return [] if no frontier URLs were used. "
+            "This enables tier-2 evidence (selected_by_planner) for auditable crawl progression."
         ),
     )
 

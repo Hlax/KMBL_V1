@@ -271,6 +271,67 @@ def seed_external_inspiration(
     return updated
 
 
+# ---------------------------------------------------------------------------
+# Planner selected_urls contract — included in every crawl_context payload
+# ---------------------------------------------------------------------------
+
+_SELECTED_URLS_CONTRACT: dict[str, Any] = {
+    "instruction": (
+        "You MUST return `selected_urls` in your output — a list of the URLs "
+        "from `next_urls_to_crawl` that you actually consulted or whose content "
+        "influenced your plan.  Rules:\n"
+        "1. ONLY include URLs from `next_urls_to_crawl` or explicitly allowed "
+        "external inspiration URLs. Do NOT invent URLs.\n"
+        "2. Prefer the exact absolute URL as listed in `next_urls_to_crawl`.\n"
+        "3. Relative paths (e.g. /about, ./contact) are accepted but absolute "
+        "URLs are preferred.\n"
+        "4. If you did not consult any frontier URL, return `selected_urls: []`.\n"
+        "5. Do NOT omit the field — always include it."
+    ),
+    "examples": [
+        {
+            "scenario": "Planner consulted two offered pages",
+            "next_urls_to_crawl": [
+                "https://acme.com/about",
+                "https://acme.com/work",
+                "https://acme.com/contact",
+            ],
+            "correct_output": {
+                "selected_urls": [
+                    "https://acme.com/about",
+                    "https://acme.com/work",
+                ],
+            },
+        },
+        {
+            "scenario": "Planner used a page but only had the relative path",
+            "next_urls_to_crawl": [
+                "https://acme.com/projects/alpha",
+                "https://acme.com/blog",
+            ],
+            "correct_output": {
+                "selected_urls": ["/projects/alpha"],
+            },
+            "note": "Relative paths are resolved against root_url automatically.",
+        },
+        {
+            "scenario": "Planner did not use any frontier URL",
+            "next_urls_to_crawl": [
+                "https://acme.com/old-page",
+            ],
+            "correct_output": {
+                "selected_urls": [],
+            },
+        },
+    ],
+    "forbidden": (
+        "Do NOT include URLs that are not in `next_urls_to_crawl` or "
+        "the allowed external inspiration set.  Invented URLs are discarded "
+        "by the orchestrator."
+    ),
+}
+
+
 def build_crawl_context_for_planner(
     state: CrawlStateRecord | None,
 ) -> dict[str, Any]:
@@ -312,4 +373,6 @@ def build_crawl_context_for_planner(
         "external_inspiration_available": bool(state.external_inspiration_urls),
         "is_exhausted": state.crawl_status == "exhausted",
         "grounding_available": has_real_data,
+        # Planner instructions for selected_urls contract:
+        "selected_urls_contract": _SELECTED_URLS_CONTRACT,
     }

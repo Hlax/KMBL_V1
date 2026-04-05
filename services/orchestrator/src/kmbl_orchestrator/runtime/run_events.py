@@ -83,6 +83,7 @@ class RunEventType:
 
     # Crawl frontier observability
     CRAWL_FRONTIER_ADVANCED = "crawl_frontier_advanced"
+    PLANNER_CRAWL_COMPLIANCE = "planner_crawl_compliance"
 
 
 def append_graph_run_event(

@@ -480,16 +480,24 @@ def _advance_crawl_frontier(
     """Advance the crawl frontier after a graph run — grounded in reality.
 
     Uses tiered evidence to decide which URLs to mark visited:
-      1. verified_fetch        (strongest — not yet implemented)
-      2. selected_by_planner   (not yet implemented)
+      1. verified_fetch        (strongest — requires successful HTTP fetch)
+      2. selected_by_planner   (explicit ``selected_urls`` in build_spec)
       3. build_spec_structured (URLs from structured build_spec ∩ offered)
       4. raw_payload_text      (from BuildSpecRecord, capped + domain-filtered)
       5. frontier_fallback     (first offered URL — guarantees progress)
 
+    After tier resolution, each URL is optionally verified via real fetch.
+    If fetch succeeds the evidence upgrades to ``verified_fetch``; otherwise
+    the original tier is kept and the failure is recorded.
+
     Records provenance for every URL marked visited and emits a
     CRAWL_FRONTIER_ADVANCED event for full observability.
     """
-    from kmbl_orchestrator.identity.crawl_evidence import resolve_evidence
+    from kmbl_orchestrator.identity.crawl_evidence import (
+        extract_planner_selected_urls,
+        resolve_evidence,
+        try_upgrade_to_verified,
+    )
     from kmbl_orchestrator.identity.crawl_state import (
         get_next_urls_to_crawl,
         record_page_visit,
@@ -515,13 +523,17 @@ def _advance_crawl_frontier(
 
         # --- Collect evidence from each source ---
         build_spec = graph_result.get("build_spec") or {}
-        build_spec_urls = extract_urls_from_build_spec(build_spec)
 
+        # FIX 1: extract explicit planner-selected URLs
+        planner_selected = extract_planner_selected_urls(build_spec)
+
+        build_spec_urls = extract_urls_from_build_spec(build_spec)
         raw_payload_urls = _extract_raw_payload_urls(repo, graph_result)
 
         # --- Resolve using tiered priority ---
         report = resolve_evidence(
             offered_urls=offered_urls,
+            planner_selected_urls=planner_selected,
             build_spec_urls=build_spec_urls,
             raw_payload_urls=raw_payload_urls,
             root_url=state.root_url,
@@ -530,42 +542,53 @@ def _advance_crawl_frontier(
 
         run_id = str(graph_result.get("graph_run_id", "unknown"))
 
+        # --- FIX 2: attempt verified fetch for each resolved URL ---
+        upgraded_visited: list[Any] = []
+        for ev in report.final_visited:
+            upgraded_ev, vf = try_upgrade_to_verified(ev, report, timeout=5.0)
+            upgraded_visited.append((upgraded_ev, vf))
+
         _log.info(
-            "Loop %s: crawl advance — offered=%d, mentioned=%d, "
-            "final=%d, tier=%s",
+            "Loop %s: crawl advance — offered=%d, planner_selected=%d, "
+            "mentioned=%d, final=%d, verified=%d, tier=%s",
             loop.loop_id,
             len(report.offered_urls),
+            len(report.planner_selected_urls),
             len(report.mentioned_urls),
             len(report.final_visited),
+            len(report.verified_urls),
             report.evidence_tier_used,
         )
 
         # --- Visit each URL with provenance ---
-        for ev in report.final_visited:
-            page_data = _try_fetch_page(ev.url)
-            if page_data is not None:
+        for upgraded_ev, vf in upgraded_visited:
+            if vf.success:
                 state = record_page_visit(
                     repo,
                     loop.identity_id,
-                    ev.url,
-                    summary=_build_page_summary(page_data),
-                    design_signals=page_data.get("design_signals"),
-                    tone_keywords=page_data.get("tone_keywords"),
-                    discovered_links=page_data.get("links"),
-                    provenance_source=ev.source,
-                    provenance_tier=ev.tier,
+                    upgraded_ev.url,
+                    summary=_build_page_summary_from_verification(vf),
+                    design_signals=vf.design_signals or None,
+                    tone_keywords=vf.tone_keywords or None,
+                    discovered_links=vf.discovered_links or None,
+                    provenance_source=upgraded_ev.source,
+                    provenance_tier=upgraded_ev.tier,
                     run_id=run_id,
                 )
             else:
                 state = record_page_visit(
                     repo,
                     loop.identity_id,
-                    ev.url,
+                    upgraded_ev.url,
                     summary=f"Referenced in build_spec (run_id={run_id})",
-                    provenance_source=ev.source,
-                    provenance_tier=ev.tier,
+                    provenance_source=upgraded_ev.source,
+                    provenance_tier=upgraded_ev.tier,
                     run_id=run_id,
                 )
+
+        # Update evidence_tier_used to reflect any upgrades
+        if report.verified_urls:
+            report.evidence_tier_used = "verified_fetch"
 
         # --- Observability: emit event ---
         graph_run_id = graph_result.get("graph_run_id")
@@ -640,24 +663,10 @@ def _collect_allowed_domains(state: "CrawlStateRecord") -> set[str]:
     return allowed
 
 
-def _try_fetch_page(url: str) -> dict[str, Any] | None:
-    """Attempt to fetch real page data, returning None on any failure.
-
-    This is best-effort — network failures, timeouts, non-HTML pages
-    all result in None. The crawl loop still advances regardless.
-    """
-    from kmbl_orchestrator.identity.page_fetch import fetch_page_data
-
-    try:
-        return fetch_page_data(url, timeout=5.0)
-    except Exception:
-        return None
-
-
-def _build_page_summary(page_data: dict[str, Any]) -> str:
-    """Build a one-line page summary from fetched page data."""
-    title = page_data.get("title", "")
-    desc = page_data.get("description", "")
+def _build_page_summary_from_verification(vf: Any) -> str:
+    """Build a one-line page summary from a FetchVerification result."""
+    title = getattr(vf, "title", "") or ""
+    desc = getattr(vf, "description", "") or ""
     if title and desc:
         return f"{title} — {desc}"[:300]
     return (title or desc or "Page fetched")[:300]

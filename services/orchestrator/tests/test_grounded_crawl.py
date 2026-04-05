@@ -178,7 +178,7 @@ class TestGroundedAdvanceCrawlFrontier:
 
         # Mock fetch_page_data to avoid real HTTP
         with patch(
-            "kmbl_orchestrator.autonomous.loop_service._try_fetch_page",
+            "kmbl_orchestrator.identity.page_fetch.fetch_page_data",
             return_value=None,
         ):
             _advance_crawl_frontier(repo, loop, graph_result)
@@ -211,7 +211,7 @@ class TestGroundedAdvanceCrawlFrontier:
         }
 
         with patch(
-            "kmbl_orchestrator.autonomous.loop_service._try_fetch_page",
+            "kmbl_orchestrator.identity.page_fetch.fetch_page_data",
             return_value=None,
         ):
             _advance_crawl_frontier(repo, loop, graph_result)
@@ -249,7 +249,7 @@ class TestGroundedAdvanceCrawlFrontier:
         }
 
         with patch(
-            "kmbl_orchestrator.autonomous.loop_service._try_fetch_page",
+            "kmbl_orchestrator.identity.page_fetch.fetch_page_data",
             return_value=None,
         ):
             _advance_crawl_frontier(repo, loop, graph_result)
@@ -284,7 +284,7 @@ class TestGroundedAdvanceCrawlFrontier:
         }
 
         with patch(
-            "kmbl_orchestrator.autonomous.loop_service._try_fetch_page",
+            "kmbl_orchestrator.identity.page_fetch.fetch_page_data",
             return_value=fake_page,
         ):
             _advance_crawl_frontier(repo, loop, graph_result)
@@ -451,7 +451,7 @@ class TestBuildSpecPassthrough:
         }
 
         with patch(
-            "kmbl_orchestrator.autonomous.loop_service._try_fetch_page",
+            "kmbl_orchestrator.identity.page_fetch.fetch_page_data",
             return_value=None,
         ):
             _advance_crawl_frontier(repo, loop, graph_result)
@@ -478,7 +478,7 @@ class TestBuildSpecPassthrough:
         }
 
         with patch(
-            "kmbl_orchestrator.autonomous.loop_service._try_fetch_page",
+            "kmbl_orchestrator.identity.page_fetch.fetch_page_data",
             return_value=None,
         ):
             _advance_crawl_frontier(repo, loop, graph_result)
@@ -533,7 +533,7 @@ class TestRawPayloadEnrichment:
         }
 
         with patch(
-            "kmbl_orchestrator.autonomous.loop_service._try_fetch_page",
+            "kmbl_orchestrator.identity.page_fetch.fetch_page_data",
             return_value=None,
         ):
             _advance_crawl_frontier(repo, loop, graph_result)

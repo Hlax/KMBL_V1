@@ -20,7 +20,7 @@ def test_bundle_seed_task_does_not_contain_prefer_static() -> None:
     ei = build_identity_url_bundle_event_input(identity_url="https://example.com")
     task = ei["task"]
     assert "Prefer static" not in task
-    assert "prefer static" not in task.lower() or "prefer static when" not in task.lower()
+    assert "prefer static" not in task.lower()
 
 
 def test_bundle_seed_task_mentions_both_verticals_neutrally() -> None:

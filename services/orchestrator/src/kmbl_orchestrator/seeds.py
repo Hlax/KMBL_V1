@@ -237,7 +237,7 @@ def build_identity_url_bundle_event_input(
         "meaningful user interaction, or a multi-file component structure (organized JS/CSS, "
         "light Three.js, canvas, or scroll-driven motion) that clearly improves the product. "
         "Generator: honor build_spec.type — produce artifact_outputs (and/or workspace ingest) "
-        "matching the chosen vertical. Include build_spec.creative_brief with design_direction, "
+        "matching the chosen vertical. Include build_spec.creative_brief with direction_summary, "
         "color_strategy, layout_concept, and interaction_goals so the generator has rich context."
     )
     return {

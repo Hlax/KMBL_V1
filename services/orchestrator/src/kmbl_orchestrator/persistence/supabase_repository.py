@@ -1726,6 +1726,7 @@ class SupabaseRepository(SupabaseRepositoryAutonomousLoopMixin):
             "visited_urls": record.visited_urls,
             "unvisited_urls": record.unvisited_urls,
             "page_summaries": record.page_summaries,
+            "visit_provenance": record.visit_provenance,
             "crawl_status": record.crawl_status,
             "external_inspiration_urls": record.external_inspiration_urls,
             "total_pages_crawled": record.total_pages_crawled,

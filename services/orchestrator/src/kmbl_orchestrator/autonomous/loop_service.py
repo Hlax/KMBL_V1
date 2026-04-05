@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 
 if TYPE_CHECKING:
     from kmbl_orchestrator.domain import CrawlStateRecord
+    from kmbl_orchestrator.identity.crawl_evidence import FetchVerification
     from kmbl_orchestrator.persistence.repository import Repository
 
 from kmbl_orchestrator.config import get_settings
@@ -543,7 +544,7 @@ def _advance_crawl_frontier(
         run_id = str(graph_result.get("graph_run_id", "unknown"))
 
         # --- FIX 2: attempt verified fetch for each resolved URL ---
-        upgraded_visited: list[Any] = []
+        upgraded_visited: list[tuple] = []
         for ev in report.final_visited:
             upgraded_ev, vf = try_upgrade_to_verified(ev, report, timeout=5.0)
             upgraded_visited.append((upgraded_ev, vf))
@@ -601,8 +602,8 @@ def _advance_crawl_frontier(
                     RunEventType.CRAWL_FRONTIER_ADVANCED,
                     payload=report.to_dict(),
                 )
-            except Exception:
-                pass  # observability is best-effort
+            except Exception as exc:
+                _log.debug("crawl frontier event emit failed: %s", str(exc)[:200])
 
         # Activate external inspiration when internal crawl is exhausted
         if state.crawl_status == "exhausted":
@@ -663,10 +664,10 @@ def _collect_allowed_domains(state: "CrawlStateRecord") -> set[str]:
     return allowed
 
 
-def _build_page_summary_from_verification(vf: Any) -> str:
+def _build_page_summary_from_verification(vf: "FetchVerification") -> str:
     """Build a one-line page summary from a FetchVerification result."""
-    title = getattr(vf, "title", "") or ""
-    desc = getattr(vf, "description", "") or ""
+    title = vf.title or ""
+    desc = vf.description or ""
     if title and desc:
         return f"{title} — {desc}"[:300]
     return (title or desc or "Page fetched")[:300]

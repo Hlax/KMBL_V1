@@ -400,7 +400,7 @@ def extract_planner_selected_urls(build_spec: dict[str, Any]) -> list[str]:
     def _add(raw: Any) -> None:
         if isinstance(raw, list):
             for item in raw:
-                if isinstance(item, str) and item.startswith("http") and item not in seen:
+                if isinstance(item, str) and (item.startswith("http://") or item.startswith("https://")) and item not in seen:
                     seen.add(item)
                     urls.append(item)
 

@@ -76,6 +76,41 @@ if TYPE_CHECKING:
 
 _log = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Evaluation contract: compact view of build_spec for evaluator internals.
+# Only the fields the evaluator actually inspects are retained; the full spec
+# never reaches the LLM payload (which already only receives success_criteria
+# + evaluation_targets).
+# ---------------------------------------------------------------------------
+
+_EVALUATION_CONTRACT_KEYS = frozenset({
+    "experience_mode",
+    "surface_type",
+    "site_archetype",
+    "canonical_vertical",
+    "literal_success_checks",
+    "machine_constraints",
+    # Interactive-lane detection keys
+    "cool_generation_lane",
+    "interaction_model",
+    "motion_spec",
+    # Library / reference keys used by gates
+    "required_libraries",
+    "library_hints",
+})
+
+
+def build_evaluation_contract(build_spec: dict[str, Any]) -> dict[str, Any]:
+    """Return a minimal view of *build_spec* containing only evaluator-relevant keys.
+
+    This keeps the evaluator's internal gate functions working identically while
+    dropping large creative-brief / crawl-context / reference-payload fields that
+    the evaluator never reads.
+    """
+    if not isinstance(build_spec, dict):
+        return {}
+    return {k: v for k, v in build_spec.items() if k in _EVALUATION_CONTRACT_KEYS}
+
 
 def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     """Invoke the evaluator role and persist the evaluation report."""
@@ -155,7 +190,7 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     bc_row = ctx.repo.get_build_candidate(UUID(bcid))
     refs_for_gates = list(bc_row.artifact_refs_json or []) if bc_row else []
     bc_gate = merge_slim_with_full_artifacts_for_gates(bc_slim, refs_for_gates)
-    bs_for_skip = state.get("build_spec") if isinstance(state.get("build_spec"), dict) else {}
+    bs_for_skip = build_evaluation_contract(state.get("build_spec") or {})
     ei_for_skip = state.get("event_input") if isinstance(state.get("event_input"), dict) else {}
     prev_ev = state.get("evaluation_report") if iter_hint > 0 else None
     preview_resolution: dict[str, Any] = resolve_evaluator_preview_resolution(
@@ -305,7 +340,7 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         snip_e = bc_slim.get("kmbl_evaluator_artifact_snippets_v1")
         if isinstance(snip_e, dict):
             payload["kmbl_evaluator_artifact_snippets_v1"] = snip_e
-    bs_lane = state.get("build_spec") if isinstance(state.get("build_spec"), dict) else {}
+    bs_lane = build_evaluation_contract(state.get("build_spec") or {})
     ei_lane = state.get("event_input") if isinstance(state.get("event_input"), dict) else {}
     if is_interactive_frontend_vertical(bs_lane, ei_lane):
         from kmbl_orchestrator.runtime.reference_library import attach_reference_cards_to_lane_context
@@ -450,7 +485,7 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     )
     report = report.model_copy(update={"metrics_json": _prev_m})
     ev_input = state.get("event_input") if isinstance(state.get("event_input"), dict) else {}
-    bs_ev = state.get("build_spec") if isinstance(state.get("build_spec"), dict) else {}
+    bs_ev = build_evaluation_contract(state.get("build_spec") or {})
     is_static_vertical = ev_input.get("scenario", "").startswith(
         "kmbl_identity_url_static",
     ) or is_preview_assembly_vertical(bs_ev, ev_input)
@@ -505,9 +540,7 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             )
     report = apply_preview_surface_gate(report, is_static_vertical=is_static_vertical)
 
-    bs_from_state = state.get("build_spec") or {}
-    if not isinstance(bs_from_state, dict):
-        bs_from_state = {}
+    bs_from_state = build_evaluation_contract(state.get("build_spec") or {})
 
     # Planner-authored substring checks against artifact bodies (deterministic).
     report = apply_literal_success_checks(

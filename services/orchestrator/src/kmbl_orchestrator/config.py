@@ -170,10 +170,13 @@ class Settings(BaseSettings):
         ),
     )
     # Absolute URLs in kmbl_session_staging (optional). E.g. http://127.0.0.1:8010 for local agents fetching previews.
+    # For demo / tunnel deployments, set this to the publicly reachable URL (e.g. https://xyz.ngrok.io).
+    # Alias: KMBL_DEMO_PUBLIC_BASE_URL is accepted as an alternative for demo-oriented setups.
     orchestrator_public_base_url: str = Field(
         default="",
         validation_alias=AliasChoices(
             "KMBL_ORCHESTRATOR_PUBLIC_BASE_URL",
+            "KMBL_DEMO_PUBLIC_BASE_URL",
             "orchestrator_public_base_url",
         ),
     )
@@ -253,7 +256,7 @@ class Settings(BaseSettings):
     # When enabled, the lifecycle manager enforces at-most-one active live_habitat per thread
     # and evicts superseded materializations when persistence is confirmed durable.
     kmbl_habitat_lifecycle_enabled: bool = Field(
-        default=False,
+        default=True,
         validation_alias=AliasChoices(
             "KMBL_HABITAT_LIFECYCLE_ENABLED",
             "kmbl_habitat_lifecycle_enabled",

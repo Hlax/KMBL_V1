@@ -155,6 +155,51 @@ async def _tick_identity_fetch(
         lambda: extract_identity_from_url(loop.identity_url, deep_crawl=True),
     )
 
+    # ── Playwright enrichment ──────────────────────────────────────────
+    # When the Playwright wrapper is configured, fetch the landing page (and
+    # optionally a few internal pages) via a real browser so JS-rendered
+    # portfolio content is captured.  Results are merged into the seed's
+    # crawl state below; the seed itself is not replaced (httpx-based
+    # extraction still provides the baseline).
+    pw_enriched_pages: list[dict[str, Any]] = []
+    pw_url = (settings.kmbl_playwright_wrapper_url or "").strip()
+    if pw_url and settings.kmbl_playwright_max_pages_per_loop > 0:
+        try:
+            from kmbl_orchestrator.browser.playwright_client import (
+                visit_page_via_wrapper,
+                wrapper_payload_to_fetch_parts,
+            )
+
+            pw_urls = [loop.identity_url]
+            # Also try internal pages the httpx crawl discovered.
+            # Cap total Playwright visits to max_pages (landing counts as 1).
+            max_extra = max(0, settings.kmbl_playwright_max_pages_per_loop - 1)
+            for extra in (seed.crawled_pages or [])[1: max_extra + 1]:
+                if extra not in pw_urls:
+                    pw_urls.append(extra)
+
+            for visit_url in pw_urls[: settings.kmbl_playwright_max_pages_per_loop]:
+                try:
+                    data = await asyncio.to_thread(
+                        lambda u=visit_url: visit_page_via_wrapper(
+                            {"url": u, "identity_id": str(loop.identity_id)},
+                            settings=settings,
+                        ),
+                    )
+                    ok, parts = wrapper_payload_to_fetch_parts(data)
+                    if ok:
+                        pw_enriched_pages.append({"url": visit_url, **parts})
+                except Exception as pw_exc:
+                    _log.debug(
+                        "Loop %s: Playwright fetch for %s failed (non-fatal): %s",
+                        loop.loop_id, visit_url, type(pw_exc).__name__,
+                    )
+        except Exception as pw_setup_exc:
+            _log.info(
+                "Loop %s: Playwright enrichment skipped: %s",
+                loop.loop_id, type(pw_setup_exc).__name__,
+            )
+
     if (
         settings.identity_minimum_confidence > 0
         and float(seed.confidence) < settings.identity_minimum_confidence
@@ -197,6 +242,25 @@ async def _tick_identity_fetch(
             summary=seed.to_profile_summary()[:_MAX_SUMMARY_LENGTH] if page_url == seed.source_url else "",
             tone_keywords=list(seed.tone_keywords or []),
             design_signals=list(seed.aesthetic_keywords or []),
+        )
+
+    # Record Playwright-enriched pages (JS-rendered content) into crawl state.
+    # These carry richer summaries, design signals, and tone keywords from the
+    # actual rendered DOM — complementing the httpx-only baseline.
+    from kmbl_orchestrator.identity.crawl_evidence import EvidenceTier
+
+    for pw_page in pw_enriched_pages:
+        record_page_visit(
+            repo,
+            loop.identity_id,
+            pw_page["url"],
+            summary=(pw_page.get("summary") or "")[:_MAX_SUMMARY_LENGTH],
+            tone_keywords=list(pw_page.get("tone_keywords") or []),
+            design_signals=list(pw_page.get("design_signals") or []),
+            discovered_links=list(pw_page.get("discovered_links") or []),
+            provenance_source="playwright_identity_fetch",
+            provenance_tier=EvidenceTier.VERIFIED_FETCH,
+            run_id=str(loop.loop_id),
         )
 
     # Build initial typed exploration directions from the identity brief.

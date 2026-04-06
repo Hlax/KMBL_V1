@@ -18,6 +18,7 @@ from kmbl_orchestrator.errors import StagingIntegrityFailed
 from kmbl_orchestrator.graph.state import GraphState
 from kmbl_orchestrator.identity.hydrate import upsert_identity_evolution_signal
 from kmbl_orchestrator.persistence.persistence_labels import staging_atomic_persistence_label
+from kmbl_orchestrator.runtime.habitat_lifecycle import register_materialization
 from kmbl_orchestrator.runtime.interrupt_checks import raise_if_interrupt_requested
 from kmbl_orchestrator.runtime.run_events import RunEventType, append_graph_run_event
 from kmbl_orchestrator.runtime.staging_snapshot_policy_v1 import (
@@ -262,6 +263,65 @@ def staging_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         working_staging=ws,
         staging_snapshot=snap,
     )
+
+    # --- Habitat lifecycle: register live_habitat materialization ---
+    # Working staging is persisted and can be rehydrated; register as active live surface.
+    try:
+        lh_manifest = register_materialization(
+            thread_id=tid,
+            local_path=f"working_staging/{tid}/{ws.working_staging_id}",
+            materialization_kind="live_habitat",
+            graph_run_id=gid,
+            source_revision=ws.revision,
+            revision_id=ws.working_staging_id,
+            can_rehydrate_from_persistence=True,
+        )
+        append_graph_run_event(
+            ctx.repo,
+            gid,
+            RunEventType.HABITAT_MATERIALIZED,
+            {
+                "manifest_id": str(lh_manifest.manifest_id),
+                "materialization_kind": "live_habitat",
+                "thread_id": str(tid),
+                "source_revision": ws.revision,
+            },
+            thread_id=tid,
+        )
+    except Exception as hlc_exc:
+        _log.warning(
+            "habitat_lifecycle live_habitat registration failed (non-fatal): %s",
+            type(hlc_exc).__name__,
+        )
+
+    # Register staging_preview when a snapshot is created.
+    if snap is not None:
+        try:
+            sp_manifest = register_materialization(
+                thread_id=tid,
+                local_path=f"staging_snapshot/{tid}/{ssid}",
+                materialization_kind="staging_preview",
+                graph_run_id=gid,
+                revision_id=ssid,
+                can_rehydrate_from_persistence=True,
+            )
+            append_graph_run_event(
+                ctx.repo,
+                gid,
+                RunEventType.HABITAT_MATERIALIZED,
+                {
+                    "manifest_id": str(sp_manifest.manifest_id),
+                    "materialization_kind": "staging_preview",
+                    "thread_id": str(tid),
+                    "staging_snapshot_id": str(ssid),
+                },
+                thread_id=tid,
+            )
+        except Exception as hlc_exc:
+            _log.warning(
+                "habitat_lifecycle staging_preview registration failed (non-fatal): %s",
+                type(hlc_exc).__name__,
+            )
 
     for cp in checkpoints_to_persist:
         append_graph_run_event(

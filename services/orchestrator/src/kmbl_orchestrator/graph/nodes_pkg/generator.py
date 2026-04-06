@@ -120,6 +120,11 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     feedback: Any = None
     if iteration > 0:
         feedback = state.get("evaluation_report")
+        # Truncate evaluator issues to avoid token bloat in generator retry context.
+        # Keep the top 5 most relevant issues (order preserved from evaluator priority).
+        if isinstance(feedback, dict) and isinstance(feedback.get("issues"), list):
+            if len(feedback["issues"]) > 5:
+                feedback = {**feedback, "issues": feedback["issues"][:5]}
 
     ws = get_working_staging_for_thread_resilient(
         ctx.repo,
@@ -922,6 +927,37 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         RunEventType.GENERATOR_INVOCATION_COMPLETED,
         {"build_candidate_id": str(cand.build_candidate_id)},
     )
+
+    # --- Habitat lifecycle: register candidate_preview materialization ---
+    try:
+        from kmbl_orchestrator.runtime.habitat_lifecycle import register_materialization
+
+        cp_manifest = register_materialization(
+            thread_id=tid,
+            local_path=f"candidate_preview/{tid}/{cand.build_candidate_id}",
+            materialization_kind="candidate_preview",
+            graph_run_id=gid,
+            revision_id=cand.build_candidate_id,
+            can_rehydrate_from_persistence=True,
+        )
+        append_graph_run_event(
+            ctx.repo,
+            gid,
+            RunEventType.HABITAT_MATERIALIZED,
+            {
+                "manifest_id": str(cp_manifest.manifest_id),
+                "materialization_kind": "candidate_preview",
+                "thread_id": str(tid),
+                "build_candidate_id": str(cand.build_candidate_id),
+            },
+            thread_id=tid,
+        )
+    except Exception as hlc_exc:
+        _log.warning(
+            "habitat_lifecycle candidate_preview registration failed (non-fatal): %s",
+            type(hlc_exc).__name__,
+        )
+
     return {
         "build_candidate": step_state["build_candidate"],
         "build_candidate_id": str(cand.build_candidate_id),

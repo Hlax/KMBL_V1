@@ -106,6 +106,13 @@ class RunEventType:
     PREVIEW_GROUNDING_FAILED = "preview_grounding_failed"
     CANDIDATE_PREVIEW_UNREACHABLE_PRIVATE_HOST = "candidate_preview_unreachable_due_to_private_host"
 
+    # Habitat materialization lifecycle (local workspace as evictable cache layer)
+    HABITAT_MATERIALIZED = "habitat_materialized"
+    HABITAT_REHYDRATED = "habitat_rehydrated"
+    HABITAT_EVICTED = "habitat_evicted"
+    HABITAT_EVICTION_SKIPPED_NOT_DURABLE = "habitat_eviction_skipped_not_durable"
+    HABITAT_EVICTION_SKIPPED_ACTIVE_THREAD = "habitat_eviction_skipped_active_thread"
+
 
 def append_graph_run_event(
     repo: Repository,

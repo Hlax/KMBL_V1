@@ -525,3 +525,81 @@ class CrawlStateRecord(BaseModel):
     )
     created_at: str = Field(default_factory=_utc_now_iso)
     updated_at: str = Field(default_factory=_utc_now_iso)
+
+
+# ---------------------------------------------------------------------------
+# Habitat lifecycle — local workspace materialization model
+# ---------------------------------------------------------------------------
+
+MaterializationKind: TypeAlias = Literal[
+    "live_habitat",
+    "candidate_preview",
+    "staging_preview",
+]
+
+MaterializationStatus: TypeAlias = Literal[
+    "active",       # currently in use / warm
+    "superseded",   # a newer materialization replaced this one for the same thread
+    "evicted",      # local folder deleted; rehydrate from persistence when needed
+    "pending",      # registered but not yet written to disk
+]
+
+PreviewServingMode: TypeAlias = Literal[
+    "persisted",    # served directly from DB/object-storage projection
+    "local_cache",  # served from a local materialized workspace folder
+    "degraded",     # neither source available; caller must surface an error/placeholder
+]
+
+
+class LocalHabitatManifest(BaseModel):
+    """
+    Registry entry for a local workspace materialization.
+
+    Local workspace folders are an **evictable cache layer** — the persisted
+    orchestrator state (WorkingStagingRecord, BuildCandidateRecord, etc.) is the
+    durable source of truth and is always sufficient to rehydrate.
+
+    Boundary:
+    - DB/persistence: manifests, summaries, metadata, artifact_refs — canonical
+    - Object storage: heavier/binary assets when applicable — canonical
+    - Local disk (this manifest's ``local_path``): runtime cache only, rebuildable
+    """
+
+    manifest_id: UUID
+    thread_id: UUID
+    graph_run_id: UUID | None = None
+
+    materialization_kind: MaterializationKind
+    local_path: str  # absolute path on local disk; may no longer exist after eviction
+
+    # Provenance linking back to the persisted source of truth
+    source_revision: int | None = Field(
+        default=None,
+        description="WorkingStagingRecord.revision this materialization was built from.",
+    )
+    revision_id: UUID | None = Field(
+        default=None,
+        description="Exact source record ID (build_candidate_id or working_staging_id).",
+    )
+    checksum: str | None = Field(
+        default=None,
+        description="Optional content digest (e.g. sha256 of primary artifact) for drift detection.",
+    )
+    entrypoint: str | None = Field(
+        default=None,
+        description="Relative path of the HTML entrypoint within local_path, e.g. 'component/preview/index.html'.",
+    )
+
+    # Rehydration capability
+    can_rehydrate_from_persistence: bool = Field(
+        default=False,
+        description=(
+            "True when the persisted state (WorkingStagingRecord / BuildCandidateRecord) "
+            "is complete enough to reconstruct this materialization without the local folder."
+        ),
+    )
+
+    materialization_status: MaterializationStatus = "pending"
+
+    created_at: str = Field(default_factory=_utc_now_iso)
+    last_accessed_at: str = Field(default_factory=_utc_now_iso)

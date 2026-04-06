@@ -249,6 +249,37 @@ class Settings(BaseSettings):
         ),
     )
 
+    # Habitat lifecycle — local workspace as evictable cache layer.
+    # When enabled, the lifecycle manager enforces at-most-one active live_habitat per thread
+    # and evicts superseded materializations when persistence is confirmed durable.
+    kmbl_habitat_lifecycle_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "KMBL_HABITAT_LIFECYCLE_ENABLED",
+            "kmbl_habitat_lifecycle_enabled",
+        ),
+    )
+    # Max number of live_habitat materializations to keep warm per thread before eviction.
+    kmbl_habitat_max_active_live_per_thread: int = Field(
+        default=1,
+        ge=1,
+        le=10,
+        validation_alias=AliasChoices(
+            "KMBL_HABITAT_MAX_ACTIVE_LIVE_PER_THREAD",
+            "kmbl_habitat_max_active_live_per_thread",
+        ),
+    )
+    # TTL in days: superseded local materializations older than this are eligible for eviction.
+    kmbl_habitat_eviction_ttl_days: float = Field(
+        default=7.0,
+        ge=0.5,
+        le=3650.0,
+        validation_alias=AliasChoices(
+            "KMBL_HABITAT_EVICTION_TTL_DAYS",
+            "kmbl_habitat_eviction_ttl_days",
+        ),
+    )
+
     # Local OpenClaw gateway (OpenAI-compatible). KILOCLAW_* env names remain accepted aliases.
     openclaw_base_url: str = Field(
         default="http://127.0.0.1:18789",

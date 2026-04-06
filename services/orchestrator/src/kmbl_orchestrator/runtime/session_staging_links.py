@@ -342,19 +342,21 @@ def resolve_canonical_demo_preview(
     cand_path = f"/orchestrator/runs/{graph_run_id}/candidate-preview"
     stage_path = f"/orchestrator/runs/{graph_run_id}/staging-preview"
 
+    coherence = _materialization_coherence(thread_id, graph_run_id)
+
     canonical_url: str | None = None
     canonical_source = "none"
     fallback = False
 
     if base:
-        canonical_url = f"{base}{cand_path}"
-        canonical_source = f"candidate_preview_via_{base_source}"
-    elif base:
-        canonical_url = f"{base}{stage_path}"
-        canonical_source = f"staging_preview_via_{base_source}"
-        fallback = True
-
-    coherence = _materialization_coherence(thread_id, graph_run_id)
+        # Prefer candidate preview; fall back to staging if candidate is not materialized
+        if coherence.get("candidate_preview_materialized", True):
+            canonical_url = f"{base}{cand_path}"
+            canonical_source = f"candidate_preview_via_{base_source}"
+        else:
+            canonical_url = f"{base}{stage_path}"
+            canonical_source = f"staging_preview_via_{base_source}"
+            fallback = True
 
     return {
         "canonical_preview_url": canonical_url,

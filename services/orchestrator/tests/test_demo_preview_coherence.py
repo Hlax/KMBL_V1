@@ -14,7 +14,7 @@ Covers:
 
 from __future__ import annotations
 
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -49,17 +49,39 @@ class TestEvaluatorPreviewCoherence:
     def test_both_resolve_to_candidate_preview_with_configured_base(self) -> None:
         s = Settings(orchestrator_public_base_url="https://demo.example.com")
         gid = str(uuid4())
-        tid = str(uuid4())
+        tid = uuid4()
+
+        # Register a candidate_preview so canonical resolves to candidate (not staging fallback)
+        register_materialization(
+            thread_id=tid,
+            local_path=f"/tmp/cp/{tid}",
+            materialization_kind="candidate_preview",
+            graph_run_id=UUID(gid),
+            can_rehydrate_from_persistence=True,
+        )
 
         ev_res = resolve_evaluator_preview_resolution(
-            s, graph_run_id=gid, thread_id=tid, build_candidate={}
+            s, graph_run_id=gid, thread_id=str(tid), build_candidate={}
         )
-        canon = resolve_canonical_demo_preview(s, graph_run_id=gid, thread_id=tid)
+        canon = resolve_canonical_demo_preview(s, graph_run_id=gid, thread_id=str(tid))
 
         # Both must resolve to the same candidate-preview URL
         expected_candidate = f"https://demo.example.com/orchestrator/runs/{gid}/candidate-preview"
         assert ev_res["preview_url"] == expected_candidate
         assert canon["canonical_preview_url"] == expected_candidate
+        assert canon["canonical_preview_fallback"] is False
+
+    def test_canonical_falls_back_to_staging_without_candidate(self) -> None:
+        """When no candidate_preview is materialized, canonical falls back to staging."""
+        s = Settings(orchestrator_public_base_url="https://demo.example.com")
+        gid = str(uuid4())
+        tid = str(uuid4())
+
+        canon = resolve_canonical_demo_preview(s, graph_run_id=gid, thread_id=tid)
+        expected_staging = f"https://demo.example.com/orchestrator/runs/{gid}/staging-preview"
+        assert canon["canonical_preview_url"] == expected_staging
+        assert canon["canonical_preview_fallback"] is True
+        assert "staging_preview" in canon["canonical_preview_source"]
 
     def test_both_resolve_with_derived_local_base(self) -> None:
         s = Settings(
@@ -75,11 +97,13 @@ class TestEvaluatorPreviewCoherence:
         )
         canon = resolve_canonical_demo_preview(s, graph_run_id=gid, thread_id=tid)
 
-        expected = f"http://127.0.0.1:9090/orchestrator/runs/{gid}/candidate-preview"
-        # Canonical preview resolves; evaluator browser URL is blocked (localhost not
-        # browser-reachable), but operator_preview_url still points at the same surface.
-        assert canon["canonical_preview_url"] == expected
-        assert ev_res["operator_preview_url"] == expected
+        # Without candidate registered, canonical falls back to staging
+        expected_staging = f"http://127.0.0.1:9090/orchestrator/runs/{gid}/staging-preview"
+        assert canon["canonical_preview_url"] == expected_staging
+        assert canon["canonical_preview_fallback"] is True
+        # Evaluator operator URL uses candidate path (always tries candidate first)
+        expected_candidate = f"http://127.0.0.1:9090/orchestrator/runs/{gid}/candidate-preview"
+        assert ev_res["operator_preview_url"] == expected_candidate
         # Browser preview_url is None because localhost is not browser-reachable by default
         assert ev_res["preview_url"] is None
         assert ev_res["preview_grounding_mode"] == "operator_local_only"
@@ -314,15 +338,35 @@ class TestMaterializationCoherence:
 class TestCanonicalDemoPreviewDiagnostics:
     """resolve_canonical_demo_preview must provide explicit fallback info."""
 
-    def test_canonical_preview_no_fallback_with_base(self) -> None:
+    def test_canonical_preview_no_fallback_with_base_and_candidate(self) -> None:
+        s = Settings(orchestrator_public_base_url="https://demo.example.com")
+        gid = str(uuid4())
+        tid = uuid4()
+
+        # Register candidate so canonical resolves without fallback
+        register_materialization(
+            thread_id=tid,
+            local_path=f"/tmp/cp/{tid}",
+            materialization_kind="candidate_preview",
+            graph_run_id=UUID(gid),
+            can_rehydrate_from_persistence=True,
+        )
+
+        result = resolve_canonical_demo_preview(s, graph_run_id=gid, thread_id=str(tid))
+        assert result["canonical_preview_url"] is not None
+        assert result["canonical_preview_fallback"] is False
+        assert "candidate_preview" in result["canonical_preview_source"]
+
+    def test_canonical_preview_fallback_without_candidate(self) -> None:
+        """Without candidate materialization, canonical uses staging and marks fallback."""
         s = Settings(orchestrator_public_base_url="https://demo.example.com")
         gid = str(uuid4())
         tid = str(uuid4())
 
         result = resolve_canonical_demo_preview(s, graph_run_id=gid, thread_id=tid)
         assert result["canonical_preview_url"] is not None
-        assert result["canonical_preview_fallback"] is False
-        assert "candidate_preview" in result["canonical_preview_source"]
+        assert result["canonical_preview_fallback"] is True
+        assert "staging_preview" in result["canonical_preview_source"]
 
     def test_canonical_preview_none_without_base(self) -> None:
         s = Settings(

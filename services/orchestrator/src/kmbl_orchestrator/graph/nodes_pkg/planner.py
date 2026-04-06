@@ -33,10 +33,16 @@ from kmbl_orchestrator.runtime.static_vertical_invariants import (
     clamp_experience_mode_for_static_vertical,
 )
 from kmbl_orchestrator.runtime.interrupt_checks import raise_if_interrupt_requested
+from kmbl_orchestrator.runtime.reference_library import build_planner_reference_payload
 from kmbl_orchestrator.runtime.habitat_strategy import (
     build_spec_with_effective_habitat,
     effective_habitat_strategy_for_iteration,
 )
+from kmbl_orchestrator.runtime.payload_budget_governor_v1 import (
+    apply_payload_budget_governor_v1,
+    merge_governor_report_into_telemetry,
+)
+from kmbl_orchestrator.runtime.payload_telemetry_v1 import build_payload_telemetry_v1
 from kmbl_orchestrator.runtime.run_events import RunEventType, append_graph_run_event
 from kmbl_orchestrator.runtime.working_staging_read import (
     get_working_staging_for_thread_resilient,
@@ -176,10 +182,19 @@ def planner_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         # Tells the planner what URLs have been visited, what's next, whether crawl is exhausted.
         "crawl_context": crawl_context,
     }
+    payload.update(
+        build_planner_reference_payload(
+            structured_identity=state.get("structured_identity")
+            if isinstance(state.get("structured_identity"), dict)
+            else None,
+            crawl_context=crawl_context if isinstance(crawl_context, dict) else None,
+            graph_run_id=str(gid),
+        )
+    )
     if iteration_idx > 0:
         ev = state.get("evaluation_report") if isinstance(state.get("evaluation_report"), dict) else {}
         bs = state.get("build_spec") if isinstance(state.get("build_spec"), dict) else {}
-        payload["replan_context"] = {
+        rctx: dict[str, Any] = {
             "replan": True,
             "iteration_index": iteration_idx,
             "prior_build_spec_id": state.get("build_spec_id"),
@@ -191,6 +206,20 @@ def planner_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             "retry_context": state.get("retry_context"),
             "prior_build_spec": bs,
         }
+        pv2 = state.get("last_build_candidate_summary_v2")
+        pv1 = state.get("last_build_candidate_summary_v1")
+        if isinstance(pv2, dict):
+            rctx["prior_build_candidate_summary_v2"] = pv2
+        if isinstance(pv1, dict):
+            rctx["prior_build_candidate_summary_v1"] = pv1
+        payload["replan_context"] = rctx
+    payload, gov_rep_pl = apply_payload_budget_governor_v1("planner", payload)
+    tel_pl = build_payload_telemetry_v1(
+        "planner",
+        payload,
+        payload_budget_notes="replan" if iteration_idx > 0 else None,
+    )
+    tel_pl = merge_governor_report_into_telemetry(tel_pl, gov_rep_pl)
     t_pl = time.perf_counter()
     try:
         inv, raw = ctx.invoker.invoke(
@@ -200,6 +229,7 @@ def planner_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             provider_config_key=ctx.settings.openclaw_planner_config_key,
             input_payload=payload,
             iteration_index=state.get("iteration_index", 0),
+            routing_metadata={"kmbl_payload_telemetry_v1": tel_pl},
         )
     except KiloclawRoleInvocationForbiddenError as e:
         raise RoleInvocationFailed(

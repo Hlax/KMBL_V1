@@ -8,6 +8,11 @@ import re
 from typing import Any
 
 from kmbl_orchestrator.domain import EvaluationReportRecord
+from kmbl_orchestrator.runtime.generator_library_policy import (
+    PRIMARY_LANE_DEFAULT_LIBRARIES,
+    build_generator_library_policy_payload,
+)
+from kmbl_orchestrator.runtime.static_vertical_invariants import is_interactive_frontend_vertical
 
 _log = logging.getLogger(__name__)
 
@@ -105,7 +110,7 @@ def summarize_execution_contract_for_generator(build_spec: dict[str, Any]) -> di
     n_lit = len(lsc) if isinstance(lsc, list) else 0
     cb = build_spec.get("creative_brief")
     cb_d = cb if isinstance(cb, dict) else {}
-    return {
+    out: dict[str, Any] = {
         "lane": ec.get("lane"),
         "surface_type": ec.get("surface_type"),
         "layout_mode": ec.get("layout_mode"),
@@ -129,6 +134,11 @@ def summarize_execution_contract_for_generator(build_spec: dict[str, Any]) -> di
             else 0
         ),
     }
+    if is_interactive_frontend_vertical(build_spec, {}):
+        out["primary_lane_default_libraries"] = list(PRIMARY_LANE_DEFAULT_LIBRARIES)
+        out["generator_library_policy"] = build_generator_library_policy_payload(ec, build_spec)
+        out["escalation_lane"] = ec.get("escalation_lane")
+    return out
 
 
 def apply_cool_generation_lane_presets(

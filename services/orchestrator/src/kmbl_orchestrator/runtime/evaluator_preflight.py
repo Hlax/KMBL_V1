@@ -21,6 +21,16 @@ def should_skip_evaluator_llm(
     if not is_preview_assembly_vertical(build_spec, event_input):
         return False, ""
 
+    summ = build_candidate.get("kmbl_build_candidate_summary_v2")
+    if not isinstance(summ, dict):
+        summ = build_candidate.get("kmbl_build_candidate_summary_v1")
+    if isinstance(summ, dict):
+        eps = summ.get("entrypoints")
+        if isinstance(eps, list):
+            for p in eps:
+                if isinstance(p, str) and p.lower().endswith((".html", ".htm")):
+                    return False, ""
+
     ao = build_candidate.get("artifact_outputs")
     if isinstance(ao, list) and ao:
         if _static_bundle_has_html(ao):

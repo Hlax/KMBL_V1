@@ -70,6 +70,14 @@ def _infer_language(path: str) -> str:
         return "glsl"
     if lower.endswith(".wgsl"):
         return "wgsl"
+    if lower.endswith(".vert"):
+        return "vert"
+    if lower.endswith(".frag"):
+        return "frag"
+    if lower.endswith(".splat"):
+        return "splat"
+    if lower.endswith(".ply"):
+        return "ply"
     raise WorkspaceIngestError(f"unsupported file extension for ingest: {path}")
 
 

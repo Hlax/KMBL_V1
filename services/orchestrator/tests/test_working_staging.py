@@ -243,6 +243,24 @@ class TestRebuildMode:
         assert result.payload_json.get("version") == 1
         assert result.status == "review_ready"
 
+    def test_partial_does_not_promote_draft_to_review_ready(self) -> None:
+        ws = _make_working_staging(revision=0)
+        bc = _make_build_candidate(
+            thread_id=ws.thread_id,
+            artifact_refs=[_html_artifact()],
+        )
+        ev = _make_eval_report(status="partial")
+
+        result = apply_generator_to_working_staging(
+            working_staging=ws,
+            build_candidate=bc,
+            evaluation_report=ev,
+            build_spec=None,
+            mode="rebuild",
+        )
+
+        assert result.status == "draft"
+
     def test_rebuild_replaces_payload_entirely(self):
         old_payload = {
             "version": 1,

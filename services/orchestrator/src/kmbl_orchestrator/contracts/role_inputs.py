@@ -103,6 +103,32 @@ class PlannerRoleInput(BaseModel):
             "This enables tier-2 evidence (selected_by_planner) for auditable crawl progression."
         ),
     )
+    kmbl_implementation_reference_cards: list[dict[str, Any]] | None = Field(
+        default=None,
+        description=(
+            "Curated compact reference cards (official docs/examples) for planning — capped slice; "
+            "see kmbl_reference_selection_meta."
+        ),
+    )
+    kmbl_inspiration_reference_cards: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Design/taste reference cards — capped; not raw site content.",
+    )
+    kmbl_planner_observed_reference_cards: list[dict[str, Any]] | None = Field(
+        default=None,
+        description=(
+            "Distilled cards from crawl/Playwright summaries (URLs + short notes) — ephemeral per crawl state; "
+            "inline for this invocation only."
+        ),
+    )
+    kmbl_reference_selection_meta: dict[str, Any] | None = Field(
+        default=None,
+        description="Counts, lane hints, library version — machine-usable selection audit.",
+    )
+    kmbl_reference_library_version: int | None = Field(
+        default=None,
+        description="Bundled curated reference_library JSON version.",
+    )
 
 
 class GeneratorRoleInput(BaseModel):
@@ -194,6 +220,20 @@ class GeneratorRoleInput(BaseModel):
             "Generator should write only under recommended_write_path when emitting workspace_manifest_v1."
         ),
     )
+    kmbl_prior_build_candidate_summary_v1: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "When iteration_index > 0: orchestrator ``build_candidate_summary_v1`` from the prior "
+            "generator step — compact file inventory and heuristics; not a substitute for build_spec."
+        ),
+    )
+    kmbl_prior_build_candidate_summary_v2: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "When iteration_index > 0: orchestrator ``build_candidate_summary_v2`` (artifact inspection) "
+            "from the prior step — preferred over v1 for artifact-first retry context."
+        ),
+    )
     kmbl_habitat_runtime: KmblHabitatRuntimeInput | None = Field(
         default=None,
         description=(
@@ -205,9 +245,44 @@ class GeneratorRoleInput(BaseModel):
         default=None,
         description=(
             "When ``build_spec.type`` / constraints select ``interactive_frontend_app_v1``: orchestrator "
-            "hints for preview-safe bundles (strengths, avoid patterns, fairness notes). Omitted for "
-            "other verticals."
+            "hints for preview-safe bundles (strengths, avoid patterns, fairness notes), plus "
+            "``generator_library_policy`` (default Three.js+GSAP lane, escalation rules, shader extensions). "
+            "Omitted for other verticals."
         ),
+    )
+    kmbl_reference_patterns: list[dict[str, Any]] | None = Field(
+        default=None,
+        description=(
+            "Interactive lane only: 1–3 compact pattern entries (lane-specific); duplicate of "
+            "``kmbl_interactive_lane_context.reference_patterns`` for top-level visibility."
+        ),
+    )
+    kmbl_library_compliance_hints: list[dict[str, Any]] | None = Field(
+        default=None,
+        description=(
+            "Interactive lane only: soft policy signals (e.g. splat library without escalation_lane); "
+            "not hard failures."
+        ),
+    )
+    kmbl_implementation_reference_cards: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Interactive lane: capped curated implementation URLs/notes (generator mirror).",
+    )
+    kmbl_inspiration_reference_cards: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Interactive lane: capped taste/design reference cards.",
+    )
+    kmbl_planner_observed_reference_cards: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Interactive lane: crawl-distilled observed cards (same as generator when aligned).",
+    )
+    kmbl_reference_selection_meta: dict[str, Any] | None = Field(
+        default=None,
+        description="Interactive lane: selection meta for reference slices.",
+    )
+    kmbl_reference_library_version: int | None = Field(
+        default=None,
+        description="Bundled curated reference_library JSON version.",
     )
 
 
@@ -223,6 +298,24 @@ class EvaluatorRoleInput(BaseModel):
         ),
     )
     build_candidate: dict[str, Any] = Field(default_factory=dict)
+    kmbl_build_candidate_summary_v1: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Echo of ``build_candidate.kmbl_build_candidate_summary_v1`` for top-level visibility: "
+            "deterministic orchestrator summary of the bundle (no full file bodies)."
+        ),
+    )
+    kmbl_build_candidate_summary_v2: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Orchestrator artifact-inspection v2 summary (canonical). Prefer this over v1 for "
+            "preview-first evaluation; full bodies remain in persistence and deterministic gates."
+        ),
+    )
+    kmbl_evaluator_artifact_snippets_v1: dict[str, Any] | None = Field(
+        default=None,
+        description="Bounded snippet extract for model context when full artifacts are omitted from payload.",
+    )
     success_criteria: list[Any] = Field(default_factory=list)
     evaluation_targets: list[Any] = Field(default_factory=list)
     iteration_hint: int = 0
@@ -282,6 +375,34 @@ class EvaluatorRoleInput(BaseModel):
             "``kmbl_interactive_lane_context`` so evaluation matches lane capabilities (bounded "
             "interactivity vs full product/WebGL shell)."
         ),
+    )
+    kmbl_reference_patterns: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Interactive lane: pattern entries aligned with generator payload.",
+    )
+    kmbl_library_compliance_hints: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Interactive lane: soft policy signals for evaluation awareness.",
+    )
+    kmbl_implementation_reference_cards: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Interactive lane: implementation reference cards aligned with generator payload.",
+    )
+    kmbl_inspiration_reference_cards: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Interactive lane: taste/design reference cards.",
+    )
+    kmbl_planner_observed_reference_cards: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Interactive lane: crawl-distilled observed reference cards.",
+    )
+    kmbl_reference_selection_meta: dict[str, Any] | None = Field(
+        default=None,
+        description="Interactive lane: reference selection audit/meta.",
+    )
+    kmbl_reference_library_version: int | None = Field(
+        default=None,
+        description="Bundled curated reference_library JSON version.",
     )
 
 

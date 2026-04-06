@@ -309,8 +309,11 @@ def apply_generator_to_working_staging(
     after_refs = _extract_artifact_refs(working_staging.payload_json)
     after_has_html = _payload_has_previewable_html(working_staging.payload_json)
 
+    # Partial/fail iterations update draft habitat for engineering; only **pass** promotes
+    # operator-facing review_ready (artifact-first: avoid treating partials as "ready for review").
     if after_has_html and working_staging.status == "draft":
-        working_staging.status = "review_ready"
+        if evaluation_report.status == "pass":
+            working_staging.status = "review_ready"
 
     new_stagnation = compute_stagnation_count(
         current_issue_count=len(evaluation_report.issues_json),

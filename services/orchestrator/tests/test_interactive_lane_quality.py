@@ -23,6 +23,8 @@ def test_build_interactive_lane_context_keys() -> None:
     )
     assert ctx["lane"] == "interactive_frontend_app_v1"
     assert ctx["heavy_webgl_product_mode_requested"] is True
+    assert "generator_library_policy" in ctx
+    assert ctx["generator_library_policy"].get("heavy_webgpu_wgsl_ambition_experience_mode") is True
     assert "preview_pipeline" in ctx
     assert "evaluator_fairness" in ctx
     assert "filter_panel" in str(ctx["execution_contract_signals"]["required_interactions_preview"])
@@ -98,6 +100,7 @@ def test_normalize_interactive_build_spec_inplace() -> None:
     assert meta.interaction_intent_weak is True
     assert bs["execution_contract"]["interactive_runtime_tier"] == "bounded_preview"
     assert "lane_escalation_hint" in bs["execution_contract"]
+    assert bs["execution_contract"]["allowed_libraries"] == ["three", "gsap"]
     assert meta.fields_missing_before.get("required_interactions") is True
 
 

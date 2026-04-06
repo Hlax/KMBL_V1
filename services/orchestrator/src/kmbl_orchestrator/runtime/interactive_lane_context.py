@@ -10,6 +10,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from kmbl_orchestrator.runtime.generator_library_policy import (
+    build_generator_library_policy_payload,
+)
+from kmbl_orchestrator.runtime.reference_patterns import (
+    build_library_compliance_hints,
+    select_reference_patterns,
+)
 from kmbl_orchestrator.runtime.static_vertical_invariants import WEBGL_EXPERIENCE_MODES
 
 
@@ -48,13 +55,23 @@ def build_interactive_lane_context(
                 "(hints, then DOM script order, then remaining paths). Cross-file ``import`` graphs "
                 "between local JS artifacts are not bundled."
             ),
+            "splat_and_cdn_note": (
+                "``.splat`` / ``.ply`` ship as same-bundle artifacts (served via orchestrator file routes). "
+                "If runtime loads Three/GSAP/splat helpers from a CDN, static-preview CSP allows "
+                "``connect-src`` to unpkg + jsDelivr for fetch — prefer same-bundle when possible."
+            ),
         },
         "strengths": [
             "One coherent interactive surface: state, controls, and feedback loops in plain JS or "
             "one module entry + CDN libraries.",
+            "Default library lane: **Three.js + GSAP** (see ``generator_library_policy``) unless the plan "
+            "escalates — keep stacks lightweight and local-preview-friendly.",
             "Multi-file bundles when HTML wires scripts explicitly; CSS for layout/motion; JS for behavior.",
             "Bounded motion: CSS transitions/keyframes, requestAnimationFrame, modest canvas or "
             "Three.js from CDN when the plan calls for it.",
+            "Shader assets: ``.glsl`` / ``.vert`` / ``.frag`` / ``.wgsl`` are valid when they improve visuals.",
+            "Gaussian splats (captured 3D): specialist lane only — see ``generator_library_policy.gaussian_splat_lane`` "
+            "and ``reference_patterns``; not a default for generic marketing sites.",
             "Optional ``kmbl_preview_assembly_hints_v1.js_path_order`` in working_state_patch when "
             "load order must be explicit.",
         ],
@@ -62,6 +79,10 @@ def build_interactive_lane_context(
             "Local ES module graphs (``import … from './sibling.js'`` across multiple generated files) "
             "— preview will not resolve those edges.",
             "npm/vite/webpack project shapes that expect a bundler — this lane is not a build system.",
+            "Defaulting to React Three Fiber, Babylon.js, A-Frame, PlayCanvas, Spline/Needle — not default KMBL lanes.",
+            "Using PixiJS as the default 3D path — reserve for clearly 2D-first briefs.",
+            "WGSL/WebGPU stacks unless ``generator_library_policy`` / experience_mode signals heavy GPU ambition.",
+            "Gaussian splat viewers for ordinary hero text or abstract motion — use default Three+GSAP instead.",
             "Treating the lane as a full game engine or immersive product shell; keep scope to one "
             "previewable experience.",
             "Placeholder interactivity (one noop click) when the plan asked for meaningful interaction.",
@@ -74,18 +95,29 @@ def build_interactive_lane_context(
         "interactivity_tiers": {
             "fits_this_lane": [
                 "micro-apps, panels, filters, toggles, draggable-lite, canvas demos, "
-                "scroll/cursor-driven reveals, small Three.js scenes via CDN",
+                "scroll/cursor-driven reveals, small Three.js + GSAP scenes via CDN (default interactive lane)",
+            ],
+            "escalation_lanes": [
+                "WebGPU/WGSL (Three path): only when heavy GPU ambition is justified — see policy + experience_mode.",
+                "OGL / TWGL / regl: shader-first minimal rendering only — not the default 3D lane.",
+                "PixiJS: 2D canvas / motion graphics — not the default 3D lane.",
+                "Gaussian splat (gaussian-splats-3d + Three): photoreal captured/scanned scenes only — "
+                "set execution_contract.escalation_lane to gaussian_splat_v1 and justify in build spec.",
             ],
             "escalate_future_lane": [
                 "multi-route SPA with deep client routing",
                 "large WebGL product modes that need asset pipelines, not a single preview bundle",
-                "physics-heavy or shader-heavy experiences that need a dedicated app lane",
+                "physics-heavy experiences that need a dedicated app lane beyond bounded preview",
             ],
         },
+        "generator_library_policy": build_generator_library_policy_payload(ec, build_spec),
+        "reference_patterns": select_reference_patterns(ec, build_spec),
+        "library_compliance_hints": build_library_compliance_hints(ec, build_spec),
         "execution_contract_signals": {
             "surface_type": ec.get("surface_type"),
             "layout_mode": ec.get("layout_mode"),
             "allowed_libraries": ec.get("allowed_libraries"),
+            "escalation_lane": ec.get("escalation_lane"),
             "required_interactions_preview": interaction_hints[:8],
         },
         "evaluator_fairness": [

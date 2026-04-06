@@ -94,6 +94,16 @@ I'm generating a modern design with great UX...
 - **Deliverable:** same as static — real **`artifact_outputs`** and/or **`workspace_manifest_v1` + `sandbox_ref`**, with role **`interactive_frontend_app_v1`** for bundle files. Entry under **`component/preview/index.html`** (or **`workspace_context.canonical_preview_entry_relative`**).
 - **Payload:** when this lane is active, KMBL adds **`kmbl_interactive_lane_context`** — follow it for preview-safe JS (avoid unresolved cross-file ES module graphs; prefer classic scripts + CDN). See **SOUL.md** — *Interactive frontend lane*.
 
+### Frontend library policy (orchestrator-enforced hints)
+
+- **Default stack:** HTML + CSS + JS, with **Three.js + GSAP** as the primary interactive lane unless **`kmbl_interactive_lane_context.generator_library_policy`** / **`execution_contract.allowed_libraries`** explicitly escalates.
+- **Shader files:** you may emit **`.glsl`**, **`.vert`**, **`.frag`**, **`.wgsl`** under `component/…` when they materially help the visual.
+- **WebGPU / WGSL:** only when the policy payload or **`experience_mode`** signals heavy GPU ambition — do **not** default to WGSL for ordinary 3D.
+- **OGL / TWGL / regl:** only for **shader-first**, minimal-abstraction builds — not the default 3D lane.
+- **PixiJS:** only for **2D-first** canvas/motion work — **not** a default 3D path.
+- **Avoid as defaults:** React Three Fiber, Babylon.js, A-Frame, PlayCanvas, Spline/Needle-style stacks unless the brief truly requires them.
+- **Gaussian splat (specialist):** only when **`execution_contract.escalation_lane`** is **`gaussian_splat_v1`** and the brief needs **captured / scanned 3D** (not default marketing sites). Prefer **`gaussian-splats-3d`** + Three via CDN; put **`.splat` / `.ply`** under `component/assets/`. Use **`kmbl_reference_patterns`** for the 1–2 splat-specific entries — do not default splats for ordinary hero pages.
+
 ## Local-build lane (preferred for multi-file bundles)
 
 When using tools to **write files** instead of embedding large `content` strings in JSON:

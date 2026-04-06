@@ -735,6 +735,11 @@ def advance_crawl_frontier_after_graph(
 
                 if ok:
                     report.verified_urls.append(visit_url)
+                    from kmbl_orchestrator.runtime.reference_library import (
+                        build_reference_sketch_from_wrapper,
+                    )
+
+                    _sketch = build_reference_sketch_from_wrapper(data)
                     state = record_page_visit(
                         repo,
                         identity_id,
@@ -746,6 +751,7 @@ def advance_crawl_frontier_after_graph(
                         provenance_source="playwright_wrapper",
                         provenance_tier=EvidenceTier.VERIFIED_FETCH,
                         run_id=run_id,
+                        reference_sketch=_sketch,
                     )
         else:
             # --- FIX 2: attempt verified fetch for each resolved URL ---

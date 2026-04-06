@@ -395,6 +395,33 @@ class Settings(BaseSettings):
             "staging_snapshot_policy",
         ),
     )
+    # Under staging_snapshot_policy=always, partial evaluations skip persisting a review snapshot by
+    # default so operator review stays focused on complete builds; set True to restore legacy dense rows.
+    kmbl_staging_snapshot_always_include_partial: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "KMBL_STAGING_SNAPSHOT_ALWAYS_INCLUDE_PARTIAL",
+            "kmbl_staging_snapshot_always_include_partial",
+        ),
+    )
+    # Force kmbl_evaluator_artifact_snippets_v1 into evaluator LLM payloads (debug / regression harness).
+    kmbl_evaluator_force_snippets: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "KMBL_EVALUATOR_FORCE_SNIPPETS",
+            "kmbl_evaluator_force_snippets",
+        ),
+    )
+    # Persist full generator model output on role_invocation.output_payload_json (inline bodies).
+    # Default False: compact on first durable save and post-normalization save. Enable only for deep
+    # debugging — larger DB/backup surface and may retain sensitive strings in the invocation table.
+    kmbl_persist_raw_generator_output_for_debug: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "KMBL_PERSIST_RAW_GENERATOR_OUTPUT_FOR_DEBUG",
+            "kmbl_persist_raw_generator_output_for_debug",
+        ),
+    )
     # deployment: development | test | production — production defaults stub transport off unless overridden
     kmbl_env: Literal["development", "test", "production"] = Field(
         default="development",

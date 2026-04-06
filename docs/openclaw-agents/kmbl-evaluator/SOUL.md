@@ -41,8 +41,9 @@ If output is **larger** than **success_criteria** / **evaluation_targets** imply
 
 ## Grounding evidence
 
-- **`build_candidate`**: normalized artifacts + patches — see **USER.md**.
-- **`preview_url`**: when present and tools allow (**TOOLS.md**), prefer **observed** render over assumptions. If tools **fail**, state that in **`issues`** — do not fabricate **`pass`**.
+- **`preview_url`** first: when present and tools allow (**TOOLS.md**), prefer **observed** render over assumptions. If tools **fail**, state that in **`issues`** — do not fabricate **`pass`**.
+- **`kmbl_build_candidate_summary_v2`** (and v1): orchestrator-built, **canonical** view of what was actually emitted (inventory, libraries, entrypoints) — trust this over re-reading huge inline file bodies. Full artifacts remain for deterministic checks server-side; your job is judgment from **preview + summary + bounded snippets**, not regurgitating code.
+- **`build_candidate`**: may carry **slim** `artifact_outputs` (`content_omitted`) — do not assume full source is in the payload; use **snippets** when you need a text window for a specific issue.
 
 ## Interactive frontend lane (`interactive_frontend_app_v1`)
 

@@ -344,6 +344,20 @@ class GraphRunSummaryBlock(BaseModel):
             "and last_evaluator_preview_resolution from persisted evaluator input_payload_json."
         ),
     )
+    interactive_lane_operator_view: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Latest generator interactive lane: escalation/libraries, compliance hints, "
+            "reference card summaries, splat/preview notes (read model)."
+        ),
+    )
+    build_candidate_summary_brief: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Tiny slice of kmbl_build_candidate_summary_v1 from latest build_candidate.raw_payload_json "
+            "(lane, entrypoints, library hints) for operator glance."
+        ),
+    )
 
 
 class RoleInvocationDetailItem(BaseModel):
@@ -371,6 +385,10 @@ class RoleInvocationDetailItem(BaseModel):
             "i.e. actual recovery/correction of malformed output (persisted flag). "
             "Informational enrichment does not set this flag."
         ),
+    )
+    payload_telemetry: dict[str, Any] | None = Field(
+        default=None,
+        description="kmbl_payload_telemetry_v1 from routing_metadata_json (compact size metrics, no prompts).",
     )
 
 

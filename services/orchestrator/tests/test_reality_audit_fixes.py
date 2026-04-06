@@ -460,7 +460,9 @@ class TestFileStagingEndpoint:
         client = TestClient(app)
         resp = client.get(f"/orchestrator/staging/{ssid}/static-preview")
         assert resp.status_code == 200
-        assert "connect-src 'self'" in resp.headers.get("content-security-policy", "")
+        csp = resp.headers.get("content-security-policy", "")
+        assert "connect-src 'self'" in csp
+        assert "https://unpkg.com" in csp and "https://cdn.jsdelivr.net" in csp
 
 
 # ---------------------------------------------------------------------------

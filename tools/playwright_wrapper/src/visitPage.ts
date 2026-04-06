@@ -27,6 +27,13 @@ export type VisitResponse = {
   same_domain_links: string[];
   summary: string;
   traits?: { design_signals: string[]; tone_keywords: string[] };
+  /** Distilled notes for KMBL reference cards — not raw HTML. */
+  reference_sketch?: {
+    page_focus: string;
+    taste_notes: string[];
+    layout_notes: string[];
+    motion_interaction_notes: string[];
+  };
   timing_ms: number;
   error?: string;
   snapshot_path?: string;
@@ -57,6 +64,38 @@ function normalizeHref(href: string, base: string): string | null {
   } catch {
     return null;
   }
+}
+
+function buildReferenceSketch(
+  title: string,
+  metaDesc: string,
+  summary: string,
+  traits: { design_signals: string[]; tone_keywords: string[] },
+): {
+  page_focus: string;
+  taste_notes: string[];
+  layout_notes: string[];
+  motion_interaction_notes: string[];
+} {
+  const ds = traits.design_signals.map((s) => s.toLowerCase());
+  const layoutMarkers = ["grid", "flex", "hero", "carousel"] as const;
+  const motionMarkers = ["animation", "parallax", "video"] as const;
+  const layout_notes = layoutMarkers.filter((m) => ds.includes(m)).map((m) => `structure:${m}`).slice(0, 4);
+  const motion_interaction_notes = motionMarkers
+    .filter((m) => ds.includes(m))
+    .map((m) => `motion:${m}`)
+    .slice(0, 4);
+  const taste_notes = traits.tone_keywords
+    .filter(Boolean)
+    .slice(0, 5)
+    .map((t) => `tone:${t}`);
+  const bits = [title.slice(0, 80), metaDesc.slice(0, 120), summary.slice(0, 160)].filter(Boolean);
+  return {
+    page_focus: bits.join(" | ").slice(0, 280),
+    taste_notes,
+    layout_notes,
+    motion_interaction_notes,
+  };
 }
 
 function extractSignals(text: string, htmlSample: string): {
@@ -148,6 +187,7 @@ export async function visitPage(req: VisitRequest): Promise<VisitResponse> {
     const summary = text.replace(/\s+/g, " ").trim().slice(0, 400);
     const htmlSnippet = await page.content().then((h) => h.slice(0, 8000)).catch(() => "");
     const traits = extractSignals(text, htmlSnippet);
+    const reference_sketch = buildReferenceSketch(title, metaDesc, summary, traits);
 
     let snapshot_path: string | undefined;
     if (req.snapshot) {
@@ -173,6 +213,7 @@ export async function visitPage(req: VisitRequest): Promise<VisitResponse> {
       same_domain_links: sameDomain.slice(0, 200),
       summary,
       traits,
+      reference_sketch,
       timing_ms: Date.now() - t0,
       snapshot_path,
     };

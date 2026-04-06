@@ -22,6 +22,7 @@ from kmbl_orchestrator.runtime.operator_action_read_model import (
     is_operator_triggered_event,
     resume_stats_from_events,
 )
+from kmbl_orchestrator.runtime.reference_library import summarize_reference_cards_for_operator
 from kmbl_orchestrator.runtime.run_events import RunEventType
 
 # Events that represent meaningful graph-level milestones (used for last_meaningful_event).
@@ -121,6 +122,26 @@ def _run_observability_block(
     }
 
 
+def _role_payload_telemetry_rows(invocations: list[RoleInvocationRecord]) -> list[dict[str, Any]]:
+    """Compact per-invocation payload metrics from persisted routing_metadata (no prompts)."""
+    rows: list[dict[str, Any]] = []
+    for r in sorted(invocations, key=lambda x: x.started_at):
+        rm = dict(r.routing_metadata_json or {})
+        tel = rm.get("kmbl_payload_telemetry_v1")
+        if not isinstance(tel, dict):
+            continue
+        rows.append(
+            {
+                "role_invocation_id": str(r.role_invocation_id),
+                "role_type": r.role_type,
+                "iteration_index": r.iteration_index,
+                "started_at": r.started_at,
+                **tel,
+            }
+        )
+    return rows
+
+
 def _routing_hints_payload(
     r: RoleInvocationRecord,
 ) -> tuple[dict[str, Any] | None, str]:
@@ -174,6 +195,71 @@ def _quality_and_pressure_from_persisted(
             "evaluation_is_partial_or_fail": eval_status in ("partial", "fail"),
         },
     }
+
+
+def _interactive_lane_operator_view(
+    invocations: list[RoleInvocationRecord],
+) -> dict[str, Any] | None:
+    """Latest generator invocation: lane signals, compliance hints, reference counts (interactive vertical)."""
+    gen: RoleInvocationRecord | None = None
+    for r in sorted(invocations, key=lambda x: (x.iteration_index, x.started_at), reverse=True):
+        if r.role_type == "generator":
+            gen = r
+            break
+    if gen is None:
+        return None
+    inp = dict(gen.input_payload_json or {})
+    ilc = inp.get("kmbl_interactive_lane_context")
+    if not isinstance(ilc, dict):
+        return {
+            "present": False,
+            "note": "Latest generator payload has no kmbl_interactive_lane_context (likely non-interactive vertical).",
+        }
+    sig = ilc.get("execution_contract_signals")
+    policy = ilc.get("generator_library_policy")
+    flags = policy.get("flags") if isinstance(policy, dict) and isinstance(policy.get("flags"), dict) else {}
+    hints = inp.get("kmbl_library_compliance_hints")
+    if not isinstance(hints, list):
+        hints = []
+    impl = inp.get("kmbl_implementation_reference_cards")
+    insp = inp.get("kmbl_inspiration_reference_cards")
+    obs = inp.get("kmbl_planner_observed_reference_cards")
+    meta = inp.get("kmbl_reference_selection_meta")
+    ref_sum = summarize_reference_cards_for_operator(
+        impl if isinstance(impl, list) else None,
+        insp if isinstance(insp, list) else None,
+        obs if isinstance(obs, list) else None,
+        meta if isinstance(meta, dict) else None,
+    )
+    preview_notes: list[str] = []
+    if flags.get("gaussian_splat_lane_active"):
+        preview_notes.append(
+            "Gaussian splat lane active: .splat/.ply are served same-origin via staging file routes; "
+            "CDN runtime scripts may require connect-src (orchestrator preview CSP includes common CDNs)."
+        )
+    planner_obs_meta: dict[str, Any] | None = None
+    for r in sorted(invocations, key=lambda x: x.started_at):
+        if r.role_type != "planner":
+            continue
+        pin = dict(r.input_payload_json or {})
+        po = pin.get("kmbl_planner_observed_reference_cards")
+        if isinstance(po, list) and po:
+            planner_obs_meta = {
+                "source": "planner_input_payload",
+                "planner_observed_reference_count": len(po),
+            }
+        break
+    out: dict[str, Any] = {
+        "present": True,
+        "execution_contract_signals": sig if isinstance(sig, dict) else {},
+        "generator_library_policy_flags": flags,
+        "library_compliance_hints": hints,
+        "reference_summary": ref_sum,
+        "preview_pipeline_notes": preview_notes,
+    }
+    if planner_obs_meta:
+        out["planner_invocation_reference_meta"] = planner_obs_meta
+    return out
 
 
 def _max_iteration(invocations: list[RoleInvocationRecord]) -> int | None:
@@ -299,6 +385,33 @@ def _timeline_item_from_event(e: GraphRunEventRecord) -> dict[str, Any]:
     }
 
 
+def _build_candidate_summary_brief(bc: BuildCandidateRecord | None) -> dict[str, Any] | None:
+    if bc is None:
+        return None
+    rp = bc.raw_payload_json
+    if not isinstance(rp, dict):
+        return None
+    s = rp.get("kmbl_build_candidate_summary_v2")
+    if not isinstance(s, dict):
+        s = rp.get("kmbl_build_candidate_summary_v1")
+    if not isinstance(s, dict):
+        return None
+    exp = s.get("experience_summary") if isinstance(s.get("experience_summary"), dict) else {}
+    libs = s.get("libraries_detected") if isinstance(s.get("libraries_detected"), list) else []
+    inv = s.get("file_inventory") if isinstance(s.get("file_inventory"), list) else []
+    warns = s.get("warnings") if isinstance(s.get("warnings"), list) else []
+    return {
+        "summary_version": s.get("summary_version"),
+        "lane": s.get("lane"),
+        "escalation_lane": s.get("escalation_lane"),
+        "artifact_count": exp.get("artifact_count"),
+        "entrypoints": s.get("entrypoints"),
+        "libraries_detected": libs[:10],
+        "file_inventory_count": len(inv),
+        "warnings_count": len(warns),
+    }
+
+
 def build_graph_run_detail_read_model(
     *,
     thread: ThreadRecord | None,
@@ -337,6 +450,9 @@ def build_graph_run_detail_read_model(
             row["normalization_rescue"] = True
         if rh is not None:
             row["routing_hints"] = rh
+        pt = rm.get("kmbl_payload_telemetry_v1")
+        if isinstance(pt, dict):
+            row["payload_telemetry"] = pt
         inv_out.append(row)
 
     events_sorted = sorted(events, key=lambda e: e.created_at)
@@ -379,7 +495,10 @@ def build_graph_run_detail_read_model(
         invocations=inv_sorted,
         ev=ev,
     )
-    obs = _run_observability_block(events_sorted, inv_sorted)
+    obs = dict(_run_observability_block(events_sorted, inv_sorted))
+    tel_rows = _role_payload_telemetry_rows(inv_sorted)
+    if tel_rows:
+        obs["role_payload_telemetry_v1"] = tel_rows
 
     # --- Failure info (mirrors status endpoint but on detail too) ---
     failure_info: dict[str, Any] = {
@@ -454,6 +573,8 @@ def build_graph_run_detail_read_model(
             "quality_metrics": qp["durable_normalization_rescue"],
             "pressure_summary": qp["v1_pressure_telemetry"],
             "run_observability": obs,
+            "interactive_lane_operator_view": _interactive_lane_operator_view(inv_sorted),
+            "build_candidate_summary_brief": _build_candidate_summary_brief(bc),
         },
         "operator_actions": operator_actions,
         "role_invocations": inv_out,

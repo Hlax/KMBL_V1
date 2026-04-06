@@ -105,6 +105,10 @@ def test_summarize_execution_contract_includes_creative_direction() -> None:
     # Existing fields preserved
     assert summary["literal_success_checks_count"] == 2
 
+    assert "generator_library_policy" in summary
+    assert summary["primary_lane_default_libraries"] == ["three", "gsap"]
+    assert summary["generator_library_policy"]["policy_version"] == 2
+
 
 def test_summarize_execution_contract_graceful_with_missing_brief() -> None:
     """Summary must not crash when creative_brief is absent."""

@@ -12,6 +12,12 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from kmbl_orchestrator.runtime.generator_library_policy import (
+    GAUSSIAN_SPLAT_ESCALATION_LANE,
+    GAUSSIAN_SPLAT_LIBRARY_PRIMARY,
+    HEAVY_WEBGL_WGSL_TOKEN,
+    PRIMARY_LANE_DEFAULT_LIBRARIES,
+)
 from kmbl_orchestrator.runtime.static_vertical_invariants import (
     WEBGL_EXPERIENCE_MODES,
     is_interactive_frontend_vertical,
@@ -27,6 +33,7 @@ _TRACKED_EC_KEYS = frozenset(
         "interactive_runtime_tier",
         "webgl_ambition_ack",
         "lane_escalation_hint",
+        "escalation_lane",
     },
 )
 
@@ -46,6 +53,7 @@ class InteractiveExecutionContractV1(BaseModel):
     interactive_runtime_tier: str = "bounded_preview"
     webgl_ambition_ack: str | None = None
     lane_escalation_hint: str | None = None
+    escalation_lane: str | None = None
 
     @field_validator("allowed_libraries", mode="before")
     @classmethod
@@ -85,6 +93,13 @@ class InteractiveExecutionContractV1(BaseModel):
         if v is None or (isinstance(v, str) and not v.strip()):
             return "bounded_preview"
         return str(v).strip()
+
+    @field_validator("escalation_lane", mode="before")
+    @classmethod
+    def _escalation_lane(cls, v: Any) -> str | None:
+        if v is None or (isinstance(v, str) and not str(v).strip()):
+            return None
+        return str(v).strip().lower()[:48]
 
 
 AmbitionProfile = Literal["bounded_preview", "heavy_webgl_ask"]
@@ -196,6 +211,36 @@ def apply_interactive_build_spec_hardening(
     ):
         ec["lane_escalation_hint"] = DEFAULT_LANE_ESCALATION
         fixes.append("lane_escalation_hint_defaulted")
+
+    # Primary interactive lane: default three + gsap when planner omitted libraries (see docs/generator-library-policy.md).
+    al = ec.get("allowed_libraries")
+    if not isinstance(al, list) or len([x for x in al if isinstance(x, str) and x.strip()]) == 0:
+        ec["allowed_libraries"] = list(PRIMARY_LANE_DEFAULT_LIBRARIES)
+        fixes.append("allowed_libraries_defaulted_primary_lane")
+
+    # Heavy WebGPU ambition modes: append wgsl so execution_contract signals WGSL/WebGPU path (not default for flat modes).
+    em_libs = (bs.get("experience_mode") or "").strip().lower()
+    if em_libs in WEBGL_EXPERIENCE_MODES:
+        libs_cur = ec.get("allowed_libraries")
+        if isinstance(libs_cur, list):
+            norm = [str(x).strip().lower() for x in libs_cur if isinstance(x, str) and str(x).strip()]
+            if HEAVY_WEBGL_WGSL_TOKEN not in norm:
+                if len(norm) >= 8:
+                    norm = norm[:7]
+                norm.append(HEAVY_WEBGL_WGSL_TOKEN)
+                ec["allowed_libraries"] = norm
+                fixes.append("allowed_libraries_appended_wgsl_for_heavy_webgl_ambition")
+
+    # Gaussian splat specialist lane: ensure Three + primary splat viewer when planner selected lane.
+    if (ec.get("escalation_lane") or "").strip().lower() == GAUSSIAN_SPLAT_ESCALATION_LANE:
+        libs_cur = ec.get("allowed_libraries")
+        if isinstance(libs_cur, list):
+            norm = [str(x).strip().lower() for x in libs_cur if isinstance(x, str) and str(x).strip()]
+            for token in ("three", "gsap", GAUSSIAN_SPLAT_LIBRARY_PRIMARY):
+                if token not in norm and len(norm) < 8:
+                    norm.append(token)
+            ec["allowed_libraries"] = norm
+            fixes.append("allowed_libraries_merged_for_gaussian_splat_lane")
 
     # Pydantic validation on tracked slice (extras on ``ec`` remain untouched)
     tracked = {k: ec.get(k) for k in _TRACKED_EC_KEYS}

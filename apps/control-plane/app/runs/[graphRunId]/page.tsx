@@ -148,6 +148,287 @@ function RuntimeObservabilityCard({
   );
 }
 
+function BuildCandidateSummaryBriefCard({
+  brief,
+}: {
+  brief: Record<string, unknown> | null | undefined;
+}) {
+  if (!brief || typeof brief !== "object") {
+    return (
+      <div className="op-card op-card--compact" style={{ marginBottom: "1rem" }}>
+        <h2 className="op-section-title" style={{ marginBottom: "0.35rem" }}>
+          Build candidate summary
+        </h2>
+        <p className="muted small" style={{ marginTop: 0, marginBottom: 0 }}>
+          No <code className="mono small">build_candidate_summary_brief</code> yet (generator may not have
+          finished, or orchestrator predates summary v1).
+        </p>
+      </div>
+    );
+  }
+  const libs = Array.isArray(brief.libraries_detected) ? brief.libraries_detected : [];
+  const eps = Array.isArray(brief.entrypoints) ? brief.entrypoints : [];
+  const wn =
+    typeof brief.warnings_count === "number" && Number.isFinite(brief.warnings_count)
+      ? brief.warnings_count
+      : null;
+  return (
+    <div className="op-card op-card--compact" style={{ marginBottom: "1rem" }}>
+      <h2 className="op-section-title" style={{ marginBottom: "0.35rem" }}>
+        Build candidate summary
+      </h2>
+      <p className="muted small" style={{ marginTop: 0 }}>
+        Orchestrator-derived glance from <code className="mono small">kmbl_build_candidate_summary_v1</code>{" "}
+        (not raw file bodies).
+      </p>
+      <dl className="pub-lineage-dl" style={{ marginBottom: 0 }}>
+        <dt>Summary version</dt>
+        <dd>{brief.summary_version != null ? String(brief.summary_version) : "—"}</dd>
+        <dt>Lane</dt>
+        <dd className="mono small">{typeof brief.lane === "string" ? brief.lane : "—"}</dd>
+        <dt>Escalation lane</dt>
+        <dd className="mono small">
+          {typeof brief.escalation_lane === "string" && brief.escalation_lane.trim()
+            ? brief.escalation_lane
+            : "—"}
+        </dd>
+        <dt>Artifact count</dt>
+        <dd>{brief.artifact_count != null ? String(brief.artifact_count) : "—"}</dd>
+        <dt>File inventory</dt>
+        <dd>
+          {brief.file_inventory_count != null ? String(brief.file_inventory_count) : "—"} files
+        </dd>
+        <dt>Libraries (top)</dt>
+        <dd className="mono small">
+          {libs.length > 0 ? libs.join(", ") : "—"}
+        </dd>
+        <dt>Entrypoints</dt>
+        <dd className="mono small" style={{ whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
+          {eps.length > 0 ? eps.join("\n") : "—"}
+        </dd>
+        <dt>Warnings</dt>
+        <dd>{wn != null ? String(wn) : "—"}</dd>
+      </dl>
+    </div>
+  );
+}
+
+function PayloadTelemetryCard({
+  obs,
+}: {
+  obs: GraphRunSummaryBlock["run_observability"];
+}) {
+  const rows = obs?.role_payload_telemetry_v1;
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return (
+      <div className="op-card op-card--compact" style={{ marginBottom: "1rem" }}>
+        <h2 className="op-section-title" style={{ marginBottom: "0.35rem" }}>
+          LLM payload telemetry
+        </h2>
+        <p className="muted small" style={{ marginTop: 0, marginBottom: 0 }}>
+          No <code className="mono small">role_payload_telemetry_v1</code> on this run (older orchestrator or no
+          invocations recorded).
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div className="op-card op-card--compact" style={{ marginBottom: "1rem" }}>
+      <h2 className="op-section-title" style={{ marginBottom: "0.35rem" }}>
+        LLM payload telemetry
+      </h2>
+      <p className="muted small" style={{ marginTop: 0 }}>
+        Serialized JSON char/byte counts per role invocation (approximate; no prompt text stored).{" "}
+        <strong>Est. content saved</strong> compares slim inline artifact text vs persisted full refs
+        (evaluator path only). <strong>Budget trim</strong> shows{" "}
+        <code className="mono small">payload_budget_governor_v1</code> (pre-invoke deterministic caps).
+      </p>
+      <div className="op-table-wrap">
+        <table className="op-table">
+          <thead>
+            <tr>
+              <th>Role</th>
+              <th>Iter</th>
+              <th>Chars</th>
+              <th>Bytes</th>
+              <th>~Tokens</th>
+              <th>Summary</th>
+              <th>Est. saved</th>
+              <th>Budget trim</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, i) => {
+              const ro = row as Record<string, unknown>;
+              const saved = ro.estimated_content_chars_saved_vs_full_inline;
+              const pg = ro.payload_governor_v1 as
+                | { was_trimmed?: boolean; chars_saved_by_governor_trim?: number; initial_payload_char_count?: number }
+                | undefined;
+              return (
+                <tr key={`${String(ro.role_invocation_id ?? i)}`}>
+                  <td className="mono small">{String(ro.role_type ?? ro.role ?? "—")}</td>
+                  <td>{ro.iteration_index != null ? String(ro.iteration_index) : "—"}</td>
+                  <td className="small">{ro.payload_char_count != null ? String(ro.payload_char_count) : "—"}</td>
+                  <td className="small">{ro.payload_byte_count != null ? String(ro.payload_byte_count) : "—"}</td>
+                  <td className="small">{ro.rough_token_estimate != null ? String(ro.rough_token_estimate) : "—"}</td>
+                  <td className="small">{ro.has_build_candidate_summary === true ? "yes" : "—"}</td>
+                  <td className="small">
+                    {typeof saved === "number" && Number.isFinite(saved) ? String(saved) : "—"}
+                  </td>
+                  <td className="small muted">
+                    {pg && typeof pg === "object" ? (
+                      <>
+                        {pg.was_trimmed ? "yes" : "no"}
+                        {typeof pg.chars_saved_by_governor_trim === "number" && pg.chars_saved_by_governor_trim > 0 ? (
+                          <span title="Chars removed by governor vs pre-trim serialized size">
+                            {" "}
+                            (−{pg.chars_saved_by_governor_trim.toLocaleString()})
+                          </span>
+                        ) : null}
+                      </>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function InteractiveLaneOperatorCard({
+  view,
+}: {
+  view: Record<string, unknown> | null | undefined;
+}) {
+  if (!view || typeof view !== "object") {
+    return (
+      <div className="op-card op-card--compact" style={{ marginBottom: "1rem" }}>
+        <h2 className="op-section-title" style={{ marginBottom: "0.35rem" }}>
+          Interactive lane &amp; references
+        </h2>
+        <p className="muted small" style={{ marginTop: 0, marginBottom: 0 }}>
+          No <code className="mono small">interactive_lane_operator_view</code> on this summary (older
+          orchestrator or detail not populated).
+        </p>
+      </div>
+    );
+  }
+  if (view.present === false) {
+    return (
+      <div className="op-card op-card--compact" style={{ marginBottom: "1rem" }}>
+        <h2 className="op-section-title" style={{ marginBottom: "0.35rem" }}>
+          Interactive lane &amp; references
+        </h2>
+        <p className="muted small" style={{ marginTop: 0, marginBottom: 0 }}>
+          {typeof view.note === "string" && view.note.trim()
+            ? view.note
+            : "Latest generator invocation had no interactive lane context (non-interactive vertical)."}
+        </p>
+      </div>
+    );
+  }
+  const sig = view.execution_contract_signals;
+  const libs = sig && typeof sig === "object" ? (sig as Record<string, unknown>).allowed_libraries : null;
+  const esc =
+    sig && typeof sig === "object" ? (sig as Record<string, unknown>).escalation_lane : null;
+  const hints = Array.isArray(view.library_compliance_hints) ? view.library_compliance_hints : [];
+  const refSum =
+    view.reference_summary && typeof view.reference_summary === "object"
+      ? (view.reference_summary as Record<string, unknown>)
+      : null;
+  const pNotes = Array.isArray(view.preview_pipeline_notes) ? view.preview_pipeline_notes : [];
+  const pim = view.planner_invocation_reference_meta;
+  const pimObj = pim && typeof pim === "object" ? (pim as Record<string, unknown>) : null;
+
+  return (
+    <div className="op-card op-card--compact" style={{ marginBottom: "1rem" }}>
+      <h2 className="op-section-title" style={{ marginBottom: "0.35rem" }}>
+        Interactive lane &amp; references
+      </h2>
+      <p className="muted small" style={{ marginTop: 0 }}>
+        From latest <strong>generator</strong> invocation payload (orchestrator read model). Reference cards are
+        capped slices — not full libraries.
+      </p>
+      <dl className="pub-lineage-dl" style={{ marginBottom: "0.65rem" }}>
+        <dt>Escalation lane</dt>
+        <dd className="mono small">{typeof esc === "string" && esc ? esc : "—"}</dd>
+        <dt>Allowed libraries (snapshot)</dt>
+        <dd className="mono small">
+          {Array.isArray(libs) && libs.length > 0 ? libs.join(", ") : "—"}
+        </dd>
+        <dt>Reference counts</dt>
+        <dd className="small">
+          impl {typeof refSum?.implementation_reference_count === "number" ? refSum.implementation_reference_count : "—"}
+          {" · "}
+          inspiration{" "}
+          {typeof refSum?.inspiration_reference_count === "number" ? refSum.inspiration_reference_count : "—"}
+          {" · "}
+          observed (generator){" "}
+          {typeof refSum?.planner_observed_reference_count === "number"
+            ? refSum.planner_observed_reference_count
+            : "—"}
+        </dd>
+        {pimObj && typeof pimObj.planner_observed_reference_count === "number" ? (
+          <>
+            <dt>Planner observed (at plan)</dt>
+            <dd>{String(pimObj.planner_observed_reference_count)}</dd>
+          </>
+        ) : null}
+        <dt>Curated library version</dt>
+        <dd className="mono small">
+          {typeof refSum?.curated_library_version === "number" ? String(refSum.curated_library_version) : "—"}
+        </dd>
+        <dt>Lane bucket (generator selection)</dt>
+        <dd className="mono small">
+          {typeof refSum?.lane_bucket === "string" ? refSum.lane_bucket : "—"}
+        </dd>
+      </dl>
+      {hints.length > 0 ? (
+        <>
+          <h3 className="op-subtitle" style={{ marginBottom: "0.35rem" }}>
+            Library compliance hints
+          </h3>
+          <ul className="op-list op-list--compact small" style={{ marginBottom: "0.65rem" }}>
+            {hints.slice(0, 8).map((h, i) => (
+              <li key={`hint-${i}`}>
+                {typeof h === "object" && h !== null && "code" in h ? (
+                  <>
+                    <code className="mono small">{(h as { code?: string }).code}</code>
+                    {" — "}
+                    <span className="muted">{(h as { severity?: string }).severity}</span>
+                    {(h as { detail?: string }).detail ? (
+                      <span className="small"> — {(h as { detail: string }).detail}</span>
+                    ) : null}
+                  </>
+                ) : (
+                  <code className="mono small">{JSON.stringify(h)}</code>
+                )}
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+      {pNotes.length > 0 ? (
+        <>
+          <h3 className="op-subtitle" style={{ marginBottom: "0.35rem" }}>
+            Preview / pipeline notes
+          </h3>
+          <ul className="op-list op-list--compact small" style={{ marginBottom: 0 }}>
+            {pNotes.map((n, i) => (
+              <li key={`pn-${i}`}>{typeof n === "string" ? n : JSON.stringify(n)}</li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 export default async function GraphRunDetailPage({
   params,
 }: {
@@ -365,6 +646,12 @@ export default async function GraphRunDetailPage({
       ) : null}
 
       <RuntimeObservabilityCard summary={s} lastMeaningful={data.last_meaningful_event} />
+
+      <PayloadTelemetryCard obs={s.run_observability} />
+
+      <InteractiveLaneOperatorCard view={s.interactive_lane_operator_view} />
+
+      <BuildCandidateSummaryBriefCard brief={s.build_candidate_summary_brief} />
 
       <section className="pub-hero">
         <div className="pub-hero__head">
@@ -620,6 +907,7 @@ export default async function GraphRunDetailPage({
                   <th>Role</th>
                   <th>Status</th>
                   <th>Iter</th>
+                  <th>Payload</th>
                   <th>Provider</th>
                   <th>Config</th>
                   <th>Started</th>
@@ -627,19 +915,51 @@ export default async function GraphRunDetailPage({
                 </tr>
               </thead>
               <tbody>
-                {invocations.map((r) => (
+                {invocations.map((r) => {
+                  const pt = r.payload_telemetry as
+                    | {
+                        payload_char_count?: number;
+                        estimated_content_chars_saved_vs_full_inline?: number;
+                        payload_governor_v1?: { was_trimmed?: boolean; chars_saved_by_governor_trim?: number };
+                      }
+                    | null
+                    | undefined;
+                  const gov = pt?.payload_governor_v1;
+                  return (
                   <tr key={r.role_invocation_id}>
                     <td className="mono">{r.role_type}</td>
                     <td>
                       <span className="op-badge op-badge--neutral">{r.status}</span>
                     </td>
                     <td>{r.iteration_index}</td>
+                    <td className="small muted">
+                      {pt && typeof pt.payload_char_count === "number" ? (
+                        <>
+                          {pt.payload_char_count.toLocaleString()} chars
+                          {typeof pt.estimated_content_chars_saved_vs_full_inline === "number" ? (
+                            <span title="vs full artifact inline content (evaluator)">
+                              {" "}
+                              · saved ~{pt.estimated_content_chars_saved_vs_full_inline.toLocaleString()}
+                            </span>
+                          ) : null}
+                          {gov?.was_trimmed ? (
+                            <span title="payload_budget_governor_v1">
+                              {" "}
+                              · gov −{typeof gov.chars_saved_by_governor_trim === "number" ? gov.chars_saved_by_governor_trim.toLocaleString() : "?"}
+                            </span>
+                          ) : null}
+                        </>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
                     <td className="mono small">{r.provider}</td>
                     <td className="mono small">{r.provider_config_key}</td>
                     <td className="small">{formatWhen(r.started_at)}</td>
                     <td className="small">{formatWhen(r.ended_at)}</td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

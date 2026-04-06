@@ -1191,7 +1191,8 @@ def graph_run_candidate_preview(
             "X-Content-Type-Options": "nosniff",
             "Content-Security-Policy": (
                 "default-src 'none'; img-src data: https:; font-src data:; "
-                "style-src 'unsafe-inline'; script-src 'unsafe-inline'"
+                "style-src 'unsafe-inline'; script-src 'unsafe-inline'; "
+                "connect-src 'self' https://unpkg.com https://cdn.jsdelivr.net"
             ),
             "Cache-Control": "private, no-store",
         },

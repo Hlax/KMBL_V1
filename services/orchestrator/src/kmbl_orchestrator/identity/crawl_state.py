@@ -163,6 +163,7 @@ def record_page_visit(
     provenance_source: str = "",
     provenance_tier: int = 0,
     run_id: str = "",
+    reference_sketch: dict[str, Any] | None = None,
 ) -> CrawlStateRecord:
     """Mark a URL as visited and record page-level data.
 
@@ -171,6 +172,8 @@ def record_page_visit(
         summary: One-line summary of the page content.
         design_signals: Visual/design signals extracted from the page.
         tone_keywords: Tone/mood keywords from the page.
+        reference_sketch: Optional compact dict from Playwright wrapper (taste/layout/motion notes) —
+            not raw HTML; capped by caller.
         discovered_links: Raw href values found on the page (will be resolved + filtered).
         provenance_source: Why this URL was marked visited (e.g. ``build_spec_structured``).
         provenance_tier: Numeric evidence tier (lower = stronger).
@@ -197,13 +200,16 @@ def record_page_visit(
     summaries = dict(state.page_summaries)
     origin: str = "portfolio" if is_same_domain(normalized, state.root_url) else "inspiration"
     if len(summaries) < _MAX_PAGE_SUMMARIES:
-        summaries[normalized] = {
+        row: dict[str, Any] = {
             "summary": (summary or "")[:_MAX_SUMMARY_LENGTH],
             "design_signals": (design_signals or [])[:_MAX_DESIGN_SIGNALS_PER_PAGE],
             "tone_keywords": (tone_keywords or [])[:_MAX_TONE_KEYWORDS_PER_PAGE],
             "crawled_at": now,
             "origin": origin,
         }
+        if reference_sketch and isinstance(reference_sketch, dict):
+            row["reference_sketch"] = reference_sketch
+        summaries[normalized] = row
 
     # Store visit provenance (why was this URL marked visited?)
     provenance = dict(state.visit_provenance)
@@ -444,13 +450,17 @@ def build_crawl_context_for_planner(
             origin = (
                 "portfolio" if is_same_domain(url, state.root_url) else "inspiration"
             )
-        return {
+        out = {
             "url": url,
             "summary": data.get("summary", ""),
             "design_signals": data.get("design_signals", []),
             "tone_keywords": data.get("tone_keywords", []),
             "origin": origin,
         }
+        rs = data.get("reference_sketch")
+        if isinstance(rs, dict):
+            out["reference_sketch"] = rs
+        return out
 
     portfolio_items: list[dict[str, Any]] = []
     inspiration_items: list[dict[str, Any]] = []

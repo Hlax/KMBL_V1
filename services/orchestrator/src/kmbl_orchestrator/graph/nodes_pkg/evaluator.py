@@ -38,10 +38,19 @@ from kmbl_orchestrator.runtime.evaluator_preflight import (
     should_skip_evaluator_llm,
     synthetic_skipped_evaluator_raw,
 )
+from kmbl_orchestrator.runtime.evaluator_snippet_policy_v1 import (
+    should_omit_evaluator_snippets_from_llm_payload,
+)
+from kmbl_orchestrator.runtime.build_candidate_summary_v1 import merge_slim_with_full_artifacts_for_gates
 from kmbl_orchestrator.runtime.interactive_lane_context import build_interactive_lane_context
 from kmbl_orchestrator.runtime.interactive_lane_evaluator_gate import (
     apply_interactive_lane_evaluator_gate,
 )
+from kmbl_orchestrator.runtime.payload_budget_governor_v1 import (
+    apply_payload_budget_governor_v1,
+    merge_governor_report_into_telemetry,
+)
+from kmbl_orchestrator.runtime.payload_telemetry_v1 import build_payload_telemetry_v1
 from kmbl_orchestrator.runtime.run_events import RunEventType, append_graph_run_event
 from kmbl_orchestrator.runtime.working_staging_read import (
     get_working_staging_for_thread_resilient,
@@ -141,7 +150,10 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             }
             break
 
-    bc = state.get("build_candidate") if isinstance(state.get("build_candidate"), dict) else {}
+    bc_slim = state.get("build_candidate") if isinstance(state.get("build_candidate"), dict) else {}
+    bc_row = ctx.repo.get_build_candidate(UUID(bcid))
+    refs_for_gates = list(bc_row.artifact_refs_json or []) if bc_row else []
+    bc_gate = merge_slim_with_full_artifacts_for_gates(bc_slim, refs_for_gates)
     bs_for_skip = state.get("build_spec") if isinstance(state.get("build_spec"), dict) else {}
     ei_for_skip = state.get("event_input") if isinstance(state.get("event_input"), dict) else {}
     prev_ev = state.get("evaluation_report") if iter_hint > 0 else None
@@ -149,7 +161,7 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         ctx.settings,
         graph_run_id=str(gid),
         thread_id=str(tid),
-        build_candidate=bc,
+        build_candidate=bc_slim,
     )
     pu_raw = preview_resolution.get("preview_url")
     preview_url = (
@@ -169,7 +181,19 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             "preview_url": None,
             "preview_url_is_absolute": False,
         }
-    skip_llm, skip_reason = should_skip_evaluator_llm(bc, bs_for_skip, ei_for_skip)
+    skip_llm, skip_reason = should_skip_evaluator_llm(bc_slim, bs_for_skip, ei_for_skip)
+    omit_snippets, snippet_policy_reason = should_omit_evaluator_snippets_from_llm_payload(
+        bc_slim=bc_slim,
+        skip_llm=skip_llm,
+        preview_url=preview_url,
+        preview_resolution=preview_resolution,
+        settings=ctx.settings,
+    )
+    bc_for_eval: dict[str, Any] = (
+        {k: v for k, v in bc_slim.items() if k != "kmbl_evaluator_artifact_snippets_v1"}
+        if omit_snippets
+        else bc_slim
+    )
     mf_ground = (
         bool(getattr(ctx.settings, "kmbl_manifest_first_static_vertical", False))
         and is_manifest_first_bundle_vertical(bs_for_skip, ei_for_skip)
@@ -203,7 +227,7 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     payload = {
         "graph_run_id": str(gid),
         "thread_id": state["thread_id"],
-        "build_candidate": bc,
+        "build_candidate": bc_for_eval,
         "success_criteria": success,
         "evaluation_targets": targets,
         "iteration_hint": iter_hint,
@@ -224,10 +248,51 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         # Prior evaluator JSON (same thread run) for visual-delta / sameness checks
         "previous_evaluation_report": prev_ev if iter_hint > 0 else None,
     }
+    summ_v2 = bc_slim.get("kmbl_build_candidate_summary_v2")
+    if isinstance(summ_v2, dict):
+        payload["kmbl_build_candidate_summary_v2"] = summ_v2
+    summ_e = bc_slim.get("kmbl_build_candidate_summary_v1")
+    if isinstance(summ_e, dict):
+        payload["kmbl_build_candidate_summary_v1"] = summ_e
+    if not omit_snippets:
+        snip_e = bc_slim.get("kmbl_evaluator_artifact_snippets_v1")
+        if isinstance(snip_e, dict):
+            payload["kmbl_evaluator_artifact_snippets_v1"] = snip_e
     bs_lane = state.get("build_spec") if isinstance(state.get("build_spec"), dict) else {}
     ei_lane = state.get("event_input") if isinstance(state.get("event_input"), dict) else {}
     if is_interactive_frontend_vertical(bs_lane, ei_lane):
-        payload["kmbl_interactive_lane_expectations"] = build_interactive_lane_context(bs_lane, ei_lane)
+        from kmbl_orchestrator.runtime.reference_library import attach_reference_cards_to_lane_context
+
+        _ile = build_interactive_lane_context(bs_lane, ei_lane)
+        _ile = attach_reference_cards_to_lane_context(
+            _ile,
+            bs_lane,
+            ei_lane,
+            graph_run_id=str(gid),
+        )
+        payload["kmbl_interactive_lane_expectations"] = _ile
+        payload["kmbl_reference_patterns"] = _ile.get("reference_patterns") or []
+        payload["kmbl_library_compliance_hints"] = _ile.get("library_compliance_hints") or []
+        payload["kmbl_implementation_reference_cards"] = _ile.get("implementation_reference_cards") or []
+        payload["kmbl_inspiration_reference_cards"] = _ile.get("inspiration_reference_cards") or []
+        payload["kmbl_planner_observed_reference_cards"] = _ile.get(
+            "planner_observed_reference_cards"
+        ) or []
+        payload["kmbl_reference_selection_meta"] = _ile.get("reference_selection_meta")
+        payload["kmbl_reference_library_version"] = _ile.get("reference_library_version")
+    ev_notes = "evaluator_llm_skipped" if skip_llm else None
+    payload, gov_rep_e = apply_payload_budget_governor_v1("evaluator", payload)
+    tel_e = build_payload_telemetry_v1(
+        "evaluator",
+        payload,
+        full_artifact_refs_for_compare=list(refs_for_gates) if refs_for_gates else None,
+        payload_budget_notes=ev_notes,
+    )
+    tel_e = merge_governor_report_into_telemetry(tel_e, gov_rep_e)
+    tel_e["kmbl_evaluator_snippet_policy_v1"] = {
+        "snippets_suppressed_for_llm": omit_snippets,
+        "reason_code": snippet_policy_reason,
+    }
     t_ev = time.perf_counter()
     if skip_llm:
         append_graph_run_event(
@@ -247,6 +312,7 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             provider_config_key=ctx.settings.openclaw_evaluator_config_key,
             input_payload_json=payload,
             output_payload_json=raw,
+            routing_metadata_json={"kmbl_payload_telemetry_v1": tel_e},
             status="completed",
             iteration_index=int(state.get("iteration_index", 0)),
             ended_at=ended,
@@ -266,6 +332,7 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
                 provider_config_key=ctx.settings.openclaw_evaluator_config_key,
                 input_payload=payload,
                 iteration_index=int(state.get("iteration_index", 0)),
+                routing_metadata={"kmbl_payload_telemetry_v1": tel_e},
             )
         except KiloclawRoleInvocationForbiddenError as e:
             raise RoleInvocationFailed(
@@ -322,7 +389,6 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         evaluator_invocation_id=inv.role_invocation_id,
         build_candidate_id=UUID(bcid),
     )
-    bc_row = ctx.repo.get_build_candidate(UUID(bcid))
     ev_input = state.get("event_input") if isinstance(state.get("event_input"), dict) else {}
     bs_ev = state.get("build_spec") if isinstance(state.get("build_spec"), dict) else {}
     is_static_vertical = ev_input.get("scenario", "").startswith(
@@ -387,23 +453,23 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     report = apply_literal_success_checks(
         report,
         build_spec=bs_from_state,
-        build_candidate=bc if isinstance(bc, dict) else {},
+        build_candidate=bc_gate,
     )
     report = apply_cool_lane_motion_signal_gate(
         report,
         build_spec=bs_from_state,
         event_input=ev_input if isinstance(ev_input, dict) else {},
-        build_candidate=bc if isinstance(bc, dict) else {},
+        build_candidate=bc_gate,
     )
     report = apply_cool_lane_execution_acknowledgment_gates(
         report,
-        build_candidate=bc if isinstance(bc, dict) else {},
+        build_candidate=bc_gate,
     )
     report = apply_interactive_lane_evaluator_gate(
         report,
         build_spec=bs_from_state,
         event_input=ev_input if isinstance(ev_input, dict) else {},
-        build_candidate=bc if isinstance(bc, dict) else {},
+        build_candidate=bc_gate,
     )
 
     # ── 3D content guardrail for spatial experience modes ────────────────
@@ -413,7 +479,7 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     if exp_mode in ("immersive_spatial_portfolio", "webgl_3d_portfolio"):
         _3d_keywords = {"three", "webgl", "3d"}
         has_3d_content = False
-        candidate_artifacts = bc.get("artifact_outputs") or []
+        candidate_artifacts = bc_gate.get("artifact_outputs") or []
         for art in candidate_artifacts:
             art_role = str(art.get("role", "")).lower()
             art_content = str(art.get("content", "")).lower()
@@ -472,14 +538,30 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
                 alignment_signals.get("source", "unknown"),
             )
 
+    m_obs = dict(report.metrics_json or {})
+    if isinstance(bc_slim, dict):
+        m_obs["kmbl_orchestrator_summary_v2_in_evaluator_input"] = isinstance(
+            bc_slim.get("kmbl_build_candidate_summary_v2"), dict
+        )
+        ao_slim = bc_slim.get("artifact_outputs")
+        if isinstance(ao_slim, list) and ao_slim:
+            first = ao_slim[0]
+            m_obs["kmbl_build_candidate_artifacts_content_omitted"] = bool(
+                isinstance(first, dict) and first.get("content_omitted") is True
+            )
+        else:
+            m_obs["kmbl_build_candidate_artifacts_content_omitted"] = False
+
     report = report.model_copy(update={
         "raw_payload_json": raw,
         "alignment_score": alignment_score,
         "alignment_signals_json": alignment_signals,
+        "metrics_json": m_obs,
     })
 
     evaluator_nomination = extract_evaluator_nomination(
-        raw if isinstance(raw, dict) else None
+        raw if isinstance(raw, dict) else None,
+        evaluation_status=report.status,
     )
 
     # Update alignment score history in state

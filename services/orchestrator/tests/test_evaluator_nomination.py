@@ -13,6 +13,24 @@ def test_nomination_defaults_when_empty() -> None:
     }
 
 
+def test_nomination_pass_defaults_marked_true_without_explicit_flag() -> None:
+    out = extract_evaluator_nomination({"summary": "ok"}, evaluation_status="pass")
+    assert out["marked_for_review"] is True
+
+
+def test_nomination_partial_defaults_marked_false_without_explicit_flag() -> None:
+    out = extract_evaluator_nomination({"summary": "needs work"}, evaluation_status="partial")
+    assert out["marked_for_review"] is False
+
+
+def test_nomination_explicit_partial_false_overrides_pass_status() -> None:
+    out = extract_evaluator_nomination(
+        {"nominate_for_review": False},
+        evaluation_status="pass",
+    )
+    assert out["marked_for_review"] is False
+
+
 def test_nomination_top_level_nominate() -> None:
     out = extract_evaluator_nomination(
         {

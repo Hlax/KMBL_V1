@@ -20,6 +20,10 @@ from kmbl_orchestrator.identity.hydrate import upsert_identity_evolution_signal
 from kmbl_orchestrator.persistence.persistence_labels import staging_atomic_persistence_label
 from kmbl_orchestrator.runtime.interrupt_checks import raise_if_interrupt_requested
 from kmbl_orchestrator.runtime.run_events import RunEventType, append_graph_run_event
+from kmbl_orchestrator.runtime.staging_snapshot_policy_v1 import (
+    should_create_staging_snapshot,
+    staging_snapshot_skip_reason,
+)
 from kmbl_orchestrator.staging.build_snapshot import build_staging_snapshot_payload
 from kmbl_orchestrator.staging.integrity import validate_preview_integrity
 from kmbl_orchestrator.staging.pressure import pressure_evaluation_to_event_payload
@@ -38,21 +42,6 @@ if TYPE_CHECKING:
 _log = logging.getLogger(__name__)
 
 
-def _should_create_staging_snapshot(policy: str, marked_for_review: bool) -> bool:
-    """Whether staging_node should persist a staging_snapshot row (not operator materialize).
-
-    ``on_nomination`` requires evaluator nomination (see ``extract_evaluator_nomination``).
-    Unknown policy values default to True (safe: do not silently drop review snapshots).
-    """
-    if policy == "always":
-        return True
-    if policy == "never":
-        return False
-    if policy == "on_nomination":
-        return marked_for_review
-    return True
-
-
 def staging_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     """Apply the build candidate to working staging and create a snapshot.
 
@@ -60,6 +49,15 @@ def staging_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     and ``staging_snapshot_policy`` only affect whether an immutable ``staging_snapshot``
     row is written (not whether working staging is updated). Blocked evaluations stop
     before this node (see integrity checks above).
+
+    When ``staging_snapshot_policy`` is ``always``, ``partial`` evaluations do **not** persist a
+    review snapshot unless ``kmbl_staging_snapshot_always_include_partial`` is true (working
+    staging still updates for iteration).
+
+    Review semantics: ``extract_evaluator_nomination`` defaults ``marked_for_review=True`` only
+    for ``pass`` when the evaluator omits an explicit nomination bool; ``partial``/``fail``
+    default to ``False`` so review snapshots stay focused on sufficiently complete builds unless
+    the model explicitly nominates.
     """
     gid = UUID(state["graph_run_id"])
     tid = UUID(state["thread_id"])
@@ -207,14 +205,31 @@ def staging_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     # Always normalize via extract — same rules for checkpoint state dicts and raw evaluator JSON
     # (avoids unsafe bool() on ad-hoc dict values).
     nom_src = nom_state if isinstance(nom_state, dict) and nom_state else raw_ev
-    nomination = extract_evaluator_nomination(nom_src if isinstance(nom_src, dict) else None)
+    nomination = extract_evaluator_nomination(
+        nom_src if isinstance(nom_src, dict) else None,
+        evaluation_status=ev.status,
+    )
 
     marked = nomination["marked_for_review"]
     mark_reason = nomination["mark_reason"]
     review_tags: list[str] = list(nomination["review_tags"])
 
     policy = getattr(ctx.settings, "staging_snapshot_policy", "on_nomination")
-    should_snapshot = _should_create_staging_snapshot(policy, marked)
+    allow_partial_always = bool(
+        getattr(ctx.settings, "kmbl_staging_snapshot_always_include_partial", False),
+    )
+    should_snapshot = should_create_staging_snapshot(
+        policy,
+        marked,
+        evaluation_status=ev.status,
+        allow_partial_under_always=allow_partial_always,
+    )
+    snapshot_skip_reason_code = staging_snapshot_skip_reason(
+        policy,
+        marked,
+        evaluation_status=ev.status,
+        allow_partial_under_always=allow_partial_always,
+    )
 
     ssid: UUID | None = None
     snap: StagingSnapshotRecord | None = None
@@ -305,16 +320,20 @@ def staging_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             },
         )
     else:
+        skip_payload: dict[str, Any] = {
+            "thread_id": str(tid),
+            "build_candidate_id": str(bc.build_candidate_id),
+            "marked_for_review": marked,
+            "staging_snapshot_policy": policy,
+            "evaluation_status": ev.status,
+            "skip_reason": snapshot_skip_reason_code or "not_eligible",
+            "kmbl_staging_snapshot_always_include_partial": allow_partial_always,
+        }
         append_graph_run_event(
             ctx.repo,
             gid,
             RunEventType.STAGING_SNAPSHOT_SKIPPED,
-            {
-                "thread_id": str(tid),
-                "build_candidate_id": str(bc.build_candidate_id),
-                "marked_for_review": marked,
-                "staging_snapshot_policy": policy,
-            },
+            skip_payload,
             thread_id=tid,
         )
 

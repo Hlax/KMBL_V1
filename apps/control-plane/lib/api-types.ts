@@ -237,12 +237,18 @@ export type GraphRunSummaryBlock = {
   working_staging_present?: boolean;
   /** Manifest-first / ingest / grounding aggregates (GET …/detail summary). */
   run_observability?: RunObservabilityBlock | null;
+  /** Interactive lane: escalation, compliance hints, reference counts (orchestrator read model). */
+  interactive_lane_operator_view?: Record<string, unknown> | null;
+  /** Glance fields from latest build candidate summary (orchestrator read model). */
+  build_candidate_summary_brief?: Record<string, unknown> | null;
 };
 
 /** Orchestrator summary.run_observability — event counts + last evaluator preview_resolution snapshot. */
 export type RunObservabilityBlock = {
   manifest_first_event_counts?: Record<string, number>;
   last_evaluator_preview_resolution?: Record<string, unknown> | null;
+  /** Per role_invocation payload size metrics (no raw prompts). */
+  role_payload_telemetry_v1?: Array<Record<string, unknown>>;
 };
 
 export type RoleInvocationDetailItem = {
@@ -259,6 +265,8 @@ export type RoleInvocationDetailItem = {
   routing_fact_source?: "persisted" | "none";
   openclaw_transport_trace?: Record<string, unknown> | null;
   normalization_rescue?: boolean | null;
+  /** kmbl_payload_telemetry_v1 (chars/bytes, summary flags). */
+  payload_telemetry?: Record<string, unknown> | null;
 };
 
 export type AssociatedOutputsBlock = {

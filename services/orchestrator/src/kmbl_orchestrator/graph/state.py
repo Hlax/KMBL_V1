@@ -28,6 +28,10 @@ class GraphState(TypedDict, total=False):
 
     build_spec: dict[str, Any] | None
     build_candidate: dict[str, Any] | None
+    # Orchestrator ``build_candidate_summary_v1`` from the previous generator step (token-efficient replan).
+    last_build_candidate_summary_v1: dict[str, Any] | None
+    # Orchestrator artifact-inspection v2 (canonical build summary for artifact-first payloads).
+    last_build_candidate_summary_v2: dict[str, Any] | None
     evaluation_report: dict[str, Any] | None
 
     build_spec_id: str | None

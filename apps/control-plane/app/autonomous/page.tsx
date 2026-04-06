@@ -482,7 +482,14 @@ export default function AutonomousPage() {
             <strong>Live habitat</strong> reflects it in real time.
           </p>
           <p style={{ margin: "0 0 0.5rem" }}>
-            A <strong>staging snapshot</strong> is a frozen row created when the graph stages after evaluator pass/partial. It is for <strong>human review</strong>; it does not replace working staging. Approving or rating a snapshot informs future runs via signals — it does not &quot;paste&quot; that snapshot over the habitat. The canonical flow is: iterations mutate working staging → optional snapshot for review → publication/canon separately.
+            A <strong>staging snapshot</strong> is an immutable review row when policy + evaluation say so
+            (e.g. <code className="mono small">on_nomination</code> after a pass, or{" "}
+            <code className="mono small">always</code> for pass/fail — partial often skips automatic snapshots
+            unless explicitly configured). It is for <strong>human review</strong>; it does not replace working
+            staging. Approving or rating a snapshot informs future runs via signals — it does not &quot;paste&quot;
+            that snapshot over the habitat. Flow: iterations mutate working staging → optional snapshot for review
+            → publication/canon separately. Use <strong>Materialize</strong> on the run page if policy skipped a
+            snapshot but you want a frozen review row.
           </p>
           <p style={{ margin: 0 }} className="muted small">
             Server cron autonomous loops (<code className="mono">/orchestrator/loops</code>) use the same staging model; this page uses <code className="mono">POST /api/runs/start</code> in a client loop.

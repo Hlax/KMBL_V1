@@ -293,7 +293,7 @@ def get_staging_static_preview(
             "Content-Security-Policy": (
                 "default-src 'none'; img-src data: https:; font-src data:; "
                 "style-src 'unsafe-inline'; script-src 'unsafe-inline'; "
-                "connect-src 'self'"
+                "connect-src 'self' https://unpkg.com https://cdn.jsdelivr.net"
             ),
             "Cache-Control": "private, no-store",
         },
@@ -308,6 +308,10 @@ _FILE_MIME_TYPES: dict[str, str] = {
     ".json": "application/json; charset=utf-8",
     ".glsl": "text/plain; charset=utf-8",
     ".wgsl": "text/plain; charset=utf-8",
+    ".vert": "text/plain; charset=utf-8",
+    ".frag": "text/plain; charset=utf-8",
+    ".splat": "application/octet-stream",
+    ".ply": "application/octet-stream",
 }
 
 
@@ -320,7 +324,7 @@ def get_staging_file(
     """
     Serve an individual file from a staging snapshot's ``static_frontend_file_v1`` artifacts.
 
-    Supports .html, .css, .js, .json, .glsl, .wgsl with correct MIME types.
+    Supports .html, .css, .js, .json, .glsl, .wgsl, .vert, .frag, .splat, .ply with correct MIME types.
     Used by WebGL/shader previews that need to fetch config and shader files at runtime.
     """
     try:

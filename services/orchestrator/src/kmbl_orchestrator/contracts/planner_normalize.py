@@ -99,6 +99,8 @@ def _compact_execution_contract_fields(bs: dict[str, Any]) -> dict[str, Any]:
         ec2["layout_mode"] = _trim_str(ec2["layout_mode"], 64)
     if isinstance(ec2.get("lane"), str):
         ec2["lane"] = _trim_str(ec2["lane"], 48)
+    if isinstance(ec2.get("escalation_lane"), str):
+        ec2["escalation_lane"] = _trim_str(ec2["escalation_lane"], 48)
     out["execution_contract"] = ec2
     return out
 

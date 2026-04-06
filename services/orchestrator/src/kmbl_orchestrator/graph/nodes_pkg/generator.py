@@ -40,6 +40,11 @@ from kmbl_orchestrator.runtime.habitat_strategy import (
 )
 from kmbl_orchestrator.runtime.interactive_lane_context import build_interactive_lane_context
 from kmbl_orchestrator.runtime.interrupt_checks import raise_if_interrupt_requested
+from kmbl_orchestrator.runtime.payload_budget_governor_v1 import (
+    apply_payload_budget_governor_v1,
+    merge_governor_report_into_telemetry,
+)
+from kmbl_orchestrator.runtime.payload_telemetry_v1 import build_payload_telemetry_v1
 from kmbl_orchestrator.runtime.run_events import RunEventType, append_graph_run_event
 from kmbl_orchestrator.runtime.static_vertical_invariants import (
     is_interactive_frontend_vertical,
@@ -51,6 +56,20 @@ from kmbl_orchestrator.runtime.workspace_ingest import (
     ingest_workspace_manifest_if_present,
     workspace_ingest_not_attempted_reason,
     workspace_ingest_should_attempt,
+)
+from kmbl_orchestrator.runtime.artifact_snippet_extract import extract_evaluator_snippets
+from kmbl_orchestrator.runtime.artifact_inspector_v2 import build_build_candidate_summary_v2
+from kmbl_orchestrator.runtime.evaluator_snippet_policy_v1 import (
+    should_prebuild_snippets_for_graph_state,
+)
+from kmbl_orchestrator.runtime.generator_wire_compact_v1 import (
+    shape_generator_invocation_output_payload,
+    wire_compaction_routing_marker,
+)
+from kmbl_orchestrator.runtime.build_candidate_summary_v1 import (
+    build_build_candidate_summary_v1,
+    build_slim_build_candidate_state_dict,
+    merge_summary_into_raw_payload,
 )
 from kmbl_orchestrator.runtime.workspace_paths import build_workspace_context_for_generator
 from kmbl_orchestrator.runtime.working_staging_read import (
@@ -122,9 +141,7 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         candidate_artifacts = candidate.get("artifact_outputs", [])
         artifact_count = len(candidate_artifacts)
         has_html = any(
-            a.get("artifact_type") == "static_file" and 
-            str(a.get("path", "")).endswith((".html", ".htm"))
-            for a in candidate_artifacts
+            str(a.get("path", "")).lower().endswith((".html", ".htm")) for a in candidate_artifacts
         )
         facts = build_working_staging_facts(
             ws,
@@ -239,8 +256,30 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         if payload["iteration_plan"] is None:
             payload["iteration_plan"] = {}
         payload["iteration_plan"] = {**payload["iteration_plan"], **rc}
+    if iteration > 0:
+        prior_v2 = state.get("last_build_candidate_summary_v2")
+        prior_v1 = state.get("last_build_candidate_summary_v1")
+        if isinstance(prior_v2, dict):
+            payload["kmbl_prior_build_candidate_summary_v2"] = prior_v2
+        if isinstance(prior_v1, dict):
+            payload["kmbl_prior_build_candidate_summary_v1"] = prior_v1
     if is_interactive_frontend_vertical(bs0, ei0):
-        payload["kmbl_interactive_lane_context"] = build_interactive_lane_context(bs0, ei0)
+        from kmbl_orchestrator.runtime.reference_library import attach_reference_cards_to_lane_context
+
+        _ilc = build_interactive_lane_context(bs0, ei0)
+        _ilc = attach_reference_cards_to_lane_context(
+            _ilc, bs0, ei0, graph_run_id=str(gid)
+        )
+        payload["kmbl_interactive_lane_context"] = _ilc
+        payload["kmbl_reference_patterns"] = _ilc.get("reference_patterns") or []
+        payload["kmbl_library_compliance_hints"] = _ilc.get("library_compliance_hints") or []
+        payload["kmbl_implementation_reference_cards"] = _ilc.get("implementation_reference_cards") or []
+        payload["kmbl_inspiration_reference_cards"] = _ilc.get("inspiration_reference_cards") or []
+        payload["kmbl_planner_observed_reference_cards"] = _ilc.get(
+            "planner_observed_reference_cards"
+        ) or []
+        payload["kmbl_reference_selection_meta"] = _ilc.get("reference_selection_meta")
+        payload["kmbl_reference_library_version"] = _ilc.get("reference_library_version")
     try:
         payload_json_chars = len(json.dumps(payload, ensure_ascii=False, default=str))
     except Exception:
@@ -300,6 +339,11 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             thread_id=tid,
             detail=detail,
         ) from e
+    payload, gov_rep_g = apply_payload_budget_governor_v1("generator", payload)
+    try:
+        payload_json_chars = len(json.dumps(payload, ensure_ascii=False, default=str))
+    except Exception:
+        payload_json_chars = -1
     t_gen = time.perf_counter()
     _log.info(
         "generator_invoke graph_run_id=%s iteration_index=%s provider_config_key=%s payload_json_chars=%s",
@@ -308,6 +352,9 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         gen_key,
         payload_json_chars,
     )
+    tel_g = build_payload_telemetry_v1("generator", payload)
+    tel_g = merge_governor_report_into_telemetry(tel_g, gov_rep_g)
+    routing_meta = {**dict(routing_meta or {}), "kmbl_payload_telemetry_v1": tel_g}
     try:
         inv, raw = ctx.invoker.invoke(
             graph_run_id=gid,
@@ -659,6 +706,33 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             thread_id=tid,
         )
 
+    debug_raw = bool(
+        getattr(ctx.settings, "kmbl_persist_raw_generator_output_for_debug", False),
+    )
+    if debug_raw:
+        _log.warning(
+            "graph_run graph_run_id=%s generator kmbl_persist_raw_generator_output_for_debug=true "
+            "— persisting full model output bodies on role_invocation rows",
+            gid,
+        )
+    persist_out, persist_shape = shape_generator_invocation_output_payload(
+        raw,
+        persist_raw_for_debug=debug_raw,
+        post_normalization=False,
+    )
+    rm_first = dict(inv.routing_metadata_json or {})
+    rm_first["kmbl_generator_persistence_shape_v1"] = persist_shape
+    wc_meta = persist_shape.get("wire_compaction")
+    rm_first["kmbl_generator_wire_compaction_v1"] = wire_compaction_routing_marker(
+        persist_raw_for_debug=debug_raw,
+        wire_meta=wc_meta if isinstance(wc_meta, dict) else None,
+    )
+    inv = inv.model_copy(
+        update={
+            "output_payload_json": persist_out,
+            "routing_metadata_json": rm_first,
+        },
+    )
     ctx.repo.save_role_invocation(inv)
 
     # Get identity_id from state for image generation context
@@ -739,23 +813,88 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     # Apply html_block_v1 artifacts to the current working staging (if any)
     cand = _apply_html_blocks_to_candidate(ctx.repo, cand, tid, graph_run_id=gid)
 
+    refs = list(cand.artifact_refs_json or [])
+    prior_sum = state.get("last_build_candidate_summary_v2") or state.get("last_build_candidate_summary_v1")
+    gen_notes = raw.get("generator_self_summary") if isinstance(raw.get("generator_self_summary"), str) else None
+    summary_v1 = build_build_candidate_summary_v1(
+        refs,
+        build_spec=bs0,
+        event_input=ei0,
+        prior_summary=prior_sum if isinstance(prior_sum, dict) else None,
+        generator_notes=gen_notes,
+    )
+    summary_v2 = build_build_candidate_summary_v2(
+        refs,
+        build_spec=bs0,
+        event_input=ei0,
+        prior_summary=prior_sum if isinstance(prior_sum, dict) else None,
+        generator_notes=gen_notes,
+        generator_raw=raw,
+    )
+    persist_out2, persist_shape2 = shape_generator_invocation_output_payload(
+        raw,
+        persist_raw_for_debug=debug_raw,
+        post_normalization=True,
+    )
+    rm_inv = dict(inv.routing_metadata_json or {})
+    merged_shape = {**(rm_inv.get("kmbl_generator_persistence_shape_v1") or {}), **persist_shape2}
+    rm_inv["kmbl_generator_persistence_shape_v1"] = merged_shape
+    wc_meta2 = persist_shape2.get("wire_compaction")
+    rm_inv["kmbl_generator_wire_compaction_v1"] = wire_compaction_routing_marker(
+        persist_raw_for_debug=debug_raw,
+        wire_meta=wc_meta2 if isinstance(wc_meta2, dict) else None,
+    )
+    inv = inv.model_copy(
+        update={
+            "output_payload_json": persist_out2,
+            "routing_metadata_json": rm_inv,
+        },
+    )
+    ctx.repo.save_role_invocation(inv)
+    state_compact, _ = shape_generator_invocation_output_payload(
+        raw,
+        persist_raw_for_debug=False,
+        post_normalization=True,
+    )
+    raw.clear()
+    raw.update(state_compact)
+
+    preview_hint = cand.preview_url or raw.get("preview_url")
+    if should_prebuild_snippets_for_graph_state(
+        summary_v2=summary_v2,
+        preview_url_hint=str(preview_hint) if preview_hint else "",
+    ):
+        snippets_v1 = extract_evaluator_snippets(refs)
+    else:
+        snippets_v1 = None
+    cand = cand.model_copy(
+        update={
+            "raw_payload_json": merge_summary_into_raw_payload(
+                cand.raw_payload_json, summary_v1, summary_v2=summary_v2
+            ),
+        }
+    )
+
     # Sequential PostgREST writes — no cross-call rollback on Supabase (see RPC helpers for atomicity).
     ctx.repo.save_build_candidate(cand)
     block_anchors = (cand.working_state_patch_json or {}).get("block_preview_anchors") or []
+    raw_for_slim = dict(raw)
+    if block_anchors:
+        raw_for_slim["block_anchors"] = block_anchors
+    slim_candidate = build_slim_build_candidate_state_dict(
+        raw_generator=raw_for_slim,
+        summary=summary_v1,
+        snippets=snippets_v1,
+        full_artifacts=refs,
+        summary_v2=summary_v2,
+    )
     step_state = {
         **dict(state),
-        "build_candidate": {
-            "proposed_changes": raw.get("proposed_changes"),
-            "artifact_outputs": raw.get("artifact_outputs"),
-            "updated_state": raw.get("updated_state"),
-            "sandbox_ref": raw.get("sandbox_ref"),
-            "preview_url": raw.get("preview_url"),
-            "block_anchors": block_anchors if block_anchors else None,
-            "execution_acknowledgment": raw.get("execution_acknowledgment"),
-            "_kmbl_compliance": raw.get("_kmbl_compliance"),
-        },
+        "build_candidate": slim_candidate,
         "build_candidate_id": str(cand.build_candidate_id),
         "current_state": raw.get("updated_state") or state.get("current_state") or {},
+        "last_build_candidate_summary_v1": summary_v1,
+        "last_build_candidate_summary_v2": summary_v2,
     }
     _save_checkpoint_with_event(
         ctx.repo,
@@ -778,4 +917,6 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         "build_candidate": step_state["build_candidate"],
         "build_candidate_id": str(cand.build_candidate_id),
         "current_state": step_state["current_state"],
+        "last_build_candidate_summary_v1": summary_v1,
+        "last_build_candidate_summary_v2": summary_v2,
     }

@@ -139,7 +139,7 @@ def static_file_map_from_payload(payload: dict[str, Any]) -> dict[str, str]:
         p = path.strip().replace("\\", "/")
         if not p.startswith("component/"):
             continue
-        if lang not in ("html", "css", "js", "json", "glsl", "wgsl"):
+        if lang not in ("html", "css", "js", "json", "glsl", "wgsl", "vert", "frag", "splat", "ply"):
             continue
         out[p] = content
     return out

@@ -75,6 +75,8 @@ class GeneratorRoleOutput(BaseModel):
     sandbox_ref: str | None = None
     preview_url: str | None = None
     # Local-build lane: orchestrator expands files into artifact_outputs before normalize.
+    # Artifact-first: prefer ``workspace_manifest_v1`` + ``sandbox_ref`` over inlining large
+    # file bodies in ``artifact_outputs``; orchestrator ingests real files and builds summaries.
     workspace_manifest_v1: dict[str, Any] | None = None
     # Machine-readable failure when the model cannot produce artifacts (no prose fallback).
     # When present with non-empty ``code`` and ``message``, primary fields may be empty.

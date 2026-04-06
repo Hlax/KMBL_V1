@@ -38,6 +38,7 @@ from kmbl_orchestrator.graph.helpers import (
     _uuid,
     compute_evaluator_decision,  # noqa: F401  re-export for tests
     maybe_suppress_duplicate_staging,  # noqa: F401  re-export for tests
+    resolve_iterate_planner_routing,
     should_route_to_planner_on_iterate,  # noqa: F401  re-export for tests
 )
 from kmbl_orchestrator.graph.nodes import (
@@ -127,13 +128,18 @@ def build_compiled_graph(ctx: GraphContext):
     def route_after_decision(state: GraphState) -> str:
         d = state.get("decision")
         if d == "iterate":
-            if should_route_to_planner_on_iterate(dict(state), ctx.settings):
-                gid_raw = state.get("graph_run_id")
-                tid_raw = state.get("thread_id")
-                if gid_raw and tid_raw:
+            route_planner, replan_reason, skipped_legacy = resolve_iterate_planner_routing(
+                dict(state), ctx.settings
+            )
+            gid_raw = state.get("graph_run_id")
+            tid_raw = state.get("thread_id")
+            if gid_raw and tid_raw:
+                tid_u = UUID(str(tid_raw))
+                gid_u = UUID(str(gid_raw))
+                if route_planner:
                     append_graph_run_event(
                         ctx.repo,
-                        UUID(str(gid_raw)),
+                        gid_u,
                         RunEventType.DECISION_ITERATE,
                         {
                             "next_node": "planner",
@@ -141,9 +147,29 @@ def build_compiled_graph(ctx: GraphContext):
                             "stagnation_count": (state.get("current_state") or {}).get(
                                 "stagnation_count"
                             ),
+                            "replan_route_reason": replan_reason,
+                            "planner_skipped_due_to_locked_spec": False,
                         },
-                        thread_id=UUID(str(tid_raw)),
+                        thread_id=tid_u,
                     )
+                elif skipped_legacy:
+                    append_graph_run_event(
+                        ctx.repo,
+                        gid_u,
+                        RunEventType.CONTRACT_WARNING,
+                        {
+                            "kind": "planner_skipped_locked_spec",
+                            "message": (
+                                "Iterate routes to generator-only retry; legacy pivot/stagnation "
+                                "replan disabled (set KMBL_GRAPH_REPLAN_ON_ITERATE_ENABLED=true to opt in)."
+                            ),
+                            "planner_skipped_due_to_locked_spec": True,
+                            "would_have_replanned_legacy": True,
+                            "retry_direction": state.get("retry_direction"),
+                        },
+                        thread_id=tid_u,
+                    )
+            if route_planner:
                 return "planner"
             return "generator"
         if d == "stage":

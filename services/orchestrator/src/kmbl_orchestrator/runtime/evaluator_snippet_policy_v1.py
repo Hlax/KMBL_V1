@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
+from kmbl_orchestrator.runtime.preview_reachability import preview_host_blocked_by_openclaw_default
+
 
 class _SnippetSettings(Protocol):
     orchestrator_smoke_contract_evaluator: bool
@@ -49,6 +51,8 @@ def should_omit_evaluator_snippets_from_llm_payload(
         return False, "summary_v2_preview_readiness_false"
 
     if not preview_url:
+        if preview_resolution.get("operator_preview_url"):
+            return False, "operator_preview_not_browser_reachable_openclaw"
         return False, "no_preview_url"
 
     if not preview_resolution.get("preview_url_is_absolute"):
@@ -78,5 +82,7 @@ def should_prebuild_snippets_for_graph_state(
         return True
     pu = preview_url_hint.strip() if isinstance(preview_url_hint, str) else ""
     if pu.lower().startswith("http"):
+        if preview_host_blocked_by_openclaw_default(pu):
+            return True
         return False
     return True

@@ -18,16 +18,24 @@ from kmbl_orchestrator.runtime.static_vertical_invariants import is_interactive_
 
 SUMMARY_VERSION: int = 1
 
-# Library tokens searched as word-boundary-ish substrings in concatenated JS/HTML (lowercased).
-_LIB_PATTERNS: tuple[tuple[str, str], ...] = (
-    ("three", r"\bthree\.js\b|\bfrom\s+['\"]three['\"]|cdn.*three"),
-    ("gsap", r"\bgsap\b|greensock"),
-    ("pixi", r"\bpixi\b|pixijs"),
+# Strict artifact evidence: import/from, runtime API, or known CDN script URLs (not spec mentions).
+_LIB_PATTERNS_ARTIFACT: tuple[tuple[str, str], ...] = (
+    (
+        "three",
+        r"(?:from|import)\s+['\"]three['\"]|new\s+THREE\b|THREE\.(?:WebGLRenderer|Scene|PerspectiveCamera|Vector3)\b|"
+        r"['\"]https?://[^'\"]*three(?:\.min)?\.js|unpkg\.com/three|cdn\.jsdelivr\.net/(?:npm/)?three",
+    ),
+    (
+        "gsap",
+        r"(?:from|import)\s+['\"]gsap['\"]|gsap\.(?:to|timeline|registerPlugin|from)\b|"
+        r"['\"]https?://[^'\"]*gsap|greensock",
+    ),
+    ("pixi", r"(?:from|import)\s+['\"]pixi\.js['\"]|@pixi/|\bPIXI\."),
     ("wgsl", r"\bwgsl\b|navigator\.gpu"),
-    ("ogl", r"\bogl\b|from\s+['\"]ogl['\"]"),
-    ("twgl", r"\btwgl\b"),
-    ("regl", r"\bregl\b"),
-    (GAUSSIAN_SPLAT_LIBRARY_PRIMARY, r"gaussian|splat3d|gaussiansplats"),
+    ("ogl", r"(?:from|import)\s+['\"]ogl['\"]|\bOGL\."),
+    ("twgl", r"\btwgl\b|from\s+['\"]twgl"),
+    ("regl", r"\bregl\b|require\(['\"]regl['\"]\)"),
+    (GAUSSIAN_SPLAT_LIBRARY_PRIMARY, r"gaussian-splats-3d|GaussianSplats3D|gaussiansplats"),
 )
 
 
@@ -55,19 +63,24 @@ def _concat_text(artifacts: list[dict[str, Any]]) -> str:
     return "\n".join(parts)
 
 
-def _detect_libraries(blob: str) -> list[str]:
+def _detect_libraries_artifact(blob: str) -> list[str]:
+    """Libraries with **artifact** evidence (imports, runtime API, CDN script URLs)."""
     low = blob.lower()
     out: list[str] = []
-    for name, pat in _LIB_PATTERNS:
+    for name, pat in _LIB_PATTERNS_ARTIFACT:
         if name in out:
             continue
         try:
             if re.search(pat, low, re.I):
                 out.append(name)
         except re.error:
-            if name in low:
-                out.append(name)
+            continue
     return sorted(set(out))
+
+
+def _detect_libraries(blob: str) -> list[str]:
+    """Backward-compatible alias — strict artifact detection only."""
+    return _detect_libraries_artifact(blob)
 
 
 def _html_outline(html: str) -> dict[str, Any]:
@@ -193,7 +206,7 @@ def build_build_candidate_summary_v1(
     arts = [a for a in artifacts if isinstance(a, dict)]
     inv = build_file_inventory(arts)
     blob = _concat_text(arts)
-    libs = _detect_libraries(blob)
+    libs = _detect_libraries_artifact(blob)
     ec = build_spec.get("execution_contract") if isinstance(build_spec.get("execution_contract"), dict) else {}
     esc = str(ec.get("escalation_lane") or "").strip().lower() or None
     allowed = ec.get("allowed_libraries") if isinstance(ec.get("allowed_libraries"), list) else []
@@ -220,6 +233,8 @@ def build_build_candidate_summary_v1(
         "escalation_lane": esc,
         "allowed_libraries_contract": allowed_s[:12],
         "libraries_detected_in_artifacts": libs,
+        "libraries_expected_from_execution_contract": allowed_s[:12],
+        "library_detection_provenance": "artifact_source_code",
     }
 
     prev_iter: dict[str, Any] | None = None
@@ -233,6 +248,13 @@ def build_build_candidate_summary_v1(
         "lane": lane,
         "escalation_lane": esc,
         "libraries_detected": libs,
+        "library_detection": {
+            "libraries_detected_artifact": libs,
+            "libraries_expected_from_execution_contract": allowed_s[:12],
+            "libraries_runtime": None,
+            "provenance_artifact": "artifact_source_code",
+            "provenance_contract": "build_spec.execution_contract.allowed_libraries",
+        },
         "file_inventory": inv[:40],
         "file_inventory_truncated": len(inv) > 40,
         "entrypoints": entry,

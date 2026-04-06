@@ -17,7 +17,11 @@ from kmbl_orchestrator.runtime.reference_patterns import (
     build_library_compliance_hints,
     select_reference_patterns,
 )
-from kmbl_orchestrator.runtime.static_vertical_invariants import WEBGL_EXPERIENCE_MODES
+from kmbl_orchestrator.runtime.static_vertical_invariants import (
+    IMMERSIVE_IDENTITY_ARCHETYPE,
+    PRIMARY_SURFACE_HERO_SCENE_FIRST,
+    WEBGL_EXPERIENCE_MODES,
+)
 
 
 def build_interactive_lane_context(
@@ -34,6 +38,29 @@ def build_interactive_lane_context(
     em_s = em.strip().lower() if isinstance(em, str) else ""
     heavy_webgl_ask = em_s in WEBGL_EXPERIENCE_MODES
 
+    site_arch = (build_spec.get("site_archetype") or "").strip().lower()
+    primary_surface = ec.get("primary_surface_mode") if isinstance(ec, dict) else None
+    psm_s = str(primary_surface).strip().lower() if primary_surface else ""
+    immersive_identity = (
+        site_arch == IMMERSIVE_IDENTITY_ARCHETYPE
+        or em_s == IMMERSIVE_IDENTITY_ARCHETYPE
+        or psm_s == PRIMARY_SURFACE_HERO_SCENE_FIRST
+    )
+    immersive_constraints: list[str] = []
+    immersive_anti_patterns: list[str] = []
+    if immersive_identity:
+        immersive_constraints = [
+            "Primary surface must be an interactive hero scene (canvas/WebGL mount) above the fold.",
+            "Projects and case studies are secondary; avoid work-grid / about / contact as the dominant fold structure.",
+            "Scene state must respond to pointer and/or scroll; 3D must not be only parallax decoration.",
+            "Provide a valid prefers-reduced-motion fallback (static or simplified hero).",
+        ]
+        immersive_anti_patterns = [
+            "Portfolio-starter IA with work grid + about + contact as the main above-fold experience.",
+            "Claiming immersive 3D using only CSS transforms/parallax without a real WebGL/canvas region.",
+            "Listing Three.js/GSAP in copy without wiring a hero mount and interaction loop.",
+        ]
+
     req_int = ec.get("required_interactions")
     interaction_hints: list[str] = []
     if isinstance(req_int, list):
@@ -48,6 +75,11 @@ def build_interactive_lane_context(
     return {
         "lane": "interactive_frontend_app_v1",
         "experience_mode": em_s or None,
+        "site_archetype": site_arch or None,
+        "primary_surface_mode": psm_s or None,
+        "immersive_identity_experience": immersive_identity,
+        "immersive_constraints": immersive_constraints,
+        "immersive_anti_patterns": immersive_anti_patterns,
         "heavy_webgl_product_mode_requested": heavy_webgl_ask,
         "preview_pipeline": {
             "summary": (

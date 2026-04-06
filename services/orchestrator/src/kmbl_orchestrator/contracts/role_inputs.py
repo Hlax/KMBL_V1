@@ -284,6 +284,12 @@ class GeneratorRoleInput(BaseModel):
         default=None,
         description="Bundled curated reference_library JSON version.",
     )
+    kmbl_locked_build_spec_digest: str | None = Field(
+        default=None,
+        description=(
+            "On iteration >= 1: short digest of the locked build_spec JSON (orchestrator retry compaction)."
+        ),
+    )
 
 
 class EvaluatorRoleInput(BaseModel):
@@ -348,16 +354,19 @@ class EvaluatorRoleInput(BaseModel):
     preview_url: str | None = Field(
         default=None,
         description=(
-            "Resolved preview URL for visual evaluation — when orchestrator_public_base_url is set, "
-            "prefers GET …/orchestrator/runs/{graph_run_id}/candidate-preview (latest build_candidate "
-            "for this run), then staging-preview, else build_candidate.preview_url."
+            "Browser/OpenClaw-reachable preview URL when the host is public (or private fetch is "
+            "explicitly allowed). Prefers KMBL_ORCHESTRATOR_PUBLIC_BASE_URL + candidate-preview, then a "
+            "public build_candidate.preview_url. Omitted when only operator-local (localhost/private) "
+            "URLs exist — see operator_preview_url in preview_resolution for human-local browsing."
         ),
     )
     preview_resolution: dict[str, Any] | None = Field(
         default=None,
         description=(
-            "Orchestrator-computed preview resolution: preview_url, preview_url_source, "
-            "preview_url_is_absolute, orchestrator_public_base_url_configured."
+            "Orchestrator preview resolution: preview_url (browser MCP), operator_preview_url (human), "
+            "preview_grounding_mode (operator_local_only | browser_reachable | unavailable), "
+            "preview_url_host_class, preview_grounding_reason, preview_url_browser_reachable_expected, "
+            "and related flags."
         ),
     )
     iteration_context: dict[str, Any] | None = Field(

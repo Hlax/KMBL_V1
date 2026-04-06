@@ -511,5 +511,17 @@ class CrawlStateRecord(BaseModel):
     )
     total_pages_crawled: int = 0
     last_crawled_at: str | None = None
+    extracted_urls: list[str] = Field(
+        default_factory=list,
+        description="URLs with extracted facts (subset of visited; identity exploration).",
+    )
+    rejected_urls: list[str] = Field(
+        default_factory=list,
+        description="URLs rejected or deprioritized for frontier selection.",
+    )
+    extracted_fact_digest: str = Field(
+        default="",
+        description="Stable short digest over page summaries for stale detection.",
+    )
     created_at: str = Field(default_factory=_utc_now_iso)
     updated_at: str = Field(default_factory=_utc_now_iso)

@@ -53,14 +53,21 @@ def test_resolve_evaluator_preview_resolution_candidate_absolute() -> None:
         thread_id="t1",
         build_candidate={},
     )
-    assert r["preview_url"] == "http://127.0.0.1:8010/orchestrator/runs/g1/candidate-preview"
-    assert r["preview_url_source"] == "orchestrator_candidate_preview"
-    assert r["preview_url_is_absolute"] is True
+    assert r["operator_preview_url"] == (
+        "http://127.0.0.1:8010/orchestrator/runs/g1/candidate-preview"
+    )
+    assert r["operator_preview_url_source"] == "orchestrator_candidate_preview"
+    assert r["preview_url"] is None
+    assert r["preview_url_is_absolute"] is False
+    assert r["preview_grounding_mode"] == "operator_local_only"
+    assert r["preview_url_host_class"] == "localhost"
+    assert r["preview_grounding_reason"] == "private_host_blocked_by_gateway_policy"
     assert r["orchestrator_public_base_url_configured"] is True
 
 
 def test_resolve_evaluator_preview_resolution_https_fallback() -> None:
-    s = Settings()
+    # Disable local derivation so orchestrator candidate URL does not win over build_candidate.
+    s = Settings(kmbl_preview_derive_local_public_base=False, kmbl_env="development")
     r = resolve_evaluator_preview_resolution(
         s,
         graph_run_id="g1",
@@ -71,10 +78,12 @@ def test_resolve_evaluator_preview_resolution_https_fallback() -> None:
     assert r["preview_url_source"] == "build_candidate_preview_url"
     assert r["preview_url_is_absolute"] is True
     assert r["orchestrator_public_base_url_configured"] is False
+    assert r["preview_grounding"] == "ok"
+    assert r["preview_grounding_mode"] == "browser_reachable"
 
 
 def test_resolve_evaluator_preview_url_wraps_resolution() -> None:
-    s = Settings()
+    s = Settings(kmbl_preview_derive_local_public_base=False)
     u = resolve_evaluator_preview_url(
         s,
         graph_run_id="g1",

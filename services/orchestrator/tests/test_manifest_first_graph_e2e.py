@@ -293,17 +293,21 @@ def test_manifest_first_inline_html_skips_ingest_fails(
     assert RunEventType.MANIFEST_FIRST_VIOLATION in types
 
 
-def test_manifest_first_evaluator_grounding_unavailable_graph(
+def test_manifest_first_evaluator_runs_without_browser_preview_when_summary_v2_ok(
     tmp_path: Any,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """No absolute preview URL with manifest-first static vertical → evaluator fails before LLM."""
+    """
+    No OpenClaw-reachable preview URL (localhost operator-only) but manifest-first summary_v2
+    grounds the evaluator without demanding browser MCP fetch.
+    """
     settings = _settings_mf(tmp_path, manifest_first=True, public_base="")
     monkeypatch.setattr("kmbl_orchestrator.roles.invoke.get_settings", lambda: settings)
 
     repo = InMemoryRepository()
     invoker = DefaultRoleInvoker(settings=settings)
     orig = KiloClawStubClient.invoke_role
+    evaluator_payloads: list[dict[str, Any]] = []
 
     tid_s, gid_s = persist_graph_run_start(
         repo,
@@ -343,22 +347,40 @@ def test_manifest_first_evaluator_grounding_unavailable_graph(
                 "updated_state": {"revision": 1},
             }
             return _apply_role_contract("generator", raw)
+        if role_type == "evaluator":
+            evaluator_payloads.append(dict(payload))
+            return _apply_role_contract(
+                "evaluator",
+                {
+                    "status": "pass",
+                    "summary": "mf no browser preview",
+                    "issues": [],
+                    "artifacts": [],
+                    "metrics": {},
+                },
+            )
         return orig(self, role_type, provider_config_key, payload)
 
     with patch.object(KiloClawStubClient, "invoke_role", wrapped):
-        with pytest.raises(RoleInvocationFailed) as exc:
-            run_graph(
-                repo=repo,
-                invoker=invoker,
-                settings=settings,
-                initial={
-                    "thread_id": tid_s,
-                    "graph_run_id": gid_s,
-                    "event_input": {},
-                },
-            )
-    assert exc.value.phase == "evaluator"
-    assert exc.value.detail.get("error_kind") == "evaluator_grounding_unavailable"
+        run_graph(
+            repo=repo,
+            invoker=invoker,
+            settings=settings,
+            initial={
+                "thread_id": tid_s,
+                "graph_run_id": gid_s,
+                "event_input": {},
+            },
+        )
+
+    assert evaluator_payloads, "evaluator should run"
+    ep0 = evaluator_payloads[0]
+    assert ep0.get("preview_url") is None
+    pr = ep0.get("preview_resolution") or {}
+    assert pr.get("preview_grounding_mode") == "operator_local_only"
+    assert pr.get("operator_preview_url")
 
     evs = repo.list_graph_run_events(gid_u, limit=200)
-    assert RunEventType.EVALUATOR_GROUNDING_UNAVAILABLE in [e.event_type for e in evs]
+    types = [e.event_type for e in evs]
+    assert RunEventType.CANDIDATE_PREVIEW_UNREACHABLE_PRIVATE_HOST in types
+    assert RunEventType.EVALUATOR_GROUNDING_UNAVAILABLE not in types

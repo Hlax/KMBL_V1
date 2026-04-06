@@ -55,6 +55,7 @@ from kmbl_orchestrator.runtime.run_events import RunEventType, append_graph_run_
 from kmbl_orchestrator.runtime.working_staging_read import (
     get_working_staging_for_thread_resilient,
 )
+from kmbl_orchestrator.runtime.preview_reachability import manifest_first_evaluator_grounding_satisfied
 from kmbl_orchestrator.runtime.session_staging_links import resolve_evaluator_preview_resolution
 from kmbl_orchestrator.runtime.static_vertical_invariants import (
     is_interactive_frontend_vertical,
@@ -180,7 +181,56 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             **preview_resolution,
             "preview_url": None,
             "preview_url_is_absolute": False,
+            "preview_url_browser_reachable_expected": False,
+            "preview_grounding_mode": "unavailable",
+            "preview_grounding_reason": "smoke_contract_evaluator",
         }
+    if not getattr(ctx.settings, "orchestrator_smoke_contract_evaluator", False):
+        if (
+            preview_resolution.get("preview_grounding") == "missing_public_base"
+            and preview_resolution.get("preview_paths_present")
+        ):
+            append_graph_run_event(
+                ctx.repo,
+                gid,
+                RunEventType.PREVIEW_GROUNDING_FAILED,
+                {
+                    "kind": "preview_grounding",
+                    "message": (
+                        "Preview paths exist but no absolute preview URL; set "
+                        "KMBL_ORCHESTRATOR_PUBLIC_BASE_URL or rely on local derivation "
+                        "(non-production, KMBL_PREVIEW_DERIVE_LOCAL_PUBLIC_BASE)."
+                    ),
+                    "preview_grounding": preview_resolution.get("preview_grounding"),
+                    "orchestrator_public_base_source": preview_resolution.get(
+                        "orchestrator_public_base_source"
+                    ),
+                },
+                thread_id=tid,
+            )
+    if (
+        not getattr(ctx.settings, "orchestrator_smoke_contract_evaluator", False)
+        and preview_resolution.get("preview_grounding_degrade_reason")
+        == "private_host_blocked_by_gateway_policy"
+    ):
+        append_graph_run_event(
+            ctx.repo,
+            gid,
+            RunEventType.CANDIDATE_PREVIEW_UNREACHABLE_PRIVATE_HOST,
+            {
+                "kind": "preview_reachability",
+                "message": (
+                    "Operator preview URL is localhost/private; OpenClaw browser MCP will not fetch it "
+                    "by default. Set KMBL_ORCHESTRATOR_PUBLIC_BASE_URL (tunnel / Tailscale / public base), "
+                    "or set KMBL_EVALUATOR_ALLOW_PRIVATE_PREVIEW_FETCH=true for local-only overrides."
+                ),
+                "operator_preview_url": preview_resolution.get("operator_preview_url"),
+                "preview_url_host_class": preview_resolution.get("preview_url_host_class"),
+                "preview_grounding_mode": preview_resolution.get("preview_grounding_mode"),
+                "preview_grounding_reason": preview_resolution.get("preview_grounding_reason"),
+            },
+            thread_id=tid,
+        )
     skip_llm, skip_reason = should_skip_evaluator_llm(bc_slim, bs_for_skip, ei_for_skip)
     omit_snippets, snippet_policy_reason = should_omit_evaluator_snippets_from_llm_payload(
         bc_slim=bc_slim,
@@ -200,10 +250,7 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         and not getattr(ctx.settings, "orchestrator_smoke_contract_evaluator", False)
     )
     if (not skip_llm) and mf_ground:
-        pr_ok = bool(
-            preview_resolution.get("preview_url")
-            and preview_resolution.get("preview_url_is_absolute"),
-        )
+        pr_ok = manifest_first_evaluator_grounding_satisfied(preview_resolution, bc_slim)
         if not pr_ok:
             append_graph_run_event(
                 ctx.repo,
@@ -389,6 +436,19 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         evaluator_invocation_id=inv.role_invocation_id,
         build_candidate_id=UUID(bcid),
     )
+    _prev_m = dict(report.metrics_json or {})
+    _prev_m["preview_grounding"] = preview_resolution.get("preview_grounding")
+    _prev_m["preview_grounding_degraded"] = preview_resolution.get("preview_grounding_degraded")
+    _prev_m["preview_grounding_degrade_reason"] = preview_resolution.get(
+        "preview_grounding_degrade_reason"
+    )
+    _prev_m["preview_grounding_mode"] = preview_resolution.get("preview_grounding_mode")
+    _prev_m["preview_grounding_reason"] = preview_resolution.get("preview_grounding_reason")
+    _prev_m["preview_url_host_class"] = preview_resolution.get("preview_url_host_class")
+    _prev_m["orchestrator_public_base_source"] = preview_resolution.get(
+        "orchestrator_public_base_source"
+    )
+    report = report.model_copy(update={"metrics_json": _prev_m})
     ev_input = state.get("event_input") if isinstance(state.get("event_input"), dict) else {}
     bs_ev = state.get("build_spec") if isinstance(state.get("build_spec"), dict) else {}
     is_static_vertical = ev_input.get("scenario", "").startswith(

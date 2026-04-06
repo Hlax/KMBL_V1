@@ -100,9 +100,10 @@ class Settings(BaseSettings):
             "graph_max_iterations_default",
         ),
     )
-    # When true, decision "iterate" may route to planner (new build_spec) instead of generator-only.
+    # When true, pivot/stagnation may route iterate → planner (legacy). Hard replan conditions
+    # (build_spec_invalid, vertical mismatch, etc.) always route to planner regardless.
     graph_replan_on_iterate_enabled: bool = Field(
-        default=True,
+        default=False,
         validation_alias=AliasChoices(
             "KMBL_GRAPH_REPLAN_ON_ITERATE_ENABLED",
             "graph_replan_on_iterate_enabled",
@@ -174,6 +175,23 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices(
             "KMBL_ORCHESTRATOR_PUBLIC_BASE_URL",
             "orchestrator_public_base_url",
+        ),
+    )
+    # When public base is unset, derive http://127.0.0.1:{orchestrator_port} for preview URLs (not in production).
+    kmbl_preview_derive_local_public_base: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "KMBL_PREVIEW_DERIVE_LOCAL_PUBLIC_BASE",
+            "kmbl_preview_derive_local_public_base",
+        ),
+    )
+    # When true: pass localhost/private preview URLs to the evaluator/OpenClaw path (browser MCP / web_fetch).
+    # Default false — gateways typically block special-use hosts; use a tunnel or KMBL_ORCHESTRATOR_PUBLIC_BASE_URL.
+    kmbl_evaluator_allow_private_preview_fetch: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "KMBL_EVALUATOR_ALLOW_PRIVATE_PREVIEW_FETCH",
+            "kmbl_evaluator_allow_private_preview_fetch",
         ),
     )
     # Absolute root for on-disk generator workspaces (local builds). Empty = default under

@@ -61,6 +61,31 @@ def test_compact_generator_wire_strips_artifact_output_content() -> None:
     assert tel["removed_inline_content_char_estimate"] == 9000
 
 
+def test_include_snippets_when_operator_preview_only_localhost() -> None:
+    s = Settings.model_construct(
+        orchestrator_smoke_contract_evaluator=False,
+        kmbl_evaluator_force_snippets=False,
+    )
+    bc = {
+        "kmbl_build_candidate_summary_v2": {
+            "entrypoints": ["index.html"],
+            "preview_readiness": {"has_resolved_entrypoints": True},
+        },
+    }
+    omit, reason = should_omit_evaluator_snippets_from_llm_payload(
+        bc_slim=bc,
+        skip_llm=False,
+        preview_url=None,
+        preview_resolution={
+            "preview_url_is_absolute": False,
+            "operator_preview_url": "http://127.0.0.1:8010/orchestrator/runs/g/candidate-preview",
+        },
+        settings=s,
+    )
+    assert omit is False
+    assert reason == "operator_preview_not_browser_reachable_openclaw"
+
+
 def test_omit_snippets_when_v2_preview_absolute() -> None:
     s = Settings.model_construct(
         orchestrator_smoke_contract_evaluator=False,
@@ -108,6 +133,17 @@ def test_prebuild_snippets_false_when_http_preview_and_v2_ok() -> None:
         summary_v2=s2,
         preview_url_hint="https://p",
     ) is False
+
+
+def test_prebuild_snippets_true_when_localhost_hint_even_with_v2() -> None:
+    s2 = {
+        "entrypoints": ["a.html"],
+        "preview_readiness": {"has_resolved_entrypoints": True},
+    }
+    assert should_prebuild_snippets_for_graph_state(
+        summary_v2=s2,
+        preview_url_hint="http://127.0.0.1:8010/orchestrator/runs/g/candidate-preview",
+    ) is True
 
 
 def test_merge_slim_with_full_refs_for_literal_gate() -> None:

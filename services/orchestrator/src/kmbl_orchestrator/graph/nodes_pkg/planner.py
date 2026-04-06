@@ -288,6 +288,20 @@ def planner_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         md = raw.setdefault("_kmbl_planner_metadata", {})
         md["normalized_missing_fields"] = normalized_fields
 
+    cc_plan = ei.get("crawl_context") if isinstance(ei, dict) else None
+    if isinstance(cc_plan, dict):
+        from kmbl_orchestrator.identity.crawl_frontier_tags import annotate_selected_urls_grounding
+
+        gmeta = annotate_selected_urls_grounding(raw["build_spec"], cc_plan)
+        if gmeta:
+            append_graph_run_event(
+                ctx.repo,
+                gid,
+                RunEventType.PLANNER_CRAWL_COMPLIANCE,
+                {"kind": "selected_url_grounding", **gmeta},
+                thread_id=tid,
+            )
+
     # Ensure experience_mode is always explicitly set in build_spec.
     # If the planner set it, we respect it; otherwise, derive from structured identity.
     # Cross-run memory may bias toward a remembered mode only when identity confidence is low

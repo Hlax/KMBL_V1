@@ -280,6 +280,13 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         ) or []
         payload["kmbl_reference_selection_meta"] = _ilc.get("reference_selection_meta")
         payload["kmbl_reference_library_version"] = _ilc.get("reference_library_version")
+    chars_saved_iteration = 0
+    if iteration > 0:
+        from kmbl_orchestrator.runtime.generator_iteration_compact_v1 import (
+            apply_iteration_compaction,
+        )
+
+        chars_saved_iteration = apply_iteration_compaction(payload, iteration)
     try:
         payload_json_chars = len(json.dumps(payload, ensure_ascii=False, default=str))
     except Exception:
@@ -353,6 +360,8 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         payload_json_chars,
     )
     tel_g = build_payload_telemetry_v1("generator", payload)
+    if iteration > 0 and chars_saved_iteration:
+        tel_g["chars_saved_from_iteration_compaction"] = chars_saved_iteration
     tel_g = merge_governor_report_into_telemetry(tel_g, gov_rep_g)
     routing_meta = {**dict(routing_meta or {}), "kmbl_payload_telemetry_v1": tel_g}
     try:

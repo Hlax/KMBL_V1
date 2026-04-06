@@ -15,7 +15,18 @@ from kmbl_orchestrator.roles.invoke import DefaultRoleInvoker
 from kmbl_orchestrator.runtime.session_staging_links import resolve_evaluator_preview_url
 
 
-def test_resolve_evaluator_preview_url_prefers_candidate_preview() -> None:
+def test_resolve_evaluator_preview_url_prefers_public_orchestrator_base_over_localhost() -> None:
+    s = Settings(orchestrator_public_base_url="https://tunnel.example.dev")
+    u = resolve_evaluator_preview_url(
+        s,
+        graph_run_id="g1",
+        thread_id="t1",
+        build_candidate={"preview_url": "https://candidate.example/preview"},
+    )
+    assert u == "https://tunnel.example.dev/orchestrator/runs/g1/candidate-preview"
+
+
+def test_resolve_evaluator_preview_url_public_build_candidate_when_orchestrator_localhost() -> None:
     s = Settings(orchestrator_public_base_url="http://127.0.0.1:8010")
     u = resolve_evaluator_preview_url(
         s,
@@ -23,11 +34,11 @@ def test_resolve_evaluator_preview_url_prefers_candidate_preview() -> None:
         thread_id="t1",
         build_candidate={"preview_url": "https://candidate.example/preview"},
     )
-    assert u == "http://127.0.0.1:8010/orchestrator/runs/g1/candidate-preview"
+    assert u == "https://candidate.example/preview"
 
 
 def test_resolve_evaluator_preview_url_falls_back_to_candidate() -> None:
-    s = Settings()
+    s = Settings(kmbl_preview_derive_local_public_base=False)
     u = resolve_evaluator_preview_url(
         s,
         graph_run_id="g1",
@@ -41,7 +52,7 @@ def test_evaluator_payload_includes_preview_and_iteration_context() -> None:
     settings = Settings.model_construct(
         openclaw_transport="stub",
         graph_max_iterations_default=3,
-        orchestrator_public_base_url="http://127.0.0.1:8010",
+        orchestrator_public_base_url="https://orch-public.example",
         habitat_image_generation_enabled=False,
     )
     repo = InMemoryRepository()
@@ -77,10 +88,11 @@ def test_evaluator_payload_includes_preview_and_iteration_context() -> None:
 
     assert len(payloads) >= 2
     assert payloads[0]["preview_url"] == (
-        f"http://127.0.0.1:8010/orchestrator/runs/{gid_s}/candidate-preview"
+        f"https://orch-public.example/orchestrator/runs/{gid_s}/candidate-preview"
     )
     pr0 = payloads[0].get("preview_resolution") or {}
     assert pr0.get("preview_url_is_absolute") is True
+    assert pr0.get("preview_grounding_mode") == "browser_reachable"
     assert pr0.get("orchestrator_public_base_url_configured") is True
     assert payloads[0]["iteration_context"]["iteration_index"] == 0
     assert payloads[0]["iteration_context"]["has_previous_evaluation_report"] is False

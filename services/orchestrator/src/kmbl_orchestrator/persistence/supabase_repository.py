@@ -1840,6 +1840,9 @@ class SupabaseRepository(SupabaseRepositoryAutonomousLoopMixin):
             "external_inspiration_urls": record.external_inspiration_urls,
             "total_pages_crawled": record.total_pages_crawled,
             "last_crawled_at": record.last_crawled_at,
+            "extracted_urls": record.extracted_urls,
+            "rejected_urls": record.rejected_urls,
+            "extracted_fact_digest": record.extracted_fact_digest,
             "created_at": record.created_at,
             "updated_at": record.updated_at,
         }

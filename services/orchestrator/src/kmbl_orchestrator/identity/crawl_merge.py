@@ -52,6 +52,9 @@ def merge_identity_with_site(
         external_inspiration_urls=list(site.external_inspiration_urls),
         total_pages_crawled=site.total_pages_crawled,
         last_crawled_at=site.last_crawled_at,
+        extracted_urls=list(identity_row.extracted_urls),
+        rejected_urls=list(identity_row.rejected_urls),
+        extracted_fact_digest=identity_row.extracted_fact_digest,
         created_at=identity_row.created_at,
         updated_at=identity_row.updated_at,
     )

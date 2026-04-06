@@ -17,8 +17,13 @@ WEBGL_EXPERIENCE_MODES: frozenset[str] = frozenset(
         "webgl_3d_portfolio",
         "immersive_spatial_portfolio",
         "model_centric_experience",
+        "immersive_identity_experience",
     },
 )
+
+# Hero-first immersive lane: primary interactive surface above the fold (not decorative 3D garnish).
+IMMERSIVE_IDENTITY_ARCHETYPE: str = "immersive_identity_experience"
+PRIMARY_SURFACE_HERO_SCENE_FIRST: str = "hero_scene_first"
 
 _STATIC_VERTICAL_INCOMPATIBLE_MODES = WEBGL_EXPERIENCE_MODES
 

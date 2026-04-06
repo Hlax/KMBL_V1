@@ -240,6 +240,7 @@ def test_evaluator_stub_payload_omits_snippets_when_preview_grounded() -> None:
         staging_snapshot_policy="on_nomination",
         graph_max_iterations_default=1,
         habitat_image_generation_enabled=False,
+        orchestrator_public_base_url="https://preview.stub.test",
     )
     invoker = DefaultRoleInvoker(settings=settings)
     orig = DefaultRoleInvoker.invoke

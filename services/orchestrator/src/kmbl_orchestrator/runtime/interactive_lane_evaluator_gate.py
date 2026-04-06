@@ -9,7 +9,11 @@ from typing import Any
 
 from kmbl_orchestrator.domain import EvaluationReportRecord
 from kmbl_orchestrator.runtime.literal_success_gate import collect_static_artifact_raw_concat
-from kmbl_orchestrator.runtime.static_vertical_invariants import is_interactive_frontend_vertical
+from kmbl_orchestrator.runtime.static_vertical_invariants import (
+    IMMERSIVE_IDENTITY_ARCHETYPE,
+    PRIMARY_SURFACE_HERO_SCENE_FIRST,
+    is_interactive_frontend_vertical,
+)
 from kmbl_orchestrator.staging.integrity import scan_interactive_bundle_preview_risks
 
 
@@ -101,6 +105,31 @@ def apply_interactive_lane_evaluator_gate(
         "interactive_evidence_ok": bool(evidence_ok),
         "hollow_control_affordances_without_js": bool(hollow_controls),
     }
+
+    ec_b = build_spec.get("execution_contract") if isinstance(build_spec.get("execution_contract"), dict) else {}
+    em_s = (build_spec.get("experience_mode") or "").strip().lower()
+    sa_s = (build_spec.get("site_archetype") or "").strip().lower()
+    psm_s = str(ec_b.get("primary_surface_mode") or "").strip().lower()
+    immersive_identity = (
+        sa_s == IMMERSIVE_IDENTITY_ARCHETYPE
+        or em_s == IMMERSIVE_IDENTITY_ARCHETYPE
+        or psm_s == PRIMARY_SURFACE_HERO_SCENE_FIRST
+    )
+    if immersive_identity:
+        head_blob = (html_blob[:12000] if html_blob else raw_text[:12000]).lower()
+        hero_fold = ("<canvas" in head_blob) or ("webgl" in head_blob and "getcontext" in head_blob)
+        scroll_ptr = bool(
+            _INTERACTION_SIGNAL_RE.search(raw_text)
+            and (
+                re.search(r"scroll|wheel|pointer", raw_text, re.I) is not None
+            )
+        )
+        reduced_ok = "prefers-reduced-motion" in raw_text.lower() or "matchmedia" in raw_text.lower()
+        m["immersive_identity_metrics"] = {
+            "hero_canvas_or_webgl_fold_hint": bool(hero_fold or canvas_hits > 0),
+            "pointer_or_scroll_affects_scene_hint": bool(scroll_ptr and (canvas_hits > 0 or hero_fold)),
+            "reduced_motion_fallback_hint": reduced_ok,
+        }
 
     issues = list(report.issues_json or [])
     status = report.status

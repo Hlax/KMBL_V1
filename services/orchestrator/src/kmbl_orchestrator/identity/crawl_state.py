@@ -13,6 +13,8 @@ All state is persisted via the Repository so it survives restarts.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
@@ -256,6 +258,18 @@ def record_page_visit(
             len(visited),
         )
 
+    extracted = list(state.extracted_urls)
+    if normalized not in extracted and (
+        (summary or "").strip()
+        or (design_signals or [])
+        or (tone_keywords or [])
+    ):
+        extracted.append(normalized)
+
+    digest = hashlib.sha256(
+        json.dumps(summaries, sort_keys=True, default=str).encode("utf-8", errors="replace")
+    ).hexdigest()[:16]
+
     updated = state.model_copy(
         update={
             "visited_urls": visited,
@@ -265,6 +279,8 @@ def record_page_visit(
             "crawl_status": crawl_status,
             "total_pages_crawled": state.total_pages_crawled + 1,
             "last_crawled_at": now,
+            "extracted_urls": extracted,
+            "extracted_fact_digest": digest,
             "updated_at": now,
         }
     )
@@ -557,4 +573,9 @@ def build_crawl_context_for_planner(
         ),
         # Planner instructions for selected_urls contract:
         "selected_urls_contract": _SELECTED_URLS_CONTRACT,
+        "extracted_url_count": len(state.extracted_urls),
+        "rejected_url_count": len(state.rejected_urls),
+        "extracted_fact_digest": state.extracted_fact_digest or "",
+        "extracted_urls_sample": list(state.extracted_urls)[-24:],
+        "grounded_reference_urls": list(state.page_summaries.keys())[-48:],
     }

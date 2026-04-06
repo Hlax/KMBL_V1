@@ -399,7 +399,12 @@ def _parse_chat_completion_json_content(
             normalized=provider_failure(
                 ph,
                 error_type="provider_error",
-                details={"preview": raw[:500], "kind": "openclaw_placeholder"},
+                details={
+                    "preview": raw[:500],
+                    "kind": "openclaw_placeholder",
+                    "failure_severity": "fatal",
+                    "failure_class": "no_reply_or_empty_gateway",
+                },
             ),
         )
 

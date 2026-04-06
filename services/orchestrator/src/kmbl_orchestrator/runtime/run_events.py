@@ -103,6 +103,8 @@ class RunEventType:
     WORKSPACE_INGEST_SKIPPED_INLINE_HTML = "workspace_ingest_skipped_inline_html"
     MANIFEST_FIRST_VIOLATION = "manifest_first_violation"
     EVALUATOR_GROUNDING_UNAVAILABLE = "evaluator_grounding_unavailable"
+    PREVIEW_GROUNDING_FAILED = "preview_grounding_failed"
+    CANDIDATE_PREVIEW_UNREACHABLE_PRIVATE_HOST = "candidate_preview_unreachable_due_to_private_host"
 
 
 def append_graph_run_event(

@@ -430,6 +430,9 @@ def _row_to_crawl_state(row: dict[str, Any]) -> CrawlStateRecord:
         external_inspiration_urls=list(ei) if isinstance(ei, list) else [],
         total_pages_crawled=int(row.get("total_pages_crawled", 0)),
         last_crawled_at=_ts_to_iso(row.get("last_crawled_at")),
+        extracted_urls=list(row.get("extracted_urls") or []) if isinstance(row.get("extracted_urls"), list) else [],
+        rejected_urls=list(row.get("rejected_urls") or []) if isinstance(row.get("rejected_urls"), list) else [],
+        extracted_fact_digest=str(row.get("extracted_fact_digest") or ""),
         created_at=_ts_to_iso(row.get("created_at")) or "",
         updated_at=_ts_to_iso(row.get("updated_at")) or "",
     )

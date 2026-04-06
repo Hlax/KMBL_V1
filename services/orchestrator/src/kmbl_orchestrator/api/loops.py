@@ -20,6 +20,10 @@ from pydantic import BaseModel, Field
 from kmbl_orchestrator.config import Settings, get_settings
 from kmbl_orchestrator.graph.app import persist_graph_run_start, run_graph
 from kmbl_orchestrator.persistence.repository import Repository
+from kmbl_orchestrator.persistence.repository_health import (
+    merge_preflight_into_event_input,
+    require_repository_dispatch_healthy,
+)
 from kmbl_orchestrator.roles.invoke import DefaultRoleInvoker
 
 _log = logging.getLogger(__name__)
@@ -80,6 +84,14 @@ async def run_graph_for_loop(
     decision_router's direction selection actually reaches the generator.
     Without this parameter, cross-run direction application is inert.
     """
+    pre = await asyncio.to_thread(
+        lambda: require_repository_dispatch_healthy(
+            repo, settings, context="autonomous_loop_run_graph"
+        )
+    )
+    if pre:
+        event_input = merge_preflight_into_event_input(event_input, pre)
+
     t_str, gid_str = persist_graph_run_start(
         repo,
         thread_id=str(thread_id) if thread_id else None,

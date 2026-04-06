@@ -1,5 +1,17 @@
 """Persistence-layer errors with explicit semantics (no silent PostgREST fallbacks)."""
 
+from __future__ import annotations
+
+from typing import Any
+
+
+class RepositoryDispatchBlockedError(RuntimeError):
+    """Supabase REST preflight failed — graph dispatch should not proceed."""
+
+    def __init__(self, snapshot: dict[str, Any], *, message: str | None = None) -> None:
+        self.snapshot = snapshot
+        super().__init__(message or snapshot.get("message") or "repository preflight blocked")
+
 
 class ActiveGraphRunPerThreadConflictError(RuntimeError):
     """Insert/update would create a second active graph_run for the same thread (DB unique index)."""

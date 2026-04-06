@@ -2,6 +2,7 @@
 
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import urlparse
 
 from typing import Literal
 
@@ -474,6 +475,37 @@ class Settings(BaseSettings):
     def _default_allow_stub_from_env(self) -> "Settings":
         if self.allow_stub_transport is None:
             object.__setattr__(self, "allow_stub_transport", self.kmbl_env != "production")
+        return self
+
+    @model_validator(mode="after")
+    def _validate_supabase_url_shape(self) -> "Settings":
+        """Catch obvious misconfiguration before PostgREST returns HTML/Cloudflare pages."""
+        url = (self.supabase_url or "").strip()
+        key = (self.supabase_service_role_key or "").strip()
+        if key and not url:
+            raise ValueError(
+                "SUPABASE_SERVICE_ROLE_KEY is set but SUPABASE_URL is empty — "
+                "set the project API URL (https://<ref>.supabase.co) or remove the key for in-memory mode."
+            )
+        if not url:
+            return self
+        parsed = urlparse(url)
+        if parsed.scheme not in ("https", "http"):
+            raise ValueError(
+                f"SUPABASE_URL must use https or http, got scheme={parsed.scheme!r}"
+            )
+        if not parsed.netloc:
+            raise ValueError("SUPABASE_URL is missing a host — check for typos or paste errors.")
+        host_l = parsed.netloc.lower()
+        if parsed.scheme == "http" and "127.0.0.1" not in host_l and "localhost" not in host_l:
+            raise ValueError(
+                "SUPABASE_URL may only use http:// for localhost development; use https:// for hosted Supabase."
+            )
+        if "app.supabase.com" in host_l or "/project/" in url:
+            raise ValueError(
+                "SUPABASE_URL must be the project's REST API base (e.g. https://<ref>.supabase.co), "
+                "not the Supabase dashboard or a /project/… URL."
+            )
         return self
 
     def effective_allow_stub_transport(self) -> bool:

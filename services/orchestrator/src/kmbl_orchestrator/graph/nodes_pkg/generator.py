@@ -53,6 +53,9 @@ from kmbl_orchestrator.runtime.workspace_ingest import (
     workspace_ingest_should_attempt,
 )
 from kmbl_orchestrator.runtime.workspace_paths import build_workspace_context_for_generator
+from kmbl_orchestrator.runtime.working_staging_read import (
+    get_working_staging_for_thread_resilient,
+)
 from kmbl_orchestrator.staging.facts import (
     build_working_staging_facts,
     working_staging_facts_to_payload,
@@ -99,7 +102,13 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     if iteration > 0:
         feedback = state.get("evaluation_report")
 
-    ws = ctx.repo.get_working_staging_for_thread(tid)
+    ws = get_working_staging_for_thread_resilient(
+        ctx.repo,
+        tid,
+        graph_run_id=gid,
+        phase="generator",
+        iteration_index=iteration,
+    )
     ws_facts: dict[str, Any] | None = None
 
     # On iteration > 0, build facts from the current build_candidate in state
@@ -728,7 +737,7 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         )
 
     # Apply html_block_v1 artifacts to the current working staging (if any)
-    cand = _apply_html_blocks_to_candidate(ctx.repo, cand, tid)
+    cand = _apply_html_blocks_to_candidate(ctx.repo, cand, tid, graph_run_id=gid)
 
     # Sequential PostgREST writes — no cross-call rollback on Supabase (see RPC helpers for atomicity).
     ctx.repo.save_build_candidate(cand)

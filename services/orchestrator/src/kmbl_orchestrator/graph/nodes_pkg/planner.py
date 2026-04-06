@@ -38,6 +38,9 @@ from kmbl_orchestrator.runtime.habitat_strategy import (
     effective_habitat_strategy_for_iteration,
 )
 from kmbl_orchestrator.runtime.run_events import RunEventType, append_graph_run_event
+from kmbl_orchestrator.runtime.working_staging_read import (
+    get_working_staging_for_thread_resilient,
+)
 from kmbl_orchestrator.memory.ops import memory_bias_for_experience_mode
 from kmbl_orchestrator.staging.facts import (
     build_working_staging_facts,
@@ -85,8 +88,16 @@ def planner_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         gid,
     )
 
+    iteration_idx = int(state.get("iteration_index", 0))
+
     # Build working staging facts for planner's habitat strategy decision
-    ws = ctx.repo.get_working_staging_for_thread(tid)
+    ws = get_working_staging_for_thread_resilient(
+        ctx.repo,
+        tid,
+        graph_run_id=gid,
+        phase="planner",
+        iteration_index=iteration_idx,
+    )
     ws_facts: dict[str, Any] | None = None
     user_rating_context: dict[str, Any] | None = None
 
@@ -144,7 +155,6 @@ def planner_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     else:
         identity_url = identity_url.strip()
 
-    iteration_idx = int(state.get("iteration_index", 0))
     # Crawl context is injected by context_hydrator into event_input
     crawl_context = ei.get("crawl_context") if isinstance(ei, dict) else None
     payload: dict[str, Any] = {
@@ -339,7 +349,13 @@ def planner_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
 
     prior_fp: str | None = None
     if effective in ("fresh_start", "rebuild_informed") and iteration_idx == 0:
-        ws_reset = ctx.repo.get_working_staging_for_thread(tid)
+        ws_reset = get_working_staging_for_thread_resilient(
+            ctx.repo,
+            tid,
+            graph_run_id=gid,
+            phase="planner_habitat_reset",
+            iteration_index=iteration_idx,
+        )
         if ws_reset is not None and ws_reset.payload_json:
             prior_fp = fingerprint_working_staging_payload(ws_reset.payload_json)
             ws_reset, _ = clear_working_staging_surface(

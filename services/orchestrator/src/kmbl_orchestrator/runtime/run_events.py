@@ -46,6 +46,8 @@ class RunEventType:
     WORKING_STAGING_UPDATED = "working_staging_updated"
     WORKING_STAGING_CHECKPOINT_CREATED = "working_staging_checkpoint_created"
     WORKING_STAGING_ROLLBACK = "working_staging_rollback"
+    # Supabase read failed (HTML/WAF/non-JSON); graph continued with ws=None where safe
+    WORKING_STAGING_FETCH_DEGRADED = "working_staging_fetch_degraded"
     OPERATOR_REVIEW_SNAPSHOT_MATERIALIZED = "operator_review_snapshot_materialized"
 
     # Hardening events

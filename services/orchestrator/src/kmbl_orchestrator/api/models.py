@@ -165,6 +165,13 @@ class StartRunResponse(BaseModel):
         default=None,
         description="Stable links to live working staging (also in event_input.kmbl_session_staging).",
     )
+    repository_preflight: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "When using Supabase persistence: compact REST preflight at run start "
+            "(read-only probe; write/RPC paths are not exercised)."
+        ),
+    )
 
 
 class InterruptRunResponse(BaseModel):

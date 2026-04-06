@@ -34,7 +34,17 @@ from kmbl_orchestrator.persistence.factory import (
     persisted_graph_runs_available,
     repository_backend,
 )
-from kmbl_orchestrator.persistence.exceptions import ActiveGraphRunPerThreadConflictError
+from kmbl_orchestrator.persistence.exceptions import (
+    ActiveGraphRunPerThreadConflictError,
+    RepositoryDispatchBlockedError,
+)
+from kmbl_orchestrator.persistence.repository_health import (
+    compact_preflight_for_start_response,
+    get_cached_repository_preflight,
+    merge_preflight_into_event_input,
+    require_repository_dispatch_healthy,
+    sanitize_repository_preflight_for_operator,
+)
 from kmbl_orchestrator.persistence.repository import Repository
 from kmbl_orchestrator.roles.invoke import DefaultRoleInvoker
 from kmbl_orchestrator.runtime.kilo_model_routing import (
@@ -460,6 +470,15 @@ def health(settings: Settings = Depends(get_settings)) -> dict[str, object]:
                 "A true ready_for_full_local_run still requires valid keys and network reachability."
             ),
         },
+        "repository_last_preflight": (
+            sanitize_repository_preflight_for_operator(lp)
+            if (lp := get_cached_repository_preflight())
+            else None
+        ),
+        "repository_last_preflight_note": (
+            "Process-local snapshot from the last successful or attempted Supabase REST preflight "
+            "(start_run / autonomous loop). Null until a run is attempted."
+        ),
         "repository_backend": repository_backend(settings),
         "orchestrator_running_stale_after_seconds": settings.orchestrator_running_stale_after_seconds,
         "orchestrator_smoke_planner_only": settings.orchestrator_smoke_planner_only,
@@ -592,6 +611,41 @@ async def start_run(
     t_req = time.perf_counter()
     _log.info("run_start stage=request_received elapsed_ms=0.0")
 
+    preflight_snapshot: dict[str, Any] | None = None
+    try:
+        preflight_snapshot = require_repository_dispatch_healthy(
+            repo, settings, context="post_orchestrator_runs_start"
+        )
+    except RepositoryDispatchBlockedError as e:
+        bp = e.snapshot.get("block_phase")
+        if bp == "write_canary":
+            msg = (
+                "Supabase write-path RPC canary failed — the PostgREST rpc channel is unusable "
+                "for atomic persistence. Fix migrations, keys, or network before starting a run."
+            )
+            hint = (
+                "Apply the latest Supabase migrations (including kmbl_repository_write_path_canary), "
+                "verify service_role can execute RPCs, and ensure no proxy returns HTML for /rest/v1/rpc."
+            )
+        else:
+            msg = (
+                "Supabase REST read preflight failed — fix SUPABASE_URL and service role key "
+                "before starting a run."
+            )
+            hint = (
+                "Ensure SUPABASE_URL is the project's REST API base (https://<ref>.supabase.co), "
+                "not the dashboard URL; verify the key; ensure no proxy returns HTML."
+            )
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error_kind": "repository_preflight_failed",
+                "message": msg,
+                "repository_health": sanitize_repository_preflight_for_operator(e.snapshot),
+                "hint": hint,
+            },
+        ) from e
+
     identity_id_str = str(body.identity_id) if body.identity_id is not None else None
     identity_seed_summary: str | None = None
 
@@ -666,6 +720,9 @@ async def start_run(
             **effective_event_input,
             "user_instructions": str(body.user_instructions).strip(),
         }
+    effective_event_input = merge_preflight_into_event_input(
+        effective_event_input, preflight_snapshot
+    )
     _log.info(
         "run_start stage=event_input_resolved elapsed_ms=%.1f",
         (time.perf_counter() - t_req) * 1000,
@@ -844,6 +901,7 @@ async def start_run(
         effective_event_input=effective_event_input,
         identity_id=identity_id_str,
         session_staging=session_staging,
+        repository_preflight=compact_preflight_for_start_response(preflight_snapshot),
     )
 
 

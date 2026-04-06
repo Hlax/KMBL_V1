@@ -40,3 +40,7 @@ def get_repository(settings: Settings) -> Repository:
 def reset_repository_singleton_for_tests() -> None:
     global _repo_singleton
     _repo_singleton = None
+    # Process-local preflight cache (api/health) — reset with repo singleton.
+    from kmbl_orchestrator.persistence import repository_health as _rh
+
+    _rh.reset_repository_preflight_cache_for_tests()

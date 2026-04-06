@@ -43,6 +43,9 @@ from kmbl_orchestrator.runtime.interactive_lane_evaluator_gate import (
     apply_interactive_lane_evaluator_gate,
 )
 from kmbl_orchestrator.runtime.run_events import RunEventType, append_graph_run_event
+from kmbl_orchestrator.runtime.working_staging_read import (
+    get_working_staging_for_thread_resilient,
+)
 from kmbl_orchestrator.runtime.session_staging_links import resolve_evaluator_preview_resolution
 from kmbl_orchestrator.runtime.static_vertical_invariants import (
     is_interactive_frontend_vertical,
@@ -102,7 +105,15 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     success = spec.success_criteria_json
     targets = spec.evaluation_targets_json
 
-    ws = ctx.repo.get_working_staging_for_thread(tid)
+    iter_hint = int(state.get("iteration_index", 0))
+
+    ws = get_working_staging_for_thread_resilient(
+        ctx.repo,
+        tid,
+        graph_run_id=gid,
+        phase="evaluator",
+        iteration_index=iter_hint,
+    )
     ws_facts: dict[str, Any] | None = None
     user_rating_context: dict[str, Any] | None = None
     if ws is not None:
@@ -133,7 +144,6 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     bc = state.get("build_candidate") if isinstance(state.get("build_candidate"), dict) else {}
     bs_for_skip = state.get("build_spec") if isinstance(state.get("build_spec"), dict) else {}
     ei_for_skip = state.get("event_input") if isinstance(state.get("event_input"), dict) else {}
-    iter_hint = int(state.get("iteration_index", 0))
     prev_ev = state.get("evaluation_report") if iter_hint > 0 else None
     preview_resolution: dict[str, Any] = resolve_evaluator_preview_resolution(
         ctx.settings,

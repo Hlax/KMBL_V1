@@ -76,10 +76,12 @@ def _apply_html_blocks_to_candidate(
     ctx_or_repo: "GraphContext | Repository",
     cand: "BuildCandidateRecord",
     tid: UUID,
+    *,
+    graph_run_id: UUID | None = None,
 ) -> "BuildCandidateRecord":
     """Backward-compat wrapper: accepts GraphContext or bare Repository."""
     repo = ctx_or_repo.repo if isinstance(ctx_or_repo, GraphContext) else ctx_or_repo
-    return _apply_html_blocks_to_candidate_impl(repo, cand, tid)
+    return _apply_html_blocks_to_candidate_impl(repo, cand, tid, graph_run_id=graph_run_id)
 
 
 def build_graph_context(

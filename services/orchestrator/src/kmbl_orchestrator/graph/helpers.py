@@ -19,6 +19,9 @@ from kmbl_orchestrator.domain import (
 from kmbl_orchestrator.errors import RoleInvocationFailed
 from kmbl_orchestrator.persistence.repository import Repository
 from kmbl_orchestrator.runtime.run_events import RunEventType, append_graph_run_event
+from kmbl_orchestrator.runtime.working_staging_read import (
+    get_working_staging_for_thread_resilient,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -60,6 +63,8 @@ def _apply_html_blocks_to_candidate(
     repo: Repository,
     cand: BuildCandidateRecord,
     tid: UUID,
+    *,
+    graph_run_id: UUID | None = None,
 ) -> BuildCandidateRecord:
     """If the build candidate contains ``html_block_v1`` artifacts, apply them.
 
@@ -107,7 +112,16 @@ def _apply_html_blocks_to_candidate(
         out_role = "interactive_frontend_app_v1"
 
     # Get the current working staging HTML for block targets
-    ws = repo.get_working_staging_for_thread(tid)
+    if graph_run_id is not None:
+        ws = get_working_staging_for_thread_resilient(
+            repo,
+            tid,
+            graph_run_id=graph_run_id,
+            phase="html_block_apply",
+            iteration_index=0,
+        )
+    else:
+        ws = repo.get_working_staging_for_thread(tid)
     file_map = _extract_html_file_map_from_working_staging(ws)
 
     # Apply blocks

@@ -181,10 +181,12 @@ export default function AutonomousPage() {
     const instructionSnapshot = [...messagesRef.current];
 
     try {
+      // identity_url alone → bundle-capable seed on current orchestrator (`start_event_input_resolution`).
+      // Omit scenario_preset so older API builds (Literal without identity_url_bundle_v1) do not 422;
+      // optional explicit preset: identity_url_bundle_v1 | identity_url_static_v1 after upgrading.
       const body: Record<string, unknown> = {
         identity_url: targetUrl,
         trigger_type: "prompt",
-        scenario_preset: "identity_url_bundle_v1",
       };
 
       const tidLoop = threadIdRef.current;

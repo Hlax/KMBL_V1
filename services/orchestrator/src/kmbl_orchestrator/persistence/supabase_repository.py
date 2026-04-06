@@ -40,6 +40,7 @@ from kmbl_orchestrator.persistence.exceptions import (
     ActiveGraphRunPerThreadConflictError,
     WriteSnapshotNotSupportedError,
 )
+from kmbl_orchestrator.persistence.supabase_infra import format_supabase_repository_error
 from kmbl_orchestrator.persistence.atomic_payloads import (
     publication_snapshot_to_rpc_dict,
     staging_checkpoint_to_rpc_dict,
@@ -155,11 +156,12 @@ class SupabaseRepository(SupabaseRepositoryAutonomousLoopMixin):
                     ctx,
                 )
                 raise RuntimeError(
-                    f"SupabaseRepository.{op}({table}) failed: {type(e).__name__}: {e}"
+                    format_supabase_repository_error(op, table, e, **ctx)
                 ) from e
         assert last is not None
         raise RuntimeError(
-            f"SupabaseRepository.{op}({table}) failed after retries: {type(last).__name__}: {last}"
+            format_supabase_repository_error(op, table, last, **ctx)
+            + " (after retries)"
         ) from last
 
     def ensure_thread(self, record: ThreadRecord) -> None:
@@ -1911,7 +1913,13 @@ class SupabaseRepository(SupabaseRepositoryAutonomousLoopMixin):
         def _fn() -> Any:
             return self._client.rpc(rpc_name, params).execute()
 
-        self._run(f"rpc:{rpc_name}", "rpc", _fn, rpc=rpc_name)
+        self._run(
+            f"rpc:{rpc_name}",
+            "rpc",
+            _fn,
+            rpc=rpc_name,
+            persistence_kind="rpc_mutating",
+        )
 
     def atomic_persist_staging_node_writes(
         self,

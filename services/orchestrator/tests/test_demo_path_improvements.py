@@ -148,7 +148,7 @@ def test_public_tunnel_url_reaches_evaluator_as_browser_reachable() -> None:
         build_candidate=None,
     )
     assert res["preview_url"] is not None
-    assert "abc123.ngrok.io" in res["preview_url"]
+    assert res["preview_url"].startswith("https://abc123.ngrok.io/")
     assert res["preview_grounding_mode"] == "browser_reachable"
     assert res["preview_grounding_reason"] == "public_orchestrator_base"
     assert res["preview_grounding"] == "ok"
@@ -165,7 +165,7 @@ def test_demo_public_base_url_alias_works() -> None:
         build_candidate=None,
     )
     assert res["preview_url"] is not None
-    assert "my-tunnel.example.com" in res["preview_url"]
+    assert res["preview_url"].startswith("https://my-tunnel.example.com/")
     assert res["preview_grounding_mode"] == "browser_reachable"
 
 

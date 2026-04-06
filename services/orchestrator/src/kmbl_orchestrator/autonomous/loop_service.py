@@ -171,8 +171,10 @@ async def _tick_identity_fetch(
             )
 
             pw_urls = [loop.identity_url]
-            # Also try internal pages the httpx crawl discovered
-            for extra in (seed.crawled_pages or [])[1: settings.kmbl_playwright_max_pages_per_loop]:
+            # Also try internal pages the httpx crawl discovered.
+            # Cap total Playwright visits to max_pages (landing counts as 1).
+            max_extra = max(0, settings.kmbl_playwright_max_pages_per_loop - 1)
+            for extra in (seed.crawled_pages or [])[1: max_extra + 1]:
                 if extra not in pw_urls:
                     pw_urls.append(extra)
 

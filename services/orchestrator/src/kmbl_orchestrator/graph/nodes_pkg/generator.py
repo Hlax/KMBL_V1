@@ -957,6 +957,18 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             "habitat_lifecycle candidate_preview registration failed (non-fatal): %s",
             type(hlc_exc).__name__,
         )
+        append_graph_run_event(
+            ctx.repo,
+            gid,
+            RunEventType.HABITAT_MATERIALIZATION_FAILED,
+            {
+                "materialization_kind": "candidate_preview",
+                "thread_id": str(tid),
+                "error": type(hlc_exc).__name__,
+                "build_candidate_id": str(cand.build_candidate_id),
+            },
+            thread_id=tid,
+        )
 
     return {
         "build_candidate": step_state["build_candidate"],

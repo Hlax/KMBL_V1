@@ -44,11 +44,21 @@ def sort_internal_frontier(urls: list[str], *, root_url: str) -> list[str]:
 
 
 def summary_strength(data: dict[str, Any]) -> float:
-    """Proxy for 'strong' internal page from stored summary."""
+    """Proxy for 'strong' internal page from stored summary.
+
+    Pages with a ``reference_sketch`` (Playwright-rendered evidence) receive a
+    boost because they carry materially richer design/layout signals than
+    lightweight HTTP-only fetches.
+    """
     sig = len(data.get("design_signals") or [])
     tone = len(data.get("tone_keywords") or [])
     summ = len((data.get("summary") or "").strip())
-    return min(1.0, 0.15 * sig + 0.1 * tone + min(0.4, summ / 400.0))
+    base = 0.15 * sig + 0.1 * tone + min(0.4, summ / 400.0)
+    # Playwright-rendered evidence boost
+    rs = data.get("reference_sketch")
+    if isinstance(rs, dict) and rs:
+        base += 0.25
+    return min(1.0, base)
 
 
 def count_strong_internal_pages(

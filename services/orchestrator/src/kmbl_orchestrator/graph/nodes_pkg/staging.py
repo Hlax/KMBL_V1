@@ -293,6 +293,18 @@ def staging_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             "habitat_lifecycle live_habitat registration failed (non-fatal): %s",
             type(hlc_exc).__name__,
         )
+        append_graph_run_event(
+            ctx.repo,
+            gid,
+            RunEventType.HABITAT_MATERIALIZATION_FAILED,
+            {
+                "materialization_kind": "live_habitat",
+                "thread_id": str(tid),
+                "error": type(hlc_exc).__name__,
+                "source_revision": ws.revision,
+            },
+            thread_id=tid,
+        )
 
     # Register staging_preview when a snapshot is created.
     if snap is not None:
@@ -321,6 +333,18 @@ def staging_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             _log.warning(
                 "habitat_lifecycle staging_preview registration failed (non-fatal): %s",
                 type(hlc_exc).__name__,
+            )
+            append_graph_run_event(
+                ctx.repo,
+                gid,
+                RunEventType.HABITAT_MATERIALIZATION_FAILED,
+                {
+                    "materialization_kind": "staging_preview",
+                    "thread_id": str(tid),
+                    "error": type(hlc_exc).__name__,
+                    "staging_snapshot_id": str(ssid),
+                },
+                thread_id=tid,
             )
 
     for cp in checkpoints_to_persist:

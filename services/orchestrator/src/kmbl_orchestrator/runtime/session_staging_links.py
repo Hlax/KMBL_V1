@@ -350,7 +350,7 @@ def resolve_canonical_demo_preview(
 
     if base:
         # Prefer candidate preview; fall back to staging if candidate is not materialized
-        if coherence.get("candidate_preview_materialized", True):
+        if coherence.get("candidate_preview_materialized", False):
             canonical_url = f"{base}{cand_path}"
             canonical_source = f"candidate_preview_via_{base_source}"
         else:

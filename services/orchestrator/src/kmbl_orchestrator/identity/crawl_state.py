@@ -441,6 +441,12 @@ _SELECTED_URLS_CONTRACT: dict[str, Any] = {
 }
 
 
+def _has_rendered_evidence(data: dict[str, Any]) -> bool:
+    """True when the page summary carries Playwright-rendered ``reference_sketch``."""
+    rs = data.get("reference_sketch")
+    return isinstance(rs, dict) and bool(rs)
+
+
 def build_crawl_context_for_planner(
     state: CrawlStateRecord | None,
 ) -> dict[str, Any]:
@@ -467,7 +473,7 @@ def build_crawl_context_for_planner(
                 "portfolio" if is_same_domain(url, state.root_url) else "inspiration"
             )
         rs = data.get("reference_sketch")
-        has_rendered = isinstance(rs, dict) and bool(rs)
+        has_rendered = _has_rendered_evidence(data)
         out = {
             "url": url,
             "summary": data.get("summary", ""),
@@ -537,7 +543,7 @@ def build_crawl_context_for_planner(
     # Count pages with Playwright-rendered evidence (materially richer grounding)
     rendered_evidence_count = sum(
         1 for data in state.page_summaries.values()
-        if isinstance(data, dict) and isinstance(data.get("reference_sketch"), dict) and data.get("reference_sketch")
+        if isinstance(data, dict) and _has_rendered_evidence(data)
     )
 
     return {

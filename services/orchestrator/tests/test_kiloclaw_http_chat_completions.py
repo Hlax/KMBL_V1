@@ -458,3 +458,267 @@ def test_http_client_default_max_tokens_evaluator_8192(mock_client_cls: MagicMoc
     c.invoke_role("evaluator", "kmbl-evaluator", {"thread_id": "00000000-0000-0000-0000-000000000001"})
     body = mock_inst.post.call_args[1]["json"]
     assert body["max_tokens"] == 8192
+
+
+# ---------------------------------------------------------------------------
+# Generator payload recognition — regression suite for the ingest failure
+# (thread 8fbf8b5c: "OpenClaw response did not contain a recognizable role payload")
+# ---------------------------------------------------------------------------
+
+_GENERATOR_ARTIFACT_PAYLOAD = {
+    "selected_urls": [
+        "https://harveylacsina.com/",
+        "https://harveylacsina.com/about",
+    ],
+    "artifact_outputs": [
+        {
+            "role": "interactive_frontend_app_v1",
+            "file_path": "component/preview/index.html",
+            "language": "html",
+            "content": "<!DOCTYPE html><html><body><h1>Harvey Lacsina</h1></body></html>",
+        },
+        {
+            "role": "interactive_frontend_app_v1",
+            "file_path": "component/preview/styles.css",
+            "language": "css",
+            "content": "body { margin: 0; }",
+        },
+        {
+            "role": "interactive_frontend_app_v1",
+            "file_path": "component/preview/app.js",
+            "language": "javascript",
+            "content": "console.log('portfolio');",
+        },
+    ],
+    "updated_state": {
+        "selected_urls": ["https://harveylacsina.com/"],
+        "chosen_vertical": "interactive_frontend_app_v1",
+        "notes": "Portfolio with hero, projects grid, about, contact.",
+    },
+}
+
+
+@patch("kmbl_orchestrator.providers.kiloclaw_http.httpx.Client")
+def test_generator_artifact_payload_as_json_string(mock_client_cls: MagicMock) -> None:
+    """Standard case: message.content is a JSON string with artifact_outputs + updated_state."""
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = _chat_response(json.dumps(_GENERATOR_ARTIFACT_PAYLOAD))
+    mock_inst = MagicMock()
+    mock_inst.post.return_value = mock_resp
+    mock_client_cls.return_value.__enter__.return_value = mock_inst
+    mock_client_cls.return_value.__exit__.return_value = None
+
+    c = KiloClawHttpClient(settings=_settings())
+    out = c.invoke_role("generator", "kmbl-generator", {"thread_id": "00000000-0000-0000-0000-000000000001"})
+
+    assert out["artifact_outputs"] == _GENERATOR_ARTIFACT_PAYLOAD["artifact_outputs"]
+    assert out["updated_state"] == _GENERATOR_ARTIFACT_PAYLOAD["updated_state"]
+    assert out["selected_urls"] == _GENERATOR_ARTIFACT_PAYLOAD["selected_urls"]
+
+
+@patch("kmbl_orchestrator.providers.kiloclaw_http.httpx.Client")
+def test_generator_artifact_payload_content_as_dict(mock_client_cls: MagicMock) -> None:
+    """Non-standard: message.content is a parsed JSON object (dict), not a string.
+
+    Regression for the gateway returning content as an already-parsed dict.
+    """
+    # Build chat response manually with content as a raw dict (not serialized).
+    chat_resp = {
+        "id": "chatcmpl-test",
+        "object": "chat.completion",
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": dict(_GENERATOR_ARTIFACT_PAYLOAD),  # dict, not string
+                },
+                "finish_reason": "stop",
+            }
+        ],
+    }
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = chat_resp
+    mock_inst = MagicMock()
+    mock_inst.post.return_value = mock_resp
+    mock_client_cls.return_value.__enter__.return_value = mock_inst
+    mock_client_cls.return_value.__exit__.return_value = None
+
+    c = KiloClawHttpClient(settings=_settings())
+    out = c.invoke_role("generator", "kmbl-generator", {"thread_id": "00000000-0000-0000-0000-000000000001"})
+
+    assert out["artifact_outputs"] == _GENERATOR_ARTIFACT_PAYLOAD["artifact_outputs"]
+    assert out["updated_state"] == _GENERATOR_ARTIFACT_PAYLOAD["updated_state"]
+
+
+@patch("kmbl_orchestrator.providers.kiloclaw_http.httpx.Client")
+def test_generator_artifact_payload_wrapped_in_response_key(mock_client_cls: MagicMock) -> None:
+    """Gateway wraps the generator output under an unexpected key (e.g. ``response``).
+
+    Regression for: _extract_http_role_dict only checked fixed wrapper keys,
+    missing arbitrary keys like ``response`` / ``answer`` / ``generated``.
+    """
+    wrapped = {"response": dict(_GENERATOR_ARTIFACT_PAYLOAD)}
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = _chat_response(json.dumps(wrapped))
+    mock_inst = MagicMock()
+    mock_inst.post.return_value = mock_resp
+    mock_client_cls.return_value.__enter__.return_value = mock_inst
+    mock_client_cls.return_value.__exit__.return_value = None
+
+    c = KiloClawHttpClient(settings=_settings())
+    out = c.invoke_role("generator", "kmbl-generator", {"thread_id": "00000000-0000-0000-0000-000000000001"})
+
+    assert out["artifact_outputs"] == _GENERATOR_ARTIFACT_PAYLOAD["artifact_outputs"]
+    assert out["updated_state"] == _GENERATOR_ARTIFACT_PAYLOAD["updated_state"]
+
+
+@patch("kmbl_orchestrator.providers.kiloclaw_http.httpx.Client")
+def test_generator_artifact_payload_wrapped_in_generated_key(mock_client_cls: MagicMock) -> None:
+    """Another arbitrary wrapper key (``generated``)."""
+    wrapped = {"generated": dict(_GENERATOR_ARTIFACT_PAYLOAD)}
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = _chat_response(json.dumps(wrapped))
+    mock_inst = MagicMock()
+    mock_inst.post.return_value = mock_resp
+    mock_client_cls.return_value.__enter__.return_value = mock_inst
+    mock_client_cls.return_value.__exit__.return_value = None
+
+    c = KiloClawHttpClient(settings=_settings())
+    out = c.invoke_role("generator", "kmbl-generator", {"thread_id": "00000000-0000-0000-0000-000000000001"})
+
+    assert out["artifact_outputs"] == _GENERATOR_ARTIFACT_PAYLOAD["artifact_outputs"]
+
+
+@patch("kmbl_orchestrator.providers.kiloclaw_http.httpx.Client")
+def test_generator_artifact_payload_prose_before_json(mock_client_cls: MagicMock) -> None:
+    """Model prepends prose before the JSON — recovery must find the role-shaped object."""
+    content = "Here is the portfolio implementation:\n\n" + json.dumps(_GENERATOR_ARTIFACT_PAYLOAD)
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = _chat_response(content)
+    mock_inst = MagicMock()
+    mock_inst.post.return_value = mock_resp
+    mock_client_cls.return_value.__enter__.return_value = mock_inst
+    mock_client_cls.return_value.__exit__.return_value = None
+
+    c = KiloClawHttpClient(settings=_settings())
+    out = c.invoke_role("generator", "kmbl-generator", {"thread_id": "00000000-0000-0000-0000-000000000001"})
+
+    assert out["artifact_outputs"] == _GENERATOR_ARTIFACT_PAYLOAD["artifact_outputs"]
+    assert out["updated_state"] == _GENERATOR_ARTIFACT_PAYLOAD["updated_state"]
+
+
+@patch("kmbl_orchestrator.providers.kiloclaw_http.httpx.Client")
+def test_generator_metadata_object_before_payload(mock_client_cls: MagicMock) -> None:
+    """Model emits a short metadata JSON object followed by the actual payload.
+
+    Regression: _decode_first_json_object_in_text would pick up the WRONG object.
+    The multi-object scanner must find the role-shaped one.
+    """
+    meta = json.dumps({"meta": {"model": "gpt-4o", "tokens": 3250}})
+    payload = json.dumps(_GENERATOR_ARTIFACT_PAYLOAD)
+    content = meta + "\n\n" + payload
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = _chat_response(content)
+    mock_inst = MagicMock()
+    mock_inst.post.return_value = mock_resp
+    mock_client_cls.return_value.__enter__.return_value = mock_inst
+    mock_client_cls.return_value.__exit__.return_value = None
+
+    c = KiloClawHttpClient(settings=_settings())
+    out = c.invoke_role("generator", "kmbl-generator", {"thread_id": "00000000-0000-0000-0000-000000000001"})
+
+    assert out["artifact_outputs"] == _GENERATOR_ARTIFACT_PAYLOAD["artifact_outputs"]
+    assert out["updated_state"] == _GENERATOR_ARTIFACT_PAYLOAD["updated_state"]
+
+
+@patch("kmbl_orchestrator.providers.kiloclaw_http.httpx.Client")
+def test_generator_markdown_fenced_artifact_payload(mock_client_cls: MagicMock) -> None:
+    """Generator output inside markdown fence."""
+    content = "```json\n" + json.dumps(_GENERATOR_ARTIFACT_PAYLOAD) + "\n```"
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = _chat_response(content)
+    mock_inst = MagicMock()
+    mock_inst.post.return_value = mock_resp
+    mock_client_cls.return_value.__enter__.return_value = mock_inst
+    mock_client_cls.return_value.__exit__.return_value = None
+
+    c = KiloClawHttpClient(settings=_settings())
+    out = c.invoke_role("generator", "kmbl-generator", {"thread_id": "00000000-0000-0000-0000-000000000001"})
+
+    assert out["artifact_outputs"] == _GENERATOR_ARTIFACT_PAYLOAD["artifact_outputs"]
+
+
+@patch("kmbl_orchestrator.providers.kiloclaw_http.httpx.Client")
+def test_generator_tool_calls_with_artifact_payload(mock_client_cls: MagicMock) -> None:
+    """Generator output delivered via tool_calls.function.arguments (content is null)."""
+    tool_calls = [
+        {
+            "id": "call_gen_1",
+            "type": "function",
+            "function": {
+                "name": "emit_artifacts",
+                "arguments": json.dumps(_GENERATOR_ARTIFACT_PAYLOAD),
+            },
+        }
+    ]
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = _chat_response("", tool_calls=tool_calls)
+    mock_inst = MagicMock()
+    mock_inst.post.return_value = mock_resp
+    mock_client_cls.return_value.__enter__.return_value = mock_inst
+    mock_client_cls.return_value.__exit__.return_value = None
+
+    c = KiloClawHttpClient(settings=_settings())
+    out = c.invoke_role("generator", "kmbl-generator", {"thread_id": "00000000-0000-0000-0000-000000000001"})
+
+    assert out["artifact_outputs"] == _GENERATOR_ARTIFACT_PAYLOAD["artifact_outputs"]
+    assert out["updated_state"] == _GENERATOR_ARTIFACT_PAYLOAD["updated_state"]
+
+
+def test_parse_generator_payload_from_openclaw_envelope() -> None:
+    """OpenClaw CLI/agent envelope wrapping the generator output in result.payloads."""
+    from kmbl_orchestrator.providers.kiloclaw_parsing import extract_role_payload_from_openclaw_output
+
+    envelope = {
+        "result": {
+            "payloads": [{"text": json.dumps(_GENERATOR_ARTIFACT_PAYLOAD)}],
+        }
+    }
+    out = extract_role_payload_from_openclaw_output(envelope)
+    assert out["artifact_outputs"] == _GENERATOR_ARTIFACT_PAYLOAD["artifact_outputs"]
+    assert out["updated_state"] == _GENERATOR_ARTIFACT_PAYLOAD["updated_state"]
+
+
+def test_parse_generator_payload_nested_under_arbitrary_result_key() -> None:
+    """extract_role_payload_from_openclaw_output deep scan for nested role output."""
+    from kmbl_orchestrator.providers.kiloclaw_parsing import extract_role_payload_from_openclaw_output
+
+    nested = {
+        "status": "ok",
+        "result": {
+            "generator_output": dict(_GENERATOR_ARTIFACT_PAYLOAD),
+        },
+    }
+    out = extract_role_payload_from_openclaw_output(nested)
+    assert out["artifact_outputs"] == _GENERATOR_ARTIFACT_PAYLOAD["artifact_outputs"]
+
+
+def test_parse_evaluator_payload_wrapped_in_response_key() -> None:
+    """Evaluator output under an unexpected wrapper key."""
+    evaluator_out = {"status": "pass", "summary": "All checks pass", "issues": []}
+    wrapped = {"response": evaluator_out}
+    data = _chat_response(json.dumps(wrapped))
+    parsed = _parse_chat_completion_json_content(data, role_type="evaluator")
+    from kmbl_orchestrator.providers.kiloclaw_parsing import _extract_http_role_dict
+
+    out = _extract_http_role_dict(parsed, role_type="evaluator")
+    assert out["status"] == "pass"

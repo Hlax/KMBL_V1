@@ -174,9 +174,17 @@ def _system_prompt_for_role(role_type: RoleType) -> str:
 
 
 def _message_content_to_str(content: Any) -> str:
-    """OpenAI ``message.content`` may be a string or a list of parts (e.g. ``{type:text}``)."""
+    """OpenAI ``message.content`` may be a string, a list of parts, or (non-standard) a dict.
+
+    Some gateways (including OpenClaw) may return ``content`` as an already-parsed
+    JSON object (dict) instead of a JSON string.  Serialize it back so downstream
+    ``json.loads`` can handle it uniformly.
+    """
     if isinstance(content, str):
         return content
+    if isinstance(content, dict):
+        # Non-standard: gateway returned parsed object — serialize back to JSON string.
+        return json.dumps(content, ensure_ascii=False)
     if isinstance(content, list):
         parts: list[str] = []
         for p in content:
@@ -326,6 +334,25 @@ def extract_role_payload_from_openclaw_output(data: dict[str, Any]) -> dict[str,
                         inner = None
                 if inner is not None and _looks_like_role_output(inner):
                     return inner
+    # Last-resort deep scan: walk all nested dict values (1 level) for role output.
+    # Catches gateways that nest the payload under arbitrary keys not tried above.
+    for _k, v in data.items():
+        if isinstance(v, dict) and _looks_like_role_output(v):
+            _log.info(
+                "extract_role_payload_from_openclaw_output recovered from nested key=%r",
+                _k,
+            )
+            return v
+        # Also check one level deeper (e.g. ``result.output`` where result has no payloads).
+        if isinstance(v, dict):
+            for _k2, v2 in v.items():
+                if isinstance(v2, dict) and _looks_like_role_output(v2):
+                    _log.info(
+                        "extract_role_payload_from_openclaw_output recovered from nested key=%r.%r",
+                        _k,
+                        _k2,
+                    )
+                    return v2
     raise KiloClawInvocationError(
         "could not extract role payload from OpenClaw JSON",
         normalized=provider_failure(
@@ -420,6 +447,19 @@ def _parse_chat_completion_json_content(
                 hit = _find_planner_contract_dict(obj) or _dict_with_planner_build_spec(obj)
                 if hit is not None:
                     return hit
+        elif role_type in ("generator", "evaluator"):
+            # Parity with planner: scan ALL objects for the first role-shaped dict
+            # instead of blindly taking the first JSON object (which may be metadata).
+            objs = _iter_json_objects_in_text(raw)
+            for obj in objs:
+                if _looks_like_role_output(obj):
+                    _log.info(
+                        "role_output_normalization step=multi_object_scan_recovery "
+                        "role_type=%s matched_keys=%s",
+                        role_type,
+                        [k for k in obj if k in ("proposed_changes", "updated_state", "artifact_outputs", "status")],
+                    )
+                    return obj
         try:
             parsed = _decode_first_json_object_in_text(raw)
         except json.JSONDecodeError:
@@ -512,6 +552,18 @@ def _extract_http_role_dict(
             "openclaw_http planner payload not recognized (before OpenClaw envelope scan): top_keys=%s",
             list(data.keys())[:30],
         )
+    elif role_type in ("generator", "evaluator"):
+        # Parity with planner: scan all top-level values for role-shaped dicts.
+        # Gateways may wrap the actual role output under an unexpected key
+        # (e.g. ``response``, ``answer``, ``generated``, ``content``).
+        for _k, v in data.items():
+            if isinstance(v, dict) and _looks_like_role_output(v):
+                _log.info(
+                    "openclaw_http %s recovered role output from wrapper key=%r",
+                    role_type,
+                    _k,
+                )
+                return v
     return extract_role_payload_from_openclaw_output(data)
 
 

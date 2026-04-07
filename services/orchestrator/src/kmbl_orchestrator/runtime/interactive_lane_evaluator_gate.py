@@ -181,7 +181,20 @@ def _compute_iteration_delta_score(
         prior_libs = set(prior.get("libraries_detected") or [])
         prior_h1 = (prior.get("h1_text") or "").lower().strip()
         outline = current_summary.get("sections_or_modules") or {}
-        current_h1 = str(outline.get("h1_text") or "").lower().strip()
+        # h1: prefer sections_or_modules.h1_text; fall back to top-level h1_text
+        current_h1 = str(
+            outline.get("h1_text") or current_summary.get("h1_text") or ""
+        ).lower().strip()
+        # section topology: compare section_ids lists
+        prior_sections = set(str(s).lower() for s in (prior.get("section_ids") or []))
+        current_sections = set(
+            str(s).lower()
+            for s in (
+                current_summary.get("section_ids")
+                or list(outline.keys())
+                or []
+            )
+        )
 
         changes: list[str] = []
         if current_libs != prior_libs:
@@ -192,8 +205,11 @@ def _compute_iteration_delta_score(
             "experience_summary", {}
         ).get("experience_mode"):
             changes.append("geometry_mode")
+        if prior_sections and current_sections and prior_sections != current_sections:
+            changes.append("section_topology")
 
-        delta = min(1.0, len(changes) / 3.0)
+        # Score over 4 comparison categories (libs, h1, geometry_mode, section_topology)
+        delta = min(1.0, len(changes) / 4.0)
         return {
             "delta_score": round(delta, 2),
             "change_categories": changes,

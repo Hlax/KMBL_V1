@@ -103,3 +103,29 @@ After a graph run completes, check the evaluation report metrics:
 - `preview_grounding_degraded`: `true` when grounding was expected but unavailable
 
 If you see repeated `WEAKLY_GROUNDED_RETRY_CAP` events in the run timeline, that means the evaluator hit the retry cap because it lacked browser evidence. Fix: set `KMBL_ORCHESTRATOR_PUBLIC_BASE_URL` to a tunnel URL.
+
+## Workspace-first preview (multi-file builds)
+
+Starting from wire compaction v2, KMBL treats the **workspace** as the authoritative source of truth for interactive builds.  When the generator returns `workspace_manifest_v1` + `sandbox_ref`, inline `artifact_outputs[].content` is **not** required for preview rendering.
+
+### How it works
+
+1. Generator writes files into a local workspace (`sandbox_ref`).
+2. Workspace ingest reads files from disk and produces `artifact_refs` with metadata.
+3. Candidate preview (`/orchestrator/runs/{id}/candidate-preview`) assembles HTML directly from the workspace-backed artifacts — no inline JSON body needed.
+4. Wire compaction replaces inline content with metadata (path, role, size, hash, snippet) to save tokens.
+
+### What this means for local dev
+
+- The **preview URL must be reachable** for the evaluator to ground its assessment.
+- Candidate preview is served by the orchestrator, so the evaluator needs a browser-reachable route to `KMBL_ORCHESTRATOR_PUBLIC_BASE_URL`.
+- Without a reachable preview, the evaluator falls back to `artifact_only` grounding (no DOM/console evidence), and retries are capped by `KMBL_WEAKLY_GROUNDED_MAX_ITERATIONS`.
+
+### Quick reference: environment variables
+
+| Variable | Purpose | Required? |
+|---|---|---|
+| `KMBL_ORCHESTRATOR_PUBLIC_BASE_URL` | Tunnel URL for browser-reachable preview | **Yes** for full grounding |
+| `KMBL_EVALUATOR_ALLOW_PRIVATE_PREVIEW_FETCH` | Allow localhost preview URLs (same-machine OpenClaw only) | Optional override |
+| `KMBL_WEAKLY_GROUNDED_MAX_ITERATIONS` | Max retries without browser grounding (default: 3) | Optional tuning |
+| `KMBL_PERSIST_RAW_GENERATOR_OUTPUT_FOR_DEBUG` | Keep full inline bodies on role_invocation rows | Debug only |

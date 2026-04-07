@@ -15,6 +15,8 @@ def normalize_build_spec_for_persistence(build_spec: dict[str, Any]) -> tuple[di
 
     - ``type`` default ``generic``
     - ``title`` default ``Untitled Build``
+    - ``site_archetype`` — **never** defaulted to ``portfolio``; left empty when
+      planner did not set it so generator uses a neutral / interactive-first bias.
     - Whitespace trimmed for string fields when present.
 
     Second return value lists which fields were defaulted (for metadata / logging).
@@ -35,6 +37,14 @@ def normalize_build_spec_for_persistence(build_spec: dict[str, Any]) -> tuple[di
         normalized.append("title")
     else:
         out["title"] = title.strip()
+
+    # Neutralize portfolio-shaped site_archetype: only keep it when the planner
+    # explicitly chose it based on identity/instructions.  An empty or absent
+    # archetype lets the generator adopt an app-like / interactive-first bias
+    # instead of collapsing into hero/proof/story/cta portfolio templates.
+    sa = out.get("site_archetype")
+    if isinstance(sa, str):
+        out["site_archetype"] = sa.strip() or None
 
     if normalized:
         _log.warning(

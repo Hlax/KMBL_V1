@@ -476,3 +476,40 @@ def registry_snapshot() -> list[LocalHabitatManifest]:
     """Return a copy of all registry entries (diagnostic / test helper)."""
     with _REGISTRY_LOCK:
         return list(_REGISTRY.values())
+
+
+def materialize_workspace_to_live_habitat(
+    *,
+    thread_id: UUID,
+    graph_run_id: UUID,
+    workspace_path: str,
+    source_revision: int | None = None,
+    revision_id: UUID | None = None,
+    entrypoint: str | None = None,
+) -> LocalHabitatManifest:
+    """Promote a workspace build to the live habitat for a thread.
+
+    On ``pass`` or ``stage`` the accepted workspace build becomes the live
+    habitat.  This supersedes any prior live_habitat for the thread and
+    registers the new materialization backed by the workspace folder.
+
+    The workspace is the single source of truth — inline artifact bodies in
+    the persistence layer are **not** required for the live habitat to render.
+    """
+    manifest = register_materialization(
+        thread_id=thread_id,
+        local_path=workspace_path,
+        materialization_kind="live_habitat",
+        graph_run_id=graph_run_id,
+        source_revision=source_revision,
+        revision_id=revision_id,
+        entrypoint=entrypoint,
+        can_rehydrate_from_persistence=True,
+    )
+    _log.info(
+        "habitat_lifecycle: workspace→live_habitat thread=%s manifest_id=%s path=%s",
+        thread_id,
+        manifest.manifest_id,
+        workspace_path,
+    )
+    return manifest

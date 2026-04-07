@@ -747,10 +747,19 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             "— persisting full model output bodies on role_invocation rows",
             gid,
         )
+    # Workspace-first: when workspace_manifest_v1 + sandbox_ref are present in the
+    # generator output, the workspace is authoritative.  Skip persisting full inline
+    # artifact_outputs content on the wire — metadata + snippet suffice.
+    _ws_first = bool(
+        isinstance(raw.get("workspace_manifest_v1"), dict)
+        and isinstance(raw.get("sandbox_ref"), str)
+        and raw.get("sandbox_ref", "").strip()
+    )
     persist_out, persist_shape = shape_generator_invocation_output_payload(
         raw,
         persist_raw_for_debug=debug_raw,
         post_normalization=False,
+        workspace_first=_ws_first,
     )
     rm_first = dict(inv.routing_metadata_json or {})
     rm_first["kmbl_generator_persistence_shape_v1"] = persist_shape
@@ -867,6 +876,7 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         raw,
         persist_raw_for_debug=debug_raw,
         post_normalization=True,
+        workspace_first=_ws_first,
     )
     rm_inv = dict(inv.routing_metadata_json or {})
     merged_shape = {**(rm_inv.get("kmbl_generator_persistence_shape_v1") or {}), **persist_shape2}
@@ -887,6 +897,7 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         raw,
         persist_raw_for_debug=False,
         post_normalization=True,
+        workspace_first=_ws_first,
     )
     raw.clear()
     raw.update(state_compact)

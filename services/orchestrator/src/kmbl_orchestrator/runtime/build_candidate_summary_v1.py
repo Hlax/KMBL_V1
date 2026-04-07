@@ -398,3 +398,34 @@ def summary_json_size(summary: dict[str, Any]) -> int:
         return len(json.dumps(summary, ensure_ascii=False, default=str))
     except Exception:
         return -1
+
+
+def build_lean_summary_for_payload(summary: dict[str, Any]) -> dict[str, Any]:
+    """Return a minimal view of the summary for token-sensitive payloads.
+
+    Keeps:
+    - ``entrypoints``
+    - ``file_inventory`` (paths + roles, no content)
+    - ``required_libraries_compliance``
+    - ``lane``, ``escalation_lane``
+    - ``experience_summary``
+
+    Drops heavy sub-dicts like ``interaction_summary``, ``rendering_summary``,
+    ``sections_or_modules``, ``compliance_summary`` (redundant with
+    ``required_libraries_compliance``), ``previous_iteration_diff_summary``.
+    """
+    if not isinstance(summary, dict):
+        return {}
+    _LEAN_KEYS = {
+        "summary_version",
+        "lane",
+        "escalation_lane",
+        "libraries_detected",
+        "file_inventory",
+        "file_inventory_truncated",
+        "entrypoints",
+        "experience_summary",
+        "required_libraries_compliance",
+        "warnings",
+    }
+    return {k: v for k, v in summary.items() if k in _LEAN_KEYS}

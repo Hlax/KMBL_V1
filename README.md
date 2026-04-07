@@ -1,6 +1,6 @@
 # KMBL_V1
 
-KMBL is the orchestrator and control plane. External role execution (Planner, Generator, Evaluator) is hosted in KiloClaw; this repository implements the execution spine (Python + LangGraph + FastAPI), shared contracts, Supabase-backed persistence (when configured), and a Next.js operator UI.
+KMBL is the orchestrator and control plane. External role execution (Planner, Generator, Evaluator) is executed by OpenClaw and hosted locally; this repository implements the execution spine (Python + LangGraph + FastAPI), shared contracts, Supabase-backed persistence (when configured), and a Next.js operator UI.
 
 Canon architecture and naming live under [`docs/`](docs/). **Current product behavior (graph runs, working staging, review snapshots, publication):** [`docs/CURRENT_PRODUCT_MODEL.md`](docs/CURRENT_PRODUCT_MODEL.md).
 

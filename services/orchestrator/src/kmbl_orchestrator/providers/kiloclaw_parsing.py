@@ -89,7 +89,7 @@ def _looks_like_truncated_json(raw: str) -> bool:
     # Obvious truncation: ends mid-key/value (no closing brace/bracket)
     open_braces = s.count("{") - s.count("}")
     open_brackets = s.count("[") - s.count("]")
-    if open_braces > 2 or open_brackets > 2:
+    if open_braces >= 2 or open_brackets >= 2:
         return True
     # Ends with a comma, colon, or backslash (mid-value)
     if s[-1] in (",", ":", "\\"):

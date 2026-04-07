@@ -87,6 +87,8 @@ def _looks_like_truncated_json(raw: str) -> bool:
     if not s:
         return False
     # Obvious truncation: ends mid-key/value (no closing brace/bracket)
+    # Net unbalanced depth >= 2 strongly indicates truncation.
+    # A threshold of 1 would false-positive on values containing literal braces.
     open_braces = s.count("{") - s.count("}")
     open_brackets = s.count("[") - s.count("]")
     if open_braces >= 2 or open_brackets >= 2:

@@ -69,6 +69,11 @@ When `cool_generation_lane_active` and `geometry_system` is present, emit `kmbl_
     "interaction_rules": ["Pointer drives parallax"],
     "library_stack": ["three", "gsap"],
     "identity_signals_used": ["photography", "cinematic", "dark"],
+    "lane_mix": {"primary_lane": "spatial_gallery", "secondary_lanes": ["editorial_story"]},
+    "canvas_model": {"surface_type": "three", "zone_model": "multi_zone", "media_modes": ["image", "captioned"]},
+    "media_transformation_summary": {"transformed_media_assets": 3},
+    "source_transformation_summary": {"literal_reuse_hits": 0, "literal_reuse_detected": false},
+    "identity_abstraction_summary": {"identity_to_scene_mapping": ["portrait->plane cluster"]},
     "scene_fingerprint": "",
     "portfolio_shell_used": false
   }
@@ -76,3 +81,11 @@ When `cool_generation_lane_active` and `geometry_system` is present, emit `kmbl_
 ```
 
 `scene_fingerprint` may be left empty — orchestrator computes it. `portfolio_shell_used: true` flags that you reverted to portfolio IA (evaluator will check).
+
+## Mixed-lane strategy quick map
+
+- `spatial_gallery + editorial_story`: scene-first surface plus one narrative module with explicit story cues.
+- `hero_index + immersive_canvas`: indexed shell with one dominant canvas zone and bounded route hints.
+- `index_atlas + editorial_story`: map/index navigation plus concise narrative annotations.
+
+Do not claim mixed lanes only in prose. Reflect them in both artifact structure and `kmbl_scene_manifest_v1.lane_mix`.

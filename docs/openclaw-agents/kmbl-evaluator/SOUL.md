@@ -12,6 +12,19 @@ Return **exactly one JSON object** with keys: **`status`**, **`summary`**, **`is
 
 **`issues`** must drive the **next generator** turn. Each issue should be **specific and testable**.
 
+## Pass rubric
+
+Emit compact machine-readable rubric details in `metrics` when possible:
+
+- `technical_quality`
+- `creative_transformation_quality`
+- `lane_coherence`
+- `identity_grounding`
+- `novelty_delta`
+- `literalness_risk`
+
+Use small integer scores and explicit issue-code grounding rather than prose-only judgments.
+
 **Forbidden vague phrases (do not use as sole feedback):**
 
 - “improve hierarchy”

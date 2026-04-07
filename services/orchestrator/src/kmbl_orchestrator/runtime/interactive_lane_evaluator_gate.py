@@ -29,6 +29,9 @@ PORTFOLIO_SHELL_REGRESSION_CODE = "portfolio_shell_regression"
 GENERIC_DEMO_PATTERN_CODE = "generic_demo_pattern"
 WEAK_IDENTITY_GROUNDING_CODE = "weak_identity_grounding"
 WEAK_ITERATION_DELTA_CODE = "weak_iteration_delta"
+LANE_MIX_MISMATCH_CODE = "lane_mix_mismatch"
+LITERAL_REUSE_REGRESSION_CODE = "literal_reuse_regression"
+WEAK_MEDIA_TRANSFORMATION_CODE = "weak_media_transformation"
 
 
 # Event / DOM hooks — not exhaustive; enough to separate "static gimmick" from wired behavior.
@@ -226,6 +229,45 @@ def _compute_iteration_delta_score(
     }
 
 
+def _lane_signal_count(raw_text: str, html_blob: str, lane_name: str) -> int:
+    lane = lane_name.strip().lower()
+    if not lane:
+        return 0
+    checks: list[str]
+    if lane in ("spatial_gallery", "immersive_canvas"):
+        checks = ["<canvas", "webgl", "three", "figure", "gallery", "data-kmbl-scene"]
+    elif lane in ("editorial_story", "story_chapters"):
+        checks = ["chapter", "narrative", "<article", "<section", "<h2", "story"]
+    elif lane in ("media_archive", "index_atlas"):
+        checks = ["archive", "atlas", "index", "<img", "<video", "caption"]
+    elif lane == "hero_index":
+        checks = ["hero", "index", "nav", "<main", "data-route"]
+    else:
+        checks = [lane.replace("_", "-")]
+
+    blob = (raw_text + "\n" + html_blob).lower()
+    return sum(1 for c in checks if c in blob)
+
+
+def _extract_lane_mix(build_spec: dict[str, Any]) -> tuple[str | None, list[str]]:
+    ec = build_spec.get("execution_contract") if isinstance(build_spec.get("execution_contract"), dict) else {}
+    lm = ec.get("lane_mix") if isinstance(ec.get("lane_mix"), dict) else {}
+    primary = lm.get("primary_lane") if isinstance(lm.get("primary_lane"), str) else None
+    secondary_raw = lm.get("secondary_lanes") if isinstance(lm.get("secondary_lanes"), list) else []
+    secondary = [str(x).strip().lower() for x in secondary_raw if str(x).strip()]
+    return (primary.strip().lower() if isinstance(primary, str) and primary.strip() else None, secondary[:3])
+
+
+def _literal_reuse_count(raw_text: str, build_spec: dict[str, Any]) -> int:
+    ec = build_spec.get("execution_contract") if isinstance(build_spec.get("execution_contract"), dict) else {}
+    srcp = ec.get("source_transformation_policy") if isinstance(ec.get("source_transformation_policy"), dict) else {}
+    needles = srcp.get("literal_source_needles")
+    if not isinstance(needles, list):
+        return 0
+    low = raw_text.lower()
+    return sum(1 for n in needles[:20] if isinstance(n, str) and n.strip() and n.strip().lower() in low)
+
+
 def _planned_required_interactions(build_spec: dict[str, Any]) -> int:
     ec = build_spec.get("execution_contract")
     if not isinstance(ec, dict):
@@ -324,6 +366,23 @@ def apply_interactive_lane_evaluator_gate(
     issues = list(report.issues_json or [])
     status = report.status
     summary = (report.summary or "").strip()
+    scene_manifest = _scene_manifest_from_candidate(build_candidate)
+    manifest_lane_mix = (
+        scene_manifest.get("lane_mix") if isinstance(scene_manifest.get("lane_mix"), dict) else {}
+    )
+    manifest_canvas = (
+        scene_manifest.get("canvas_model") if isinstance(scene_manifest.get("canvas_model"), dict) else {}
+    )
+    manifest_media = (
+        scene_manifest.get("media_transformation_summary")
+        if isinstance(scene_manifest.get("media_transformation_summary"), dict)
+        else {}
+    )
+    manifest_source = (
+        scene_manifest.get("source_transformation_summary")
+        if isinstance(scene_manifest.get("source_transformation_summary"), dict)
+        else {}
+    )
 
     def _has_code(c: str) -> bool:
         for it in issues:
@@ -492,6 +551,95 @@ def apply_interactive_lane_evaluator_gate(
                 }
             )
 
+    # ── Lane-mix coherence + source transformation gates ───────────────────
+    primary_lane, secondary_lanes = _extract_lane_mix(build_spec)
+    lane_mix_scores: dict[str, int] = {}
+    if primary_lane:
+        lane_mix_scores[primary_lane] = _lane_signal_count(raw_text, html_blob, primary_lane)
+    for lane in secondary_lanes:
+        lane_mix_scores[lane] = _lane_signal_count(raw_text, html_blob, lane)
+
+    man_primary = str(manifest_lane_mix.get("primary_lane") or "").strip().lower()
+    man_secondary = {
+        str(x).strip().lower()
+        for x in (manifest_lane_mix.get("secondary_lanes") or [])
+        if str(x).strip()
+    }
+    if primary_lane and man_primary == primary_lane:
+        lane_mix_scores[primary_lane] = max(2, lane_mix_scores.get(primary_lane, 0))
+    for lane in secondary_lanes:
+        if lane in man_secondary:
+            lane_mix_scores[lane] = max(2, lane_mix_scores.get(lane, 0))
+
+    m["lane_mix_signals"] = lane_mix_scores
+    if scene_manifest:
+        m["manifest_first_signals"] = {
+            "scene_manifest_present": True,
+            "manifest_primary_lane": man_primary or None,
+            "manifest_secondary_lanes": sorted(man_secondary)[:3],
+            "manifest_zone_model": str(manifest_canvas.get("zone_model") or "") or None,
+        }
+
+    if primary_lane and status in ("pass", "partial"):
+        pscore = lane_mix_scores.get(primary_lane, 0)
+        secondary_score = max((lane_mix_scores.get(x, 0) for x in secondary_lanes), default=0)
+        if pscore == 0 or (secondary_lanes and secondary_score == 0):
+            if not _has_code(LANE_MIX_MISMATCH_CODE):
+                new_issues.append(
+                    {
+                        "severity": "medium",
+                        "category": "interactive_lane_coherence",
+                        "code": LANE_MIX_MISMATCH_CODE,
+                        "message": (
+                            "Artifacts do not show enough evidence for planned lane mix "
+                            f"(primary={primary_lane}, secondary={secondary_lanes or []}). "
+                            "Strengthen zone-level realization of the lane blend without inflating app scope."
+                        ),
+                    }
+                )
+
+    literal_reuse_hits = _literal_reuse_count(raw_text, build_spec)
+    if isinstance(manifest_source.get("literal_reuse_hits"), int):
+        literal_reuse_hits = max(literal_reuse_hits, int(manifest_source.get("literal_reuse_hits") or 0))
+    elif manifest_source.get("literal_reuse_detected") is True:
+        literal_reuse_hits = max(literal_reuse_hits, 2)
+    m["literal_source_reuse_hits"] = literal_reuse_hits
+    if literal_reuse_hits >= 2 and status in ("pass", "partial"):
+        if not _has_code(LITERAL_REUSE_REGRESSION_CODE):
+            new_issues.append(
+                {
+                    "severity": "high",
+                    "category": "interactive_lane_identity",
+                    "code": LITERAL_REUSE_REGRESSION_CODE,
+                    "message": (
+                        "Detected repeated literal source text reuse from planner-provided needles. "
+                        "Transform source material into habitat-native composition and avoid near-verbatim restatement."
+                    ),
+                }
+            )
+
+    ec_media = build_spec.get("execution_contract") if isinstance(build_spec.get("execution_contract"), dict) else {}
+    canvas_system = ec_media.get("canvas_system") if isinstance(ec_media.get("canvas_system"), dict) else {}
+    media_modes = canvas_system.get("media_modes") if isinstance(canvas_system.get("media_modes"), list) else []
+    wants_media = any(str(x).lower() in ("image", "video", "ambient", "captioned") for x in media_modes)
+    media_hits = sum(1 for tok in ("<img", "<video", "figure", "track") if tok in raw_text.lower())
+    if isinstance(manifest_media.get("transformed_media_assets"), int):
+        media_hits = max(media_hits, int(manifest_media.get("transformed_media_assets") or 0))
+    m["canvas_media_hits"] = media_hits
+    if wants_media and media_hits == 0 and status in ("pass", "partial"):
+        if not _has_code(WEAK_MEDIA_TRANSFORMATION_CODE):
+            new_issues.append(
+                {
+                    "severity": "medium",
+                    "category": "interactive_lane_media",
+                    "code": WEAK_MEDIA_TRANSFORMATION_CODE,
+                    "message": (
+                        "Canvas contract requests media modes but artifacts contain no transformed media composition "
+                        "signals (img/video/figure)."
+                    ),
+                }
+            )
+
     if new_issues:
         issues = issues + new_issues
         if status == "pass":
@@ -556,3 +704,11 @@ def _required_library_compliance(
 
     missing = [lib for lib in required if lib not in detected]
     return required, detected, missing
+
+
+def _scene_manifest_from_candidate(build_candidate: dict[str, Any]) -> dict[str, Any]:
+    summ = build_candidate.get("kmbl_build_candidate_summary_v1")
+    if not isinstance(summ, dict):
+        return {}
+    manifest = summ.get("kmbl_scene_manifest_v1")
+    return manifest if isinstance(manifest, dict) else {}

@@ -13,6 +13,14 @@ RoleTelemetry = Literal["planner", "generator", "evaluator"]
 
 TELEMETRY_VERSION: int = 1
 
+EXECUTION_CONTRACT_GUARDRAILS_V1: dict[str, int] = {
+    "execution_contract": 14_000,
+    "geometry_system": 4_500,
+    "canvas_system": 3_000,
+    "lane_mix": 2_000,
+    "source_transformation_policy": 2_500,
+}
+
 
 def _json_sizes(payload: dict[str, Any]) -> tuple[int, int]:
     s = json.dumps(payload, ensure_ascii=False, default=str)
@@ -114,6 +122,31 @@ def build_payload_telemetry_v1(
     # Cheap heuristic (~4 chars/token for Latin text); not a real tokenizer.
     rough_token_estimate = max(1, chars // 4)
 
+    ec_sizes: dict[str, int] = {}
+    ec_guardrail: dict[str, Any] = {}
+    bs = payload.get("build_spec") if isinstance(payload.get("build_spec"), dict) else None
+    if isinstance(bs, dict):
+        ec = bs.get("execution_contract") if isinstance(bs.get("execution_contract"), dict) else {}
+        if ec:
+            ec_sizes["execution_contract"] = _json_sizes(ec)[0]
+            for key in ("geometry_system", "canvas_system", "lane_mix", "source_transformation_policy"):
+                sec = ec.get(key)
+                if isinstance(sec, dict):
+                    ec_sizes[key] = _json_sizes(sec)[0]
+    if ec_sizes:
+        over = sorted([
+            key
+            for key, budget in EXECUTION_CONTRACT_GUARDRAILS_V1.items()
+            if int(ec_sizes.get(key) or 0) > budget
+        ])
+        ec_guardrail = {
+            "guardrail_version": 1,
+            "section_char_counts": ec_sizes,
+            "section_char_budgets": dict(EXECUTION_CONTRACT_GUARDRAILS_V1),
+            "over_budget_sections": over,
+            "within_budget": len(over) == 0,
+        }
+
     out: dict[str, Any] = {
         "telemetry_version": TELEMETRY_VERSION,
         "role": role,
@@ -130,6 +163,8 @@ def build_payload_telemetry_v1(
         "summary_replaced_full_artifacts": summary_replaced,
         "artifact_outputs_inline_content_char_count": inline_chars,
     }
+    if ec_guardrail:
+        out["execution_contract_size_guardrails_v1"] = ec_guardrail
     if full_chars is not None:
         out["full_artifact_content_char_count"] = full_chars
     if estimated_saved is not None:

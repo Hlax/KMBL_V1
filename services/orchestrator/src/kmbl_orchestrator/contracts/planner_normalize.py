@@ -111,6 +111,106 @@ def _compact_execution_contract_fields(bs: dict[str, Any]) -> dict[str, Any]:
         ec2["lane"] = _trim_str(ec2["lane"], 48)
     if isinstance(ec2.get("escalation_lane"), str):
         ec2["escalation_lane"] = _trim_str(ec2["escalation_lane"], 48)
+
+    geo = ec2.get("geometry_system")
+    if isinstance(geo, dict):
+        g2 = dict(geo)
+        for key, max_n, max_item in (
+            ("primitive_set", 10, 48),
+            ("composition_rules", 10, 220),
+            ("motion_mapping_rules", 8, 220),
+            ("interaction_rules", 8, 220),
+            ("color_mapping_rules", 8, 180),
+            ("derivation_signals", 8, 80),
+        ):
+            v = g2.get(key)
+            if isinstance(v, list):
+                g2[key] = [_trim_str(str(x), max_item) for x in v[:max_n]]
+        for key, max_len in (
+            ("mode", 32),
+            ("layout_strategy", 64),
+            ("typography_spatial_role", 64),
+            ("density_profile", 64),
+            ("scene_topology", 64),
+            ("diagram_relationship_mode", 64),
+        ):
+            if isinstance(g2.get(key), str):
+                g2[key] = _trim_str(g2[key], max_len)
+        ec2["geometry_system"] = g2
+
+    canvas = ec2.get("canvas_system")
+    if isinstance(canvas, dict):
+        c2 = dict(canvas)
+        for key, max_n, max_item in (
+            ("media_modes", 6, 48),
+            ("interaction_model", 8, 48),
+            ("route_hints", 8, 96),
+            ("module_zones", 10, 64),
+        ):
+            v = c2.get(key)
+            if isinstance(v, list):
+                c2[key] = [_trim_str(str(x), max_item) for x in v[:max_n]]
+        for key, max_len in (
+            ("surface_type", 24),
+            ("zone_model", 32),
+            ("navigation_model", 32),
+            ("mixed_media_policy", 80),
+            ("progressive_loading_policy", 80),
+        ):
+            if isinstance(c2.get(key), str):
+                c2[key] = _trim_str(c2[key], max_len)
+        ec2["canvas_system"] = c2
+
+    lane_mix = ec2.get("lane_mix")
+    if isinstance(lane_mix, dict):
+        lm2 = dict(lane_mix)
+        if isinstance(lm2.get("primary_lane"), str):
+            lm2["primary_lane"] = _trim_str(lm2["primary_lane"], 48)
+        if isinstance(lm2.get("lane_mix_policy"), str):
+            lm2["lane_mix_policy"] = _trim_str(lm2["lane_mix_policy"], 80)
+        if isinstance(lm2.get("lane_choice_rationale"), str):
+            lm2["lane_choice_rationale"] = _trim_str(lm2["lane_choice_rationale"], 240)
+        for key, max_n, max_item in (
+            ("secondary_lanes", 4, 48),
+            ("blend_rules", 8, 220),
+        ):
+            v = lm2.get(key)
+            if isinstance(v, list):
+                lm2[key] = [_trim_str(str(x), max_item) for x in v[:max_n]]
+        lps = lm2.get("lane_proposal_scores")
+        if isinstance(lps, list):
+            compact_scores: list[dict[str, Any]] = []
+            for row in lps[:4]:
+                if not isinstance(row, dict):
+                    continue
+                compact_scores.append(
+                    {
+                        "lane": _trim_str(str(row.get("lane") or ""), 48),
+                        "score": int(row.get("score") or 0),
+                        "rationale": _trim_str(str(row.get("rationale") or ""), 120),
+                    }
+                )
+            lm2["lane_proposal_scores"] = compact_scores
+        ec2["lane_mix"] = lm2
+
+    srcp = ec2.get("source_transformation_policy")
+    if isinstance(srcp, dict):
+        p2 = dict(srcp)
+        for key, max_len in (
+            ("text_reuse", 80),
+            ("structure_reuse", 100),
+            ("media_reuse", 100),
+        ):
+            if isinstance(p2.get(key), str):
+                p2[key] = _trim_str(p2[key], max_len)
+        lg = p2.get("literalness_guard")
+        if isinstance(lg, list):
+            p2["literalness_guard"] = [_trim_str(str(x), 80) for x in lg[:8]]
+        ls = p2.get("literal_source_needles")
+        if isinstance(ls, list):
+            p2["literal_source_needles"] = [_trim_str(str(x), 140) for x in ls[:8]]
+        ec2["source_transformation_policy"] = p2
+
     out["execution_contract"] = ec2
     return out
 

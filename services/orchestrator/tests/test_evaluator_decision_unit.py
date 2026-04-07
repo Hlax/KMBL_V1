@@ -8,6 +8,7 @@ from __future__ import annotations
 import pytest
 
 from kmbl_orchestrator.graph.helpers import (
+    apply_mixed_lane_failure_policy,
     compute_evaluator_decision,
     maybe_suppress_duplicate_staging,
 )
@@ -139,3 +140,47 @@ class TestMaybeSuppressDuplicateStaging:
         )
         assert d == "stage"
         assert suppressed is False
+
+
+class TestMixedLaneFailurePolicy:
+    def test_hard_failure_interrupts(self) -> None:
+        d, r, meta = apply_mixed_lane_failure_policy(
+            "iterate",
+            None,
+            status="partial",
+            iteration=0,
+            max_iterations=3,
+            issues=[{"code": "required_library_missing"}],
+            metrics={},
+        )
+        assert d == "interrupt"
+        assert str(r).startswith("mixed_lane_hard_failure:")
+        assert meta["route"] == "interrupt"
+
+    def test_soft_failure_iterates_before_cap(self) -> None:
+        d, r, meta = apply_mixed_lane_failure_policy(
+            "stage",
+            None,
+            status="partial",
+            iteration=0,
+            max_iterations=2,
+            issues=[{"code": "lane_mix_mismatch"}],
+            metrics={},
+        )
+        assert d == "iterate"
+        assert r is None
+        assert meta["route"] == "iterate"
+
+    def test_pivot_failure_escalates_to_interrupt_at_cap(self) -> None:
+        d, r, meta = apply_mixed_lane_failure_policy(
+            "stage",
+            None,
+            status="fail",
+            iteration=2,
+            max_iterations=2,
+            issues=[{"code": "literal_reuse_regression"}],
+            metrics={},
+        )
+        assert d == "interrupt"
+        assert r == "mixed_lane_pivot_required_at_iteration_cap"
+        assert meta["route"] == "pivot"

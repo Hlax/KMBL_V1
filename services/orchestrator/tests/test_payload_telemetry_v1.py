@@ -72,6 +72,26 @@ def test_generator_telemetry_reference_cards() -> None:
     assert t["artifact_output_count"] == 0
 
 
+def test_execution_contract_size_guardrails_present() -> None:
+    p = {
+        "thread_id": "t",
+        "build_spec": {
+            "execution_contract": {
+                "geometry_system": {"composition_rules": ["x" * 1400] * 5},
+                "canvas_system": {"module_zones": ["zone"] * 20},
+                "lane_mix": {"blend_rules": ["blend"] * 12},
+                "source_transformation_policy": {"literal_source_needles": ["needle"] * 40},
+            }
+        },
+    }
+    t = build_payload_telemetry_v1("generator", p)
+    g = t.get("execution_contract_size_guardrails_v1")
+    assert isinstance(g, dict)
+    assert g.get("guardrail_version") == 1
+    assert isinstance(g.get("section_char_counts"), dict)
+    assert "execution_contract" in g.get("section_char_counts")
+
+
 def test_read_model_merges_payload_telemetry() -> None:
     tid = uuid4()
     gid = uuid4()

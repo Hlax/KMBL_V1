@@ -26,6 +26,20 @@ from kmbl_orchestrator.runtime.working_staging_read import (
 _log = logging.getLogger(__name__)
 
 
+MIXED_LANE_FAILURE_POLICY_V1: dict[str, dict[str, str]] = {
+    # Hard integrity/preview/render failures should never proceed to staging.
+    "interactive_lane_module_preview_risk": {"route": "interrupt", "severity": "hard"},
+    "required_library_missing": {"route": "interrupt", "severity": "hard"},
+    "staging_integrity": {"route": "interrupt", "severity": "hard"},
+    # Recoverable generation quality failures should iterate while budget remains.
+    "lane_mix_mismatch": {"route": "iterate", "severity": "soft"},
+    "weak_media_transformation": {"route": "iterate", "severity": "soft"},
+    "weak_iteration_delta": {"route": "iterate", "severity": "soft"},
+    # Literal reuse is recoverable early, but should pivot direction to avoid repeating.
+    "literal_reuse_regression": {"route": "pivot", "severity": "pivot"},
+}
+
+
 def _uuid() -> str:
     return str(uuid4())
 
@@ -278,6 +292,102 @@ def maybe_suppress_duplicate_staging(
     ):
         return "interrupt", "duplicate_output_after_max_iterations", True
     return decision, interrupt_reason, False
+
+
+def apply_mixed_lane_failure_policy(
+    decision: Literal["stage", "iterate", "interrupt"],
+    interrupt_reason: str | None,
+    *,
+    status: str,
+    iteration: int,
+    max_iterations: int,
+    issues: list[Any] | None,
+    metrics: dict[str, Any] | None,
+    stagnation_count: int = 0,
+) -> tuple[
+    Literal["stage", "iterate", "interrupt"],
+    str | None,
+    dict[str, Any],
+]:
+    """Apply explicit fail/iterate/pivot handling for mixed-lane deterministic issue codes."""
+    if status not in ("fail", "partial"):
+        return decision, interrupt_reason, {
+            "policy_version": 1,
+            "matched_codes": [],
+            "route": "default",
+            "pivot_required": False,
+            "at_iteration_cap": iteration >= max_iterations,
+        }
+
+    metric_map = metrics if isinstance(metrics, dict) else {}
+    issue_rows = issues if isinstance(issues, list) else []
+    codes: set[str] = set()
+    for it in issue_rows:
+        if not isinstance(it, dict):
+            continue
+        for key in ("code", "type", "id", "criterion"):
+            v = it.get(key)
+            if isinstance(v, str) and v.strip():
+                codes.add(v.strip().lower())
+
+    # Some older evaluators may only set this category for integrity faults.
+    if metric_map.get("duplicate_rejection") is True:
+        codes.add("staging_integrity")
+
+    matched = sorted([c for c in codes if c in MIXED_LANE_FAILURE_POLICY_V1])
+    at_cap = iteration >= max_iterations
+
+    hard_codes = [c for c in matched if MIXED_LANE_FAILURE_POLICY_V1[c]["route"] == "interrupt"]
+    pivot_codes = [c for c in matched if MIXED_LANE_FAILURE_POLICY_V1[c]["route"] == "pivot"]
+    soft_codes = [
+        c
+        for c in matched
+        if MIXED_LANE_FAILURE_POLICY_V1[c]["route"] == "iterate"
+    ]
+
+    route = "default"
+    pivot_required = False
+    out_decision = decision
+    out_reason = interrupt_reason
+
+    if hard_codes:
+        route = "interrupt"
+        out_decision = "interrupt"
+        out_reason = f"mixed_lane_hard_failure:{hard_codes[0]}"
+    elif pivot_codes:
+        pivot_required = True
+        route = "pivot"
+        if at_cap:
+            out_decision = "interrupt"
+            out_reason = "mixed_lane_pivot_required_at_iteration_cap"
+        else:
+            out_decision = "iterate"
+    elif soft_codes:
+        route = "iterate"
+        if at_cap:
+            out_decision = "interrupt"
+            out_reason = "mixed_lane_soft_failure_at_iteration_cap"
+        else:
+            out_decision = "iterate"
+
+    # Escalate repeated soft failures into pivot when stagnating.
+    if (
+        route == "iterate"
+        and not pivot_required
+        and stagnation_count >= 2
+        and any(c in ("lane_mix_mismatch", "weak_media_transformation") for c in soft_codes)
+    ):
+        route = "pivot"
+        pivot_required = True
+
+    return out_decision, out_reason, {
+        "policy_version": 1,
+        "matched_codes": matched,
+        "route": route,
+        "pivot_required": pivot_required,
+        "at_iteration_cap": at_cap,
+        "stagnation_count": stagnation_count,
+    }
 
 
 def legacy_would_route_to_planner_on_iterate(

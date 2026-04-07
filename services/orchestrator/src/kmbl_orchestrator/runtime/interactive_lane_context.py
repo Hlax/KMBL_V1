@@ -150,6 +150,9 @@ def build_interactive_lane_context(
             "layout_mode": ec.get("layout_mode"),
             "allowed_libraries": ec.get("allowed_libraries"),
             "escalation_lane": ec.get("escalation_lane"),
+            "canvas_system": ec.get("canvas_system"),
+            "lane_mix": ec.get("lane_mix"),
+            "source_transformation_policy": ec.get("source_transformation_policy"),
             "required_interactions_preview": interaction_hints[:8],
         },
         "evaluator_fairness": [

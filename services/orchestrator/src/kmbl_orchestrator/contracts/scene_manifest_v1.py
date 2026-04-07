@@ -55,6 +55,13 @@ class SceneManifestV1(BaseModel):
     scene_fingerprint: str = ""
     portfolio_shell_used: bool = False
 
+    # Structured scene/canvas manifest signals (preferred by evaluator when present)
+    lane_mix: dict[str, Any] = Field(default_factory=dict)
+    canvas_model: dict[str, Any] = Field(default_factory=dict)
+    media_transformation_summary: dict[str, Any] = Field(default_factory=dict)
+    source_transformation_summary: dict[str, Any] = Field(default_factory=dict)
+    identity_abstraction_summary: dict[str, Any] = Field(default_factory=dict)
+
     # Self-reported delta from prior (optional — generator may populate)
     claimed_delta_from_prior: str | None = None
 
@@ -308,6 +315,15 @@ def manifest_to_fingerprint_data(manifest: SceneManifestV1) -> dict[str, Any]:
         "interaction_rules": [str(r).strip().lower()[:60] for r in manifest.interaction_rules[:3]],
         "portfolio_shell_used": manifest.portfolio_shell_used,
         "identity_signals_used": manifest.identity_signals_used[:6],
+        "lane_mix": {
+            "primary_lane": str((manifest.lane_mix or {}).get("primary_lane") or "")[:48],
+            "secondary_lanes": [str(x)[:48] for x in ((manifest.lane_mix or {}).get("secondary_lanes") or [])[:3]],
+        },
+        "canvas_model": {
+            "zone_model": str((manifest.canvas_model or {}).get("zone_model") or "")[:48],
+            "surface_type": str((manifest.canvas_model or {}).get("surface_type") or "")[:32],
+            "media_modes": [str(x)[:32] for x in ((manifest.canvas_model or {}).get("media_modes") or [])[:5]],
+        },
     }
 
 

@@ -7,9 +7,12 @@ import logging
 import re
 from typing import Any
 
+from kmbl_orchestrator.contracts.canvas_contract_v1 import (
+    derive_canvas_contract,
+    derive_mixed_lane_contract,
+)
 from kmbl_orchestrator.contracts.geometry_contract_v1 import (
     derive_geometry_contract,
-    geometry_mode_to_library_recommendations,
 )
 from kmbl_orchestrator.domain import EvaluationReportRecord
 from kmbl_orchestrator.runtime.generator_library_policy import (
@@ -151,6 +154,10 @@ def summarize_execution_contract_for_generator(build_spec: dict[str, Any]) -> di
         ),
         # Geometry contract — machine-readable composition rules for 3D/interactive builds
         "geometry_system": ec.get("geometry_system"),
+        # Canvas and lane-mix contracts
+        "canvas_system": ec.get("canvas_system"),
+        "lane_mix": ec.get("lane_mix"),
+        "source_transformation_policy": ec.get("source_transformation_policy"),
     }
     if is_interactive_frontend_vertical(build_spec, {}):
         out["primary_lane_default_libraries"] = list(PRIMARY_LANE_DEFAULT_LIBRARIES)
@@ -325,6 +332,35 @@ def apply_cool_generation_lane_presets(
     geo_dict = geo_contract.to_compact_dict()
     ec["geometry_system"] = geo_dict
 
+    # Derive mixed-lane + canvas contracts so interactive shape is first-class.
+    lane_mix = derive_mixed_lane_contract(identity_brief, structured_identity, bs)
+    canvas_contract = derive_canvas_contract(identity_brief, structured_identity, bs, lane_mix)
+    ec["lane_mix"] = lane_mix.to_compact_dict()
+    ec["canvas_system"] = canvas_contract.to_compact_dict()
+
+    # Source material policy: keep portfolio grounding but force transformed reuse.
+    if not isinstance(ec.get("source_transformation_policy"), dict):
+        literal_needles: list[str] = []
+        hs = ib.get("headings_sample") if isinstance(ib.get("headings_sample"), list) else []
+        for x in hs[:6]:
+            s = str(x).strip()
+            if len(s) >= 12:
+                literal_needles.append(s[:120])
+        ps = ib.get("profile_summary")
+        if isinstance(ps, str) and len(ps.strip()) >= 16:
+            literal_needles.append(ps.strip()[:120])
+        ec["source_transformation_policy"] = {
+            "text_reuse": "summarize_or_omit_by_default",
+            "structure_reuse": "do_not_mirror_portfolio_order",
+            "media_reuse": "allowed_if_habitat_native_transform",
+            "literalness_guard": [
+                "avoid_near_verbatim_source_copy",
+                "avoid_portfolio_section_order_clone",
+                "prefer_identity_abstraction_over_restate",
+            ],
+            "literal_source_needles": literal_needles[:8],
+        }
+
     # Align allowed_libraries with geometry mode when planner didn't specify them
     if interactive_vertical:
         mode = geo_contract.mode
@@ -349,6 +385,11 @@ def apply_cool_generation_lane_presets(
         "portfolio_ia_sections_injected": not interactive_vertical and portfolio_ia,
         "geometry_mode": geo_contract.mode,
         "geometry_contract_applied": True,
+        "canvas_contract_applied": True,
+        "canvas_zone_model": canvas_contract.zone_model,
+        "lane_mix_applied": True,
+        "primary_lane": lane_mix.primary_lane,
+        "secondary_lanes": lane_mix.secondary_lanes,
     }
     _log.info(
         "cool_generation_lane presets merged literal_needles=%s patterns=%d",

@@ -6,6 +6,8 @@ KMBL invokes this workspace; you return **one JSON object** with **`build_spec`*
 
 **BOOTSTRAP.md**, **IDENTITY.md**, **USER.md**, **SOUL.md**, **TOOLS.md**. Do not delete **BOOTSTRAP.md**.
 
+Keep SOUL consumption lean: load only policy there, and rely on generator reference docs for deep lane/library strategy details.
+
 ## Verticals
 
 - **`static_frontend_file_v1`** — single-page static bundle (default example below).

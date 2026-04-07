@@ -102,6 +102,7 @@ _EVALUATION_CONTRACT_KEYS = frozenset({
     # Library / reference keys used by gates
     "required_libraries",
     "library_hints",
+    "execution_contract",
 })
 
 
@@ -115,6 +116,62 @@ def build_evaluation_contract(build_spec: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(build_spec, dict):
         return {}
     return {k: v for k, v in build_spec.items() if k in _EVALUATION_CONTRACT_KEYS}
+
+
+def _build_pass_rubric_v1(report: Any) -> dict[str, Any]:
+    metrics = report.metrics_json if isinstance(getattr(report, "metrics_json", None), dict) else {}
+    issues = report.issues_json if isinstance(getattr(report, "issues_json", None), list) else []
+
+    codes: set[str] = set()
+    high_sev = 0
+    for it in issues:
+        if not isinstance(it, dict):
+            continue
+        sev = str(it.get("severity") or "").strip().lower()
+        if sev in ("high", "critical"):
+            high_sev += 1
+        for key in ("code", "type", "id", "criterion"):
+            v = it.get(key)
+            if isinstance(v, str) and v.strip():
+                codes.add(v.strip().lower())
+
+    req_lib = metrics.get("required_libraries_compliance") if isinstance(metrics.get("required_libraries_compliance"), dict) else {}
+    iter_delta = metrics.get("iteration_delta") if isinstance(metrics.get("iteration_delta"), dict) else {}
+    delta_score = iter_delta.get("delta_score")
+    if not isinstance(delta_score, (int, float)):
+        delta_score = 0.0
+
+    score_technical = 2
+    if high_sev > 0 or bool(codes.intersection({"required_library_missing", "interactive_lane_module_preview_risk"})):
+        score_technical = 0
+    elif metrics.get("preview_grounding_degraded"):
+        score_technical = 1
+
+    score_creative = 2
+    if bool(codes.intersection({"weak_iteration_delta", "generic_demo_pattern"})):
+        score_creative = 1
+    if bool(codes.intersection({"literal_reuse_regression", "portfolio_shell_regression"})):
+        score_creative = 0
+
+    score_lane = 2 if "lane_mix_mismatch" not in codes else 0
+    score_identity = 2 if not bool(codes.intersection({"weak_identity_grounding", "generic_demo_pattern", "literal_reuse_regression"})) else 0
+    score_novelty = 2 if float(delta_score) >= 0.5 else (1 if float(delta_score) >= 0.2 else 0)
+    score_literalness_risk = 2 if "literal_reuse_regression" not in codes else 0
+
+    return {
+        "rubric_version": 1,
+        "status": getattr(report, "status", None),
+        "scores": {
+            "technical_quality": score_technical,
+            "creative_transformation_quality": score_creative,
+            "lane_coherence": score_lane,
+            "identity_grounding": score_identity,
+            "novelty_delta": score_novelty,
+            "literalness_risk": score_literalness_risk,
+        },
+        "issues_codes": sorted(codes)[:12],
+        "required_libraries_satisfied": bool(req_lib.get("satisfied", True)),
+    }
 
 
 def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
@@ -708,6 +765,11 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     identity_brief = state.get("identity_brief")
     alignment_score: float | None = None
     alignment_signals: dict[str, Any] = {}
+
+    rubric_v1 = _build_pass_rubric_v1(report)
+    _metrics_rubric = dict(report.metrics_json or {})
+    _metrics_rubric["kmbl_pass_rubric_v1"] = rubric_v1
+    report = report.model_copy(update={"metrics_json": _metrics_rubric})
     if identity_brief:
         cand_artifact_refs: list[Any] = []
         if bc_row is not None:

@@ -42,6 +42,8 @@ _PLANNER_REPLAN_SPEC_KEYS = frozenset({
     "required_libraries",
     "library_hints",
     "machine_constraints",
+    "execution_contract",
+    "creative_brief",
 })
 
 

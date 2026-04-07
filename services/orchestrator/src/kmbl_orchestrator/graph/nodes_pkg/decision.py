@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from kmbl_orchestrator.graph.helpers import (
+    apply_mixed_lane_failure_policy,
     compute_evaluator_decision,
     maybe_suppress_duplicate_staging,
 )
@@ -58,6 +59,19 @@ def decision_router(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     metrics = ev.get("metrics") if isinstance(ev.get("metrics"), dict) else {}
     decision, interrupt_reason, dup_suppressed = maybe_suppress_duplicate_staging(
         decision, interrupt_reason, status, metrics
+    )
+
+    issues_for_policy = ev.get("issues") if isinstance(ev.get("issues"), list) else []
+    stagnation_now = int((state.get("current_state") or {}).get("stagnation_count", 0))
+    decision, interrupt_reason, mixed_lane_policy = apply_mixed_lane_failure_policy(
+        decision,
+        interrupt_reason,
+        status=status,
+        iteration=iteration,
+        max_iterations=max_iter,
+        issues=issues_for_policy,
+        metrics=metrics,
+        stagnation_count=stagnation_now,
     )
     if dup_suppressed:
         append_graph_run_event(
@@ -182,6 +196,7 @@ def decision_router(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     out: dict[str, Any] = {"decision": decision}
     if interrupt_reason:
         out["interrupt_reason"] = interrupt_reason
+    out["mixed_lane_failure_policy_v1"] = mixed_lane_policy
 
     # Track pass_count for quality-based visibility (currently informational;
     # enables future policy: "require N consecutive passes before staging").
@@ -217,6 +232,8 @@ def decision_router(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             stagnation_count=stagnation,
             prior_direction=prior_direction,
         )
+        if mixed_lane_policy.get("pivot_required"):
+            retry_dir = "pivot_content"
         out["retry_direction"] = retry_dir
 
         if alignment_score is None:
@@ -280,6 +297,7 @@ def decision_router(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             "evaluation_status": status,
             "retry_direction": out.get("retry_direction"),
             "last_alignment_score": state.get("last_alignment_score"),
+            "mixed_lane_failure_policy_v1": mixed_lane_policy,
         },
     )
     return out

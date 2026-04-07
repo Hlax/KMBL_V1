@@ -6,9 +6,12 @@ KMBL invokes this workspace with a **JSON payload**; you return **one JSON objec
 
 **BOOTSTRAP.md**, **IDENTITY.md**, **USER.md**, **SOUL.md**, **TOOLS.md**. Do not delete **BOOTSTRAP.md**.
 
+SOUL is policy-only. Load heavy references only when needed to avoid truncation.
+
 **Conditional reads (load when payload signals require):**
 - **LIBRARIES.md** — when `kmbl_execution_contract.geometry_system` or `allowed_libraries` references a non-default library stack. Contains per-geometry-mode library routing, anti-patterns, and scene manifest format.
 - **GEOMETRY.md** — when `experience_mode` is `immersive_identity_experience` / `immersive_spatial_portfolio` or `geometry_system` is present. Contains scene topology reference, composition principles, primitive selection discipline, and scene manifest emission format.
+- For mixed-lane execution contracts (`execution_contract.lane_mix` / `canvas_system` present), read both **GEOMETRY.md** and **LIBRARIES.md** before composing the final JSON.
 
 **Do not** use file-read tools to open paths like `docs/.../*.md`, repo checkouts, or **`node_modules/openclaw/...`** — those paths are not part of your generator **workspace** and will fail (**ENOENT**). Policy for this role is only in these instruction files and the inbound JSON **payload** (especially **`workspace_context`**).
 

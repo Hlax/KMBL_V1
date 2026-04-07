@@ -10,6 +10,13 @@ Source-of-truth markdown for **`kmbl-planner`**, **`kmbl-generator`**, **`kmbl-e
 4. **Task prompts** — small, run-specific templates only.
 5. **Orchestrator** — Pydantic wire contracts in `services/orchestrator/.../contracts/role_outputs.py` catch drift; generator can emit **`contract_failure`** (see below).
 
+## SOUL size discipline
+
+- Keep each agent's **SOUL.md** short and policy-only.
+- Put deep implementation guidance in read-on-demand references (`LIBRARIES.md`, `GEOMETRY.md`, lane-specific docs).
+- In `AGENTS.md`, define conditional read triggers so models only load heavy docs when payload signals require them.
+- Avoid giant nested examples in SOUL files; prefer compact schema snippets plus links to reference docs.
+
 ## Wire contracts (orchestrator-enforced)
 
 | Role | Input | Output must include |

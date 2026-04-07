@@ -251,6 +251,29 @@ class Settings(BaseSettings):
             "kmbl_maintenance_prune_http_enabled",
         ),
     )
+    # Shorter retention for workspaces left by parse-failed generator runs.
+    # When retention is enabled, dirs tagged as parse-failed (via ``.kmbl_parse_failed`` marker)
+    # are pruned after this many hours instead of the normal ``min_age_days``.
+    # Set 0 to disable the fast-prune lane (falls back to normal retention age).
+    kmbl_generator_workspace_parse_fail_retention_hours: float = Field(
+        default=24.0,
+        ge=0.0,
+        le=8760.0,
+        validation_alias=AliasChoices(
+            "KMBL_GENERATOR_WORKSPACE_PARSE_FAIL_RETENTION_HOURS",
+            "kmbl_generator_workspace_parse_fail_retention_hours",
+        ),
+    )
+    # When true, parse-failed workspaces use the normal long retention window
+    # (``min_age_days``) instead of ``parse_fail_retention_hours``.
+    # Intended for operator debug sessions that need to inspect failed workspace artifacts.
+    kmbl_generator_workspace_debug_retention: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "KMBL_GENERATOR_WORKSPACE_DEBUG_RETENTION",
+            "kmbl_generator_workspace_debug_retention",
+        ),
+    )
 
     # Habitat lifecycle — local workspace as evictable cache layer.
     # When enabled, the lifecycle manager enforces at-most-one active live_habitat per thread
@@ -389,7 +412,7 @@ class Settings(BaseSettings):
         ),
     )
     openclaw_chat_max_tokens_generator: int | None = Field(
-        default=8192,
+        default=16384,
         validation_alias=AliasChoices(
             "OPENCLAW_CHAT_MAX_TOKENS_GENERATOR",
             "KILOCLAW_CHAT_MAX_TOKENS_GENERATOR",

@@ -414,8 +414,8 @@ def test_http_client_sets_max_tokens_for_evaluator(mock_client_cls: MagicMock) -
 
 
 @patch("kmbl_orchestrator.providers.kiloclaw_http.httpx.Client")
-def test_http_client_default_max_tokens_generator_8192(mock_client_cls: MagicMock) -> None:
-    """Schema default sends max_tokens for generator (parity with planner)."""
+def test_http_client_default_max_tokens_generator_16384(mock_client_cls: MagicMock) -> None:
+    """Schema default sends max_tokens for generator (raised to 16384 for truncation hardening)."""
     gen_out = {"updated_state": {"smoke": True}}
     mock_resp = MagicMock()
     mock_resp.status_code = 200
@@ -434,7 +434,7 @@ def test_http_client_default_max_tokens_generator_8192(mock_client_cls: MagicMoc
     c = KiloClawHttpClient(settings=s)
     c.invoke_role("generator", "kmbl-generator", {"thread_id": "00000000-0000-0000-0000-000000000001"})
     body = mock_inst.post.call_args[1]["json"]
-    assert body["max_tokens"] == 8192
+    assert body["max_tokens"] == 16384
 
 
 @patch("kmbl_orchestrator.providers.kiloclaw_http.httpx.Client")

@@ -22,6 +22,107 @@ from kmbl_orchestrator.providers.kiloclaw_protocol import (
 
 _log = logging.getLogger(__name__)
 
+# Cap for raw-content previews in diagnostic logs (bytes).
+_DIAG_PREVIEW_CAP = 2048
+
+
+def _sanitized_preview(raw: str, cap: int = _DIAG_PREVIEW_CAP) -> str:
+    """Return a log-safe prefix of *raw* with no secrets / excessive size."""
+    if not raw:
+        return "<empty>"
+    return raw[:cap].replace("\n", "\\n")
+
+
+def _log_parsing_diagnostics(
+    *,
+    stage: str,
+    role_type: RoleType | None,
+    provider_config_key: str | None = None,
+    content_type: str | None = None,
+    wrapper_keys: list[str] | None = None,
+    raw_preview: str = "",
+    recovery_succeeded: bool | None = None,
+    extra: dict[str, Any] | None = None,
+) -> None:
+    """Structured WARNING log for recovery/fallback parsing paths.
+
+    Provides enough context to diagnose provider shape drift without dumping
+    massive payloads or secrets.
+    """
+    parts = [f"stage={stage}", f"role_type={role_type}"]
+    if provider_config_key:
+        parts.append(f"provider_config_key={provider_config_key}")
+    if content_type:
+        parts.append(f"content_type={content_type}")
+    if wrapper_keys is not None:
+        parts.append(f"wrapper_keys={wrapper_keys[:20]}")
+    if raw_preview:
+        parts.append(f"raw_preview={_sanitized_preview(raw_preview)!r}")
+    if recovery_succeeded is not None:
+        parts.append(f"recovery_succeeded={recovery_succeeded}")
+    if extra:
+        for k, v in list(extra.items())[:10]:
+            parts.append(f"{k}={v}")
+    _log.warning("kiloclaw_parsing_recovery %s", " ".join(parts))
+
+
+# ---------------------------------------------------------------------------
+# Truncation detection
+# ---------------------------------------------------------------------------
+
+_MAX_TOKENS_SETTING_NAMES: dict[str, str] = {
+    "planner": "OPENCLAW_CHAT_MAX_TOKENS_PLANNER",
+    "generator": "OPENCLAW_CHAT_MAX_TOKENS_GENERATOR",
+    "evaluator": "OPENCLAW_CHAT_MAX_TOKENS_EVALUATOR",
+}
+
+
+def _looks_like_truncated_json(raw: str) -> bool:
+    """Heuristic: the raw text looks like it was cut off mid-JSON.
+
+    Checks for unbalanced braces/brackets or trailing partial tokens
+    that suggest the model hit the token limit.
+    """
+    s = raw.rstrip()
+    if not s:
+        return False
+    # Obvious truncation: ends mid-key/value (no closing brace/bracket)
+    # Net unbalanced depth >= 2 strongly indicates truncation.
+    # A threshold of 1 would false-positive on values containing literal braces.
+    open_braces = s.count("{") - s.count("}")
+    open_brackets = s.count("[") - s.count("]")
+    if open_braces >= 2 or open_brackets >= 2:
+        return True
+    # Ends with a comma, colon, or backslash (mid-value)
+    if s[-1] in (",", ":", "\\"):
+        return True
+    # Ends with an open quote (value was being written)
+    if s.endswith('"') and s.count('"') % 2 != 0:
+        return True
+    return False
+
+
+def detect_truncation(
+    raw: str,
+    *,
+    role_type: RoleType | None = None,
+    finish_reason: str | None = None,
+) -> str | None:
+    """Return a human-readable truncation message, or None if no truncation detected."""
+    reasons: list[str] = []
+    if finish_reason and finish_reason.lower() in ("length", "max_tokens"):
+        reasons.append(f"finish_reason={finish_reason!r} indicates the model hit the token limit")
+    if _looks_like_truncated_json(raw):
+        reasons.append("JSON payload appears incomplete (unbalanced braces/brackets or cut-off value)")
+    if not reasons:
+        return None
+    setting = _MAX_TOKENS_SETTING_NAMES.get(role_type or "", "OPENCLAW_CHAT_MAX_TOKENS_*")
+    return (
+        f"Generator output appears truncated: {'; '.join(reasons)}. "
+        f"The payload may have been cut off by the token limit. "
+        f"Increase the {setting} setting (env var) to allow larger outputs."
+    )
+
 
 def _looks_like_role_output(d: dict[str, Any]) -> bool:
     if "build_spec" in d:
@@ -338,19 +439,24 @@ def extract_role_payload_from_openclaw_output(data: dict[str, Any]) -> dict[str,
     # Catches gateways that nest the payload under arbitrary keys not tried above.
     for _k, v in data.items():
         if isinstance(v, dict) and _looks_like_role_output(v):
-            _log.info(
-                "extract_role_payload_from_openclaw_output recovered from nested key=%r",
-                _k,
+            _log_parsing_diagnostics(
+                stage="openclaw_envelope_deep_scan",
+                role_type=None,
+                wrapper_keys=[_k],
+                raw_preview=json.dumps(v, default=str)[:_DIAG_PREVIEW_CAP],
+                recovery_succeeded=True,
             )
             return v
         # Also check one level deeper (e.g. ``result.output`` where result has no payloads).
         if isinstance(v, dict):
             for _k2, v2 in v.items():
                 if isinstance(v2, dict) and _looks_like_role_output(v2):
-                    _log.info(
-                        "extract_role_payload_from_openclaw_output recovered from nested key=%r.%r",
-                        _k,
-                        _k2,
+                    _log_parsing_diagnostics(
+                        stage="openclaw_envelope_deep_scan",
+                        role_type=None,
+                        wrapper_keys=[_k, _k2],
+                        raw_preview=json.dumps(v2, default=str)[:_DIAG_PREVIEW_CAP],
+                        recovery_succeeded=True,
                     )
                     return v2
     raise KiloClawInvocationError(
@@ -387,6 +493,10 @@ def _parse_chat_completion_json_content(
                 error_type="invalid_response",
             ),
         )
+
+    # Extract finish_reason for truncation detection
+    finish_reason = c0.get("finish_reason")
+
     msg = c0.get("message")
     if not isinstance(msg, dict):
         raise KiloClawInvocationError(
@@ -446,6 +556,14 @@ def _parse_chat_completion_json_content(
             for obj in objs:
                 hit = _find_planner_contract_dict(obj) or _dict_with_planner_build_spec(obj)
                 if hit is not None:
+                    _log_parsing_diagnostics(
+                        stage="multi_object_scan_recovery",
+                        role_type=role_type,
+                        content_type="str",
+                        wrapper_keys=list(obj.keys())[:15],
+                        raw_preview=raw,
+                        recovery_succeeded=True,
+                    )
                     return hit
         elif role_type in ("generator", "evaluator"):
             # Parity with planner: scan ALL objects for the first role-shaped dict
@@ -453,17 +571,48 @@ def _parse_chat_completion_json_content(
             objs = _iter_json_objects_in_text(raw)
             for obj in objs:
                 if _looks_like_role_output(obj):
-                    _log.info(
-                        "role_output_normalization step=multi_object_scan_recovery "
-                        "role_type=%s matched_keys=%s",
-                        role_type,
-                        [k for k in obj if k in ("proposed_changes", "updated_state", "artifact_outputs", "status")],
+                    _log_parsing_diagnostics(
+                        stage="multi_object_scan_recovery",
+                        role_type=role_type,
+                        content_type="str",
+                        wrapper_keys=[k for k in obj if k in ("proposed_changes", "updated_state", "artifact_outputs", "status")],
+                        raw_preview=raw,
+                        recovery_succeeded=True,
                     )
                     return obj
         try:
             parsed = _decode_first_json_object_in_text(raw)
         except json.JSONDecodeError:
             assert e_first is not None
+            # Before raising, check for truncation — give a clearer error if detected.
+            trunc_msg = detect_truncation(raw, role_type=role_type, finish_reason=finish_reason if isinstance(finish_reason, str) else None)
+            if trunc_msg:
+                _log_parsing_diagnostics(
+                    stage="truncation_detected",
+                    role_type=role_type,
+                    raw_preview=raw,
+                    recovery_succeeded=False,
+                    extra={"finish_reason": finish_reason},
+                )
+                raise KiloClawInvocationError(
+                    trunc_msg,
+                    normalized=provider_failure(
+                        trunc_msg,
+                        error_kind="provider_error",
+                        error_type="truncated_output",
+                        details={
+                            "preview": raw[:500],
+                            "finish_reason": finish_reason,
+                            "failure_class": "generator_output_truncated",
+                        },
+                    ),
+                ) from e_first
+            _log_parsing_diagnostics(
+                stage="json_decode_failed",
+                role_type=role_type,
+                raw_preview=raw,
+                recovery_succeeded=False,
+            )
             raise KiloClawInvocationError(
                 f"assistant content is not valid JSON: {e_first!s}",
                 normalized=provider_failure(
@@ -480,14 +629,24 @@ def _parse_chat_completion_json_content(
                 if isinstance(item, dict):
                     hit = _find_planner_contract_dict(item) or _dict_with_planner_build_spec(item)
                     if hit is not None:
+                        _log_parsing_diagnostics(
+                            stage="list_root_recovery",
+                            role_type=role_type,
+                            content_type="list",
+                            wrapper_keys=list(hit.keys())[:15],
+                            recovery_succeeded=True,
+                        )
                         return hit
         elif role_type in ("generator", "evaluator"):
             # Generator/evaluator: find first dict matching role output keys
             for item in parsed:
                 if isinstance(item, dict) and _looks_like_role_output(item):
-                    _log.warning(
-                        "openclaw %s returned list-root JSON; recovering first matching dict",
-                        role_type,
+                    _log_parsing_diagnostics(
+                        stage="list_root_recovery",
+                        role_type=role_type,
+                        content_type="list",
+                        wrapper_keys=list(item.keys())[:15],
+                        recovery_succeeded=True,
                     )
                     return item
         raise KiloClawInvocationError(
@@ -544,13 +703,21 @@ def _extract_http_role_dict(
             if isinstance(v, dict) and _looks_like_role_output(v):
                 return v
         if _looks_like_variation_only_echo(data):
-            _log.warning(
-                "openclaw_http planner returned variation-only JSON; applying gallery-varied synthetic contract"
+            _log_parsing_diagnostics(
+                stage="variation_only_echo_recovery",
+                role_type=role_type,
+                content_type="dict",
+                wrapper_keys=list(data.keys())[:15],
+                recovery_succeeded=True,
             )
             return _synthetic_planner_from_variation_echo(data)
-        _log.warning(
-            "openclaw_http planner payload not recognized (before OpenClaw envelope scan): top_keys=%s",
-            list(data.keys())[:30],
+        _log_parsing_diagnostics(
+            stage="planner_payload_not_recognized",
+            role_type=role_type,
+            content_type="dict",
+            wrapper_keys=list(data.keys())[:30],
+            raw_preview=json.dumps(data, default=str)[:_DIAG_PREVIEW_CAP],
+            recovery_succeeded=False,
         )
     elif role_type in ("generator", "evaluator"):
         # Parity with planner: scan all top-level values for role-shaped dicts.
@@ -558,10 +725,12 @@ def _extract_http_role_dict(
         # (e.g. ``response``, ``answer``, ``generated``, ``content``).
         for _k, v in data.items():
             if isinstance(v, dict) and _looks_like_role_output(v):
-                _log.info(
-                    "openclaw_http %s recovered role output from wrapper key=%r",
-                    role_type,
-                    _k,
+                _log_parsing_diagnostics(
+                    stage="http_role_dict_wrapper_key_recovery",
+                    role_type=role_type,
+                    wrapper_keys=[_k],
+                    content_type=type(v).__name__,
+                    recovery_succeeded=True,
                 )
                 return v
     return extract_role_payload_from_openclaw_output(data)

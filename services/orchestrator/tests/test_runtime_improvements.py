@@ -229,6 +229,7 @@ class TestRequiredLibraryEnforcement:
         # Status should remain pass (no required_library_missing issue)
         codes = [i["code"] for i in result.issues_json if isinstance(i, dict)]
         assert REQUIRED_LIBRARY_MISSING_CODE not in codes
+        assert result.status == "pass"
 
     def test_compliance_metric_populated(self):
         build_spec = {

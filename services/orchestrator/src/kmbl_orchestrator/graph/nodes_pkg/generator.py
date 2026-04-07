@@ -753,7 +753,7 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     _ws_first = bool(
         isinstance(raw.get("workspace_manifest_v1"), dict)
         and isinstance(raw.get("sandbox_ref"), str)
-        and str(raw.get("sandbox_ref", "")).strip()
+        and raw.get("sandbox_ref", "").strip()
     )
     persist_out, persist_shape = shape_generator_invocation_output_payload(
         raw,

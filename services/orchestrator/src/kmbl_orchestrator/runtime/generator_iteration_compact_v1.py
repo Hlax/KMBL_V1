@@ -6,6 +6,41 @@ import hashlib
 import json
 from typing import Any
 
+# Keys retained in the slim build_spec sent to the generator on iterations > 0.
+# Everything else is redundant once the spec is locked — the digest proves identity.
+_BUILD_SPEC_ITERATION_KEYS = frozenset({
+    "experience_mode",
+    "surface_type",
+    "canonical_vertical",
+    "success_criteria",
+    "literal_success_checks",
+    "cool_generation_lane",
+    "interaction_model",
+    "motion_spec",
+    "required_libraries",
+    "library_hints",
+    "machine_constraints",
+})
+
+# Keys retained in prior_build_spec sent to the planner on replan (iteration > 0).
+# The planner needs enough context to understand what it planned last time and why
+# it needs to change — but not the full creative/crawl blob, which can be very large.
+_PLANNER_REPLAN_SPEC_KEYS = frozenset({
+    "experience_mode",
+    "surface_type",
+    "canonical_vertical",
+    "site_archetype",
+    "success_criteria",
+    "evaluation_targets",
+    "literal_success_checks",
+    "cool_generation_lane",
+    "interaction_model",
+    "selected_urls",
+    "required_libraries",
+    "library_hints",
+    "machine_constraints",
+})
+
 
 def build_spec_digest(build_spec: dict[str, Any]) -> str:
     raw = json.dumps(build_spec, sort_keys=True, default=str).encode("utf-8", errors="replace")
@@ -39,6 +74,51 @@ def compact_structured_identity(si: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def compact_crawl_context_for_replan(
+    crawl_context: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Return a compact crawl-context summary for planner replan payloads.
+
+    On iteration > 0, the planner needs to know what's been crawled (counts,
+    phase, exhaustion) but not the full per-page summaries, which can be very
+    large.  The planner already incorporated crawl content into the prior
+    build_spec during iteration 0.
+    """
+    if not isinstance(crawl_context, dict):
+        return crawl_context
+    return {
+        "visited_count": crawl_context.get("visited_count"),
+        "extracted_fact_digest": crawl_context.get("extracted_fact_digest"),
+        "crawl_phase": crawl_context.get("crawl_phase"),
+        "grounding_available": crawl_context.get("grounding_available"),
+        "crawl_exhausted": crawl_context.get("crawl_exhausted"),
+        "next_urls_count": len(crawl_context.get("next_urls") or []),
+        "_kmbl_compacted": True,
+    }
+
+
+def compact_previous_evaluation_report_for_llm(
+    prev_ev: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Return a slim copy of a prior evaluation report safe for LLM context.
+
+    Strips orchestrator-internal fields (metrics_json blob, raw artifact refs,
+    alignment_signals) that the evaluator LLM never uses but that can be very
+    large on subsequent iterations.  Only status, summary, a capped issues list,
+    and alignment_score are kept.
+    """
+    if not isinstance(prev_ev, dict):
+        return prev_ev
+    issues = prev_ev.get("issues")
+    return {
+        "status": prev_ev.get("status"),
+        "summary": prev_ev.get("summary"),
+        "issues": issues[:5] if isinstance(issues, list) else [],
+        "alignment_score": prev_ev.get("alignment_score"),
+        "_kmbl_compacted": True,
+    }
+
+
 def apply_iteration_compaction(payload: dict[str, Any], iteration: int) -> int:
     """Mutates ``payload`` for iteration >= 1; returns approximate JSON chars saved."""
     if iteration <= 0:
@@ -56,6 +136,7 @@ def apply_iteration_compaction(payload: dict[str, Any], iteration: int) -> int:
     bs = payload.get("build_spec")
     if isinstance(bs, dict):
         payload["kmbl_locked_build_spec_digest"] = build_spec_digest(bs)
+        payload["build_spec"] = {k: v for k, v in bs.items() if k in _BUILD_SPEC_ITERATION_KEYS}
 
     if "kmbl_interactive_lane_context" in payload:
         ilc = payload.get("kmbl_interactive_lane_context")

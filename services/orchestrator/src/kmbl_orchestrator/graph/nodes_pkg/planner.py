@@ -48,6 +48,11 @@ from kmbl_orchestrator.runtime.working_staging_read import (
     get_working_staging_for_thread_resilient,
 )
 from kmbl_orchestrator.memory.ops import memory_bias_for_experience_mode
+from kmbl_orchestrator.runtime.generator_iteration_compact_v1 import (
+    _PLANNER_REPLAN_SPEC_KEYS,
+    build_spec_digest,
+    compact_crawl_context_for_replan,
+)
 from kmbl_orchestrator.staging.facts import (
     build_working_staging_facts,
     working_staging_facts_to_payload,
@@ -163,6 +168,13 @@ def planner_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
 
     # Crawl context is injected by context_hydrator into event_input
     crawl_context = ei.get("crawl_context") if isinstance(ei, dict) else None
+    # On replans (iteration > 0) the planner already consumed the full crawl on
+    # iteration 0 — send a compact view (counts/phase/exhaustion) not full page summaries.
+    crawl_context_for_payload = (
+        compact_crawl_context_for_replan(crawl_context)
+        if iteration_idx > 0 and isinstance(crawl_context, dict)
+        else crawl_context
+    )
     payload: dict[str, Any] = {
         "graph_run_id": str(gid),
         "thread_id": state["thread_id"],
@@ -180,7 +192,8 @@ def planner_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         "structured_identity": state.get("structured_identity"),
         # Durable crawl state for cross-session resumption.
         # Tells the planner what URLs have been visited, what's next, whether crawl is exhausted.
-        "crawl_context": crawl_context,
+        # Compacted on replans: full page summaries already incorporated in iteration 0 plan.
+        "crawl_context": crawl_context_for_payload,
     }
     payload.update(
         build_planner_reference_payload(
@@ -194,17 +207,22 @@ def planner_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     if iteration_idx > 0:
         ev = state.get("evaluation_report") if isinstance(state.get("evaluation_report"), dict) else {}
         bs = state.get("build_spec") if isinstance(state.get("build_spec"), dict) else {}
+        # Slim prior_build_spec to only replan-relevant keys — creative/crawl blobs
+        # are already incorporated into the identity profile and prior eval report.
+        # Send digest so the planner can verify it's referencing the right spec.
+        _slim_bs = {k: v for k, v in bs.items() if k in _PLANNER_REPLAN_SPEC_KEYS}
         rctx: dict[str, Any] = {
             "replan": True,
             "iteration_index": iteration_idx,
             "prior_build_spec_id": state.get("build_spec_id"),
+            "prior_build_spec_digest": build_spec_digest(bs) if bs else None,
             "prior_evaluation_report": {
                 "status": ev.get("status"),
                 "summary": ev.get("summary"),
                 "issues": ev.get("issues"),
             },
             "retry_context": state.get("retry_context"),
-            "prior_build_spec": bs,
+            "prior_build_spec": _slim_bs,
         }
         pv2 = state.get("last_build_candidate_summary_v2")
         pv1 = state.get("last_build_candidate_summary_v1")

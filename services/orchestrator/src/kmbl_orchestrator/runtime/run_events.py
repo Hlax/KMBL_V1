@@ -105,6 +105,8 @@ class RunEventType:
     EVALUATOR_GROUNDING_UNAVAILABLE = "evaluator_grounding_unavailable"
     PREVIEW_GROUNDING_FAILED = "preview_grounding_failed"
     CANDIDATE_PREVIEW_UNREACHABLE_PRIVATE_HOST = "candidate_preview_unreachable_due_to_private_host"
+    # Demo/public-mode: grounding required but not satisfied — evaluation marked degraded.
+    EVALUATOR_DEMO_GROUNDING_DEGRADED = "evaluator_demo_grounding_degraded"
 
     # Habitat materialization lifecycle (local workspace as evictable cache layer)
     HABITAT_MATERIALIZED = "habitat_materialized"

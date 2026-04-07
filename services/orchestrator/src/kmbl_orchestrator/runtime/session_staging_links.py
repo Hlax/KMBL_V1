@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
 from kmbl_orchestrator.config import Settings
 from kmbl_orchestrator.runtime.preview_reachability import (
@@ -245,7 +246,40 @@ def resolve_evaluator_preview_resolution(
         "preview_grounding_degrade_reason": preview_grounding_degrade_reason,
         "preview_paths_present": has_candidate_path,
         "kmbl_evaluator_allow_private_preview_fetch": allow_private,
+        # Materialization coherence: does a registered habitat back the preview URL?
+        **_materialization_coherence(thread_id, graph_run_id),
     }
+
+
+def _materialization_coherence(thread_id: str, graph_run_id: str) -> dict[str, Any]:
+    """Check whether habitat materializations back the preview surfaces.
+
+    Returns metadata keys that tell the evaluator whether the candidate/staging
+    preview URL is actually backed by a registered materialization in the current
+    process, or whether the URL was constructed but no materialization was recorded.
+    """
+    try:
+        from kmbl_orchestrator.runtime.habitat_lifecycle import list_manifests
+
+        tid = UUID(thread_id)
+        all_m = list_manifests(thread_id=tid, status="active")
+        kinds = {m.materialization_kind for m in all_m}
+        candidate_materialized = "candidate_preview" in kinds
+        staging_materialized = "staging_preview" in kinds
+        live_materialized = "live_habitat" in kinds
+        return {
+            "candidate_preview_materialized": candidate_materialized,
+            "staging_preview_materialized": staging_materialized,
+            "live_habitat_materialized": live_materialized,
+            "preview_materialization_coherent": candidate_materialized or staging_materialized,
+        }
+    except Exception:
+        return {
+            "candidate_preview_materialized": False,
+            "staging_preview_materialized": False,
+            "live_habitat_materialized": False,
+            "preview_materialization_coherent": False,
+        }
 
 
 def resolve_evaluator_preview_url(
@@ -282,3 +316,54 @@ def merge_session_staging_into_event_input(
         thread_id=str(thread_id),
     )
     return ei
+
+
+# ---------------------------------------------------------------------------
+# Canonical demo-mode preview resolution
+# ---------------------------------------------------------------------------
+
+def resolve_canonical_demo_preview(
+    settings: Settings,
+    *,
+    graph_run_id: str,
+    thread_id: str,
+) -> dict[str, Any]:
+    """Single source of truth for the public preview URL in demo mode.
+
+    Produces one ``canonical_preview_url`` that candidate_preview, staging_preview,
+    and the evaluator should all reference.  Includes explicit fallback diagnostics
+    so silent degradation is impossible.
+
+    Returns:
+        A dict with ``canonical_preview_url``, ``canonical_preview_source``,
+        ``canonical_preview_fallback``, and materialization coherence flags.
+    """
+    base, base_source = effective_orchestrator_public_base(settings)
+    cand_path = f"/orchestrator/runs/{graph_run_id}/candidate-preview"
+    stage_path = f"/orchestrator/runs/{graph_run_id}/staging-preview"
+
+    coherence = _materialization_coherence(thread_id, graph_run_id)
+
+    canonical_url: str | None = None
+    canonical_source = "none"
+    fallback = False
+
+    if base:
+        # Prefer candidate preview; fall back to staging if candidate is not materialized
+        if coherence.get("candidate_preview_materialized", False):
+            canonical_url = f"{base}{cand_path}"
+            canonical_source = f"candidate_preview_via_{base_source}"
+        else:
+            canonical_url = f"{base}{stage_path}"
+            canonical_source = f"staging_preview_via_{base_source}"
+            fallback = True
+
+    return {
+        "canonical_preview_url": canonical_url,
+        "canonical_preview_source": canonical_source,
+        "canonical_preview_path": cand_path,
+        "canonical_preview_fallback": fallback,
+        "orchestrator_public_base": base,
+        "orchestrator_public_base_source": base_source,
+        **coherence,
+    }

@@ -441,6 +441,12 @@ _SELECTED_URLS_CONTRACT: dict[str, Any] = {
 }
 
 
+def _has_rendered_evidence(data: dict[str, Any]) -> bool:
+    """True when the page summary carries Playwright-rendered ``reference_sketch``."""
+    rs = data.get("reference_sketch")
+    return isinstance(rs, dict) and bool(rs)
+
+
 def build_crawl_context_for_planner(
     state: CrawlStateRecord | None,
 ) -> dict[str, Any]:
@@ -466,15 +472,17 @@ def build_crawl_context_for_planner(
             origin = (
                 "portfolio" if is_same_domain(url, state.root_url) else "inspiration"
             )
+        rs = data.get("reference_sketch")
+        has_rendered = _has_rendered_evidence(data)
         out = {
             "url": url,
             "summary": data.get("summary", ""),
             "design_signals": data.get("design_signals", []),
             "tone_keywords": data.get("tone_keywords", []),
             "origin": origin,
+            "has_rendered_evidence": has_rendered,
         }
-        rs = data.get("reference_sketch")
-        if isinstance(rs, dict):
+        if has_rendered:
             out["reference_sketch"] = rs
         return out
 
@@ -532,6 +540,12 @@ def build_crawl_context_for_planner(
         except Exception:
             stale = False
 
+    # Count pages with Playwright-rendered evidence (materially richer grounding)
+    rendered_evidence_count = sum(
+        1 for data in state.page_summaries.values()
+        if isinstance(data, dict) and _has_rendered_evidence(data)
+    )
+
     return {
         "crawl_available": True,
         "crawl_phase": state.crawl_phase,
@@ -551,6 +565,7 @@ def build_crawl_context_for_planner(
         "external_inspiration_available": bool(state.external_inspiration_urls),
         "is_exhausted": state.crawl_status == "exhausted",
         "grounding_available": has_real_data,
+        "rendered_evidence_count": rendered_evidence_count,
         "resume": {
             "has_prior_crawl_memory": has_prior,
             "frontier_internal_urls_remaining": len(

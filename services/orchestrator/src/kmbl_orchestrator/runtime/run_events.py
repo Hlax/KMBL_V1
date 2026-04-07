@@ -108,6 +108,7 @@ class RunEventType:
 
     # Habitat materialization lifecycle (local workspace as evictable cache layer)
     HABITAT_MATERIALIZED = "habitat_materialized"
+    HABITAT_MATERIALIZATION_FAILED = "habitat_materialization_failed"
     HABITAT_REHYDRATED = "habitat_rehydrated"
     HABITAT_EVICTED = "habitat_evicted"
     HABITAT_EVICTION_SKIPPED_NOT_DURABLE = "habitat_eviction_skipped_not_durable"

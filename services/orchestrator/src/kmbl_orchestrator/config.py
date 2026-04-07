@@ -129,6 +129,18 @@ class Settings(BaseSettings):
             "memory_identity_derive_min_confidence",
         ),
     )
+    # Weakly-grounded retry cap: when evaluator runs without browser-reachable preview
+    # (artifact-only), cap retries at this value to avoid token waste on non-browser-grounded
+    # evaluations.  0 disables (falls back to graph_max_iterations_default).
+    kmbl_weakly_grounded_max_iterations: int = Field(
+        default=3,
+        ge=0,
+        le=100,
+        validation_alias=AliasChoices(
+            "KMBL_WEAKLY_GROUNDED_MAX_ITERATIONS",
+            "kmbl_weakly_grounded_max_iterations",
+        ),
+    )
     # Nudge experience_mode from taste when identity confidence is below this (bias, not override).
     memory_bias_max_identity_confidence: float = Field(
         default=0.55,

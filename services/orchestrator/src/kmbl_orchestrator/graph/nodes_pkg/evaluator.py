@@ -56,6 +56,10 @@ from kmbl_orchestrator.runtime.working_staging_read import (
     get_working_staging_for_thread_resilient,
 )
 from kmbl_orchestrator.runtime.demo_preview_grounding import compute_demo_preview_grounding_state
+from kmbl_orchestrator.runtime.generator_iteration_compact_v1 import (
+    compact_previous_evaluation_report_for_llm,
+    compact_structured_identity,
+)
 from kmbl_orchestrator.runtime.preview_reachability import manifest_first_evaluator_grounding_satisfied
 from kmbl_orchestrator.runtime.session_staging_links import resolve_evaluator_preview_resolution
 from kmbl_orchestrator.runtime.static_vertical_invariants import (
@@ -193,7 +197,8 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     bc_gate = merge_slim_with_full_artifacts_for_gates(bc_slim, refs_for_gates)
     bs_for_skip = build_evaluation_contract(state.get("build_spec") or {})
     ei_for_skip = state.get("event_input") if isinstance(state.get("event_input"), dict) else {}
-    prev_ev = state.get("evaluation_report") if iter_hint > 0 else None
+    _prev_ev_raw = state.get("evaluation_report") if iter_hint > 0 else None
+    prev_ev = compact_previous_evaluation_report_for_llm(_prev_ev_raw) if _prev_ev_raw is not None else None
     preview_resolution: dict[str, Any] = resolve_evaluator_preview_resolution(
         ctx.settings,
         graph_run_id=str(gid),
@@ -356,7 +361,12 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         "identity_brief": state.get("identity_brief"),
         # Structured identity profile: themes, tone, visual_tendencies, content_types,
         # complexity — enables intent-aware judgment (experience_mode alignment, spatial checks).
-        "structured_identity": state.get("structured_identity"),
+        # Compacted on iterations > 0: full profile is redundant after iteration 0.
+        "structured_identity": (
+            compact_structured_identity(state["structured_identity"])
+            if iter_hint > 0 and isinstance(state.get("structured_identity"), dict)
+            else state.get("structured_identity")
+        ),
         # Prefer live assembled staging preview for Playwright / visual grounding
         "preview_url": preview_url,
         "preview_resolution": preview_resolution,

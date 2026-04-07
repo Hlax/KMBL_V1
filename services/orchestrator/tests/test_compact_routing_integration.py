@@ -380,7 +380,8 @@ class TestGeneratorIterationCompaction:
         payload = self._make_gen_payload()
         apply_iteration_compaction(payload, iteration=1)
         result_bs = payload["build_spec"]
-        assert "creative_brief" not in result_bs
+        # creative_brief and execution_contract are now retained for iteration context
+        assert "creative_brief" in result_bs
         assert "crawl_context_snapshot" not in result_bs
 
     def test_digest_set_to_original(self) -> None:

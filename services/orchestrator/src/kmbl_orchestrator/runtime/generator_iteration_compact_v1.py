@@ -20,6 +20,9 @@ _BUILD_SPEC_ITERATION_KEYS = frozenset({
     "required_libraries",
     "library_hints",
     "machine_constraints",
+    "execution_contract",
+    "creative_brief",
+    "site_archetype",
 })
 
 # Keys retained in prior_build_spec sent to the planner on replan (iteration > 0).
@@ -149,12 +152,17 @@ def apply_iteration_compaction(payload: dict[str, Any], iteration: int) -> int:
                 "preview_pipeline": ilc.get("preview_pipeline"),
                 "iteration_compact": True,
             }
+        # Retain a small subset of reference cards on iteration >= 1 so the generator
+        # keeps implementation context for iteration; full list is too large.
+        _REFERENCE_CARD_CAP = 3
         for k in (
             "kmbl_implementation_reference_cards",
             "kmbl_inspiration_reference_cards",
             "kmbl_planner_observed_reference_cards",
         ):
-            payload[k] = []
+            cards = payload.get(k)
+            if isinstance(cards, list) and len(cards) > _REFERENCE_CARD_CAP:
+                payload[k] = cards[:_REFERENCE_CARD_CAP]
 
     after = len(json.dumps(payload, ensure_ascii=False, default=str))
     return max(0, before - after)

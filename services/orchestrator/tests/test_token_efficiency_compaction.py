@@ -99,7 +99,9 @@ class TestBuildSpecCompaction:
         apply_iteration_compaction(payload, iteration=1)
 
         result_bs = payload["build_spec"]
-        assert "creative_brief" not in result_bs
+        # creative_brief and execution_contract are now intentionally retained
+        # for generator context on iterations
+        assert "creative_brief" in result_bs
         assert "crawl_context" not in result_bs
         assert "raw_reference_payload" not in result_bs
 

@@ -10,6 +10,7 @@ from kmbl_orchestrator.graph.helpers import (
     compute_evaluator_decision,
     maybe_suppress_duplicate_staging,
 )
+from kmbl_orchestrator.runtime.demo_preview_grounding import is_grounding_only_partial
 from kmbl_orchestrator.graph.state import GraphState
 from kmbl_orchestrator.identity.alignment import (
     compute_alignment_trend,
@@ -66,6 +67,38 @@ def decision_router(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             {
                 "kind": "duplicate_staging_suppressed",
                 "message": "Evaluation still duplicate vs prior staging; skipping snapshot",
+            },
+            thread_id=UUID(state["thread_id"]),
+        )
+
+    # ── Grounding-only partial override ────────────────────────────────────
+    # When the evaluator was pass on all quality criteria but downgraded to
+    # partial solely because demo preview grounding could not be verified,
+    # generator iteration is wasteful — the build is already acceptable.
+    # Reroute iterate → stage (degraded) so the output is surfaced to the
+    # operator rather than wasting a generator call on an infra gap.
+    if decision == "iterate" and is_grounding_only_partial(metrics):
+        decision = "stage"
+        _log.info(
+            "decision_router graph_run_id=%s grounding_only_partial=True "
+            "rerouting iterate→stage (build quality was pass; infra gap cannot be fixed by generator)",
+            gid,
+        )
+        append_graph_run_event(
+            ctx.repo,
+            gid,
+            RunEventType.DEGRADED_STAGING,
+            {
+                "message": (
+                    "Grounding-only partial: build quality was acceptable (evaluator passed all "
+                    "quality criteria) but demo preview grounding was not satisfied. "
+                    "Routing to stage (degraded) rather than generator retry — the generator "
+                    "cannot fix a preview infrastructure gap."
+                ),
+                "evaluation_status": status,
+                "grounding_only_partial": True,
+                "iteration_index": iteration,
+                "preview_grounding_fallback_reason": metrics.get("preview_grounding_fallback_reason"),
             },
             thread_id=UUID(state["thread_id"]),
         )

@@ -72,6 +72,7 @@ from kmbl_orchestrator.runtime.build_candidate_summary_v1 import (
     merge_summary_into_raw_payload,
 )
 from kmbl_orchestrator.runtime.workspace_paths import build_workspace_context_for_generator
+from kmbl_orchestrator.runtime.demo_preview_grounding import sanitize_feedback_for_generator
 from kmbl_orchestrator.runtime.working_staging_read import (
     get_working_staging_for_thread_resilient,
 )
@@ -120,6 +121,10 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     feedback: Any = None
     if iteration > 0:
         feedback = state.get("evaluation_report")
+        # Strip non-actionable grounding issues before any further processing.
+        # For grounding-only partials this leaves issues=[] (build was quality-pass).
+        # For mixed partials this removes only the grounding issue, keeping real defects.
+        feedback = sanitize_feedback_for_generator(feedback)
         # Truncate evaluator issues to avoid token bloat in generator retry context.
         # Keep the top 5 most relevant issues (order preserved from evaluator priority).
         if isinstance(feedback, dict) and isinstance(feedback.get("issues"), list):

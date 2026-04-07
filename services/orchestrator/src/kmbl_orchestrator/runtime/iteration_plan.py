@@ -4,6 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from kmbl_orchestrator.runtime.demo_preview_grounding import (
+    GROUNDING_ISSUE_CODE,
+    is_grounding_only_partial,
+)
+
 
 def _design_rubric_suggests_pivot(metrics: dict[str, Any]) -> bool:
     """Low design_quality + originality on partial builds → encourage aesthetic pivot."""
@@ -55,6 +60,17 @@ def build_iteration_plan_for_generator(
     )
     status = str(evaluation_report.get("status") or "fail")
     issues = evaluation_report.get("issues")
+
+    # Strip non-actionable grounding issues so they don't inflate issue_count
+    # or mislead pivot/refine decisions.  For grounding-only partials this
+    # results in issue_count=0, which is the correct signal to the generator.
+    grounding_only = is_grounding_only_partial(metrics)
+    if isinstance(issues, list):
+        issues = [
+            iss for iss in issues
+            if not (isinstance(iss, dict) and iss.get("code") == GROUNDING_ISSUE_CODE)
+        ]
+
     issue_count = len(issues) if isinstance(issues, list) else 0
     duplicate = metrics.get("duplicate_rejection") is True
     rubric_pivot = _design_rubric_suggests_pivot(metrics) and status == "partial"
@@ -80,4 +96,6 @@ def build_iteration_plan_for_generator(
         "headline": evaluation_report.get("summary"),
         "stagnation_count": stagnation_count,
         "pressure_recommendation": pressure_recommendation,
+        # Explicit flag so generator knows partial was caused by infra, not build quality.
+        "grounding_only_partial": grounding_only,
     }

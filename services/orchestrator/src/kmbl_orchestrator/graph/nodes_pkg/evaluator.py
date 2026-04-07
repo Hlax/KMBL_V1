@@ -629,6 +629,9 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         })
         _demo_m = dict(report.metrics_json or {})
         _demo_m["demo_preview_grounding_pass_adjusted"] = True
+        # Explicit named flag consumed by decision_router and generator to distinguish
+        # this grounding-only downgrade from a real quality partial.
+        _demo_m["grounding_only_partial"] = True
         report = report.model_copy(update={
             "status": "partial",
             "issues_json": _demo_issues,

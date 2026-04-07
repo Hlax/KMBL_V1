@@ -24,8 +24,8 @@ Key concepts
     - ``manifest``  ← (future: manifest-first offline grounding)
     - ``none``      ← unavailable / unknown
 
-The three new fields written to ``metrics_json``
------------------------------------------------
+The fields written to ``metrics_json``
+--------------------------------------
 ``preview_grounding_required : bool``
     True in demo mode; False outside (silent fallback is acceptable).
 ``preview_grounding_satisfied : bool``
@@ -33,11 +33,41 @@ The three new fields written to ``metrics_json``
 ``preview_grounding_fallback_reason : str | None``
     Set only when required=True and satisfied=False.  Describes *why* grounding
     could not be met (e.g. ``private_host_blocked_by_gateway_policy``).
+
+Downstream routing semantics
+-----------------------------
+``grounding_only_partial : bool``
+    True when the evaluation status was ``pass`` on all quality criteria but was
+    downgraded to ``partial`` *solely* because demo preview grounding could not be
+    satisfied.  Set in ``evaluator.py`` by the demo grounding gate.
+
+    Decision-router behaviour:
+    - ``grounding_only_partial = True``  → route to **stage** (degraded), not iterate.
+      The generator cannot fix a preview infrastructure gap.
+    - Quality partial (``grounding_only_partial`` absent/False) → normal iterate.
+
+Issue code used by grounding gate
+----------------------------------
+``GROUNDING_ISSUE_CODE = "demo_preview_grounding_not_satisfied"``
+
+Generator feedback sanitisation
+--------------------------------
+``sanitize_feedback_for_generator`` strips grounding-only issues from the
+evaluation report that is passed back to the generator, preventing non-actionable
+infra messages from polluting the LLM's refinement context.
 """
 
 from __future__ import annotations
 
 from typing import Any
+
+# ---------------------------------------------------------------------------
+# Public constants
+# ---------------------------------------------------------------------------
+
+#: Issue code injected by the demo grounding gate in evaluator.py.
+#: Used downstream to identify and strip non-actionable grounding issues.
+GROUNDING_ISSUE_CODE = "demo_preview_grounding_not_satisfied"
 
 # ---------------------------------------------------------------------------
 # Grounding mode normalisation
@@ -122,3 +152,52 @@ def compute_demo_preview_grounding_state(
         "preview_grounding_mode": normalized_mode,
         "preview_grounding_fallback_reason": fallback_reason,
     }
+
+
+# ---------------------------------------------------------------------------
+# Downstream helpers
+# ---------------------------------------------------------------------------
+
+
+def is_grounding_only_partial(metrics: dict[str, Any]) -> bool:
+    """Return True when the evaluation was downgraded *only* by the demo grounding gate.
+
+    A grounding-only partial means the build quality assessment was ``pass`` on all
+    real criteria; the downgrade to ``partial`` happened solely because the demo
+    preview could not be verified against a browser-reachable URL.
+
+    In this situation generator iteration is wasteful — the build is already
+    acceptable, but the preview infra gap cannot be fixed by the generator.
+    """
+    return metrics.get("grounding_only_partial") is True
+
+
+def sanitize_feedback_for_generator(
+    feedback: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Strip non-actionable grounding issues from generator retry feedback.
+
+    When the evaluator report is passed back to the generator as
+    ``iteration_feedback``, grounding-infrastructure issues (code
+    ``GROUNDING_ISSUE_CODE``) must be removed so the LLM does not treat an
+    infra gap as a UI/code defect to fix.
+
+    For grounding-only partials this will result in an empty ``issues`` list,
+    which is the correct signal — the build needs no code changes.
+    For mixed partials (quality + grounding) only the grounding issue is stripped;
+    real quality issues are preserved.
+
+    Returns the (possibly mutated) feedback dict, or None if input is None.
+    """
+    if not isinstance(feedback, dict):
+        return feedback
+    issues = feedback.get("issues")
+    if not isinstance(issues, list):
+        return feedback
+    cleaned = [
+        iss for iss in issues
+        if not (isinstance(iss, dict) and iss.get("code") == GROUNDING_ISSUE_CODE)
+    ]
+    if len(cleaned) == len(issues):
+        return feedback  # nothing removed — avoid unnecessary copy
+    return {**feedback, "issues": cleaned}

@@ -72,6 +72,11 @@ from kmbl_orchestrator.runtime.build_candidate_summary_v1 import (
     merge_summary_into_raw_payload,
 )
 from kmbl_orchestrator.runtime.workspace_paths import build_workspace_context_for_generator
+from kmbl_orchestrator.runtime.workspace_paths import run_workspace_directory
+from kmbl_orchestrator.runtime.workspace_retention import (
+    ensure_clean_workspace,
+    mark_workspace_parse_failed,
+)
 from kmbl_orchestrator.runtime.demo_preview_grounding import sanitize_feedback_for_generator
 from kmbl_orchestrator.runtime.working_staging_read import (
     get_working_staging_for_thread_resilient,
@@ -213,6 +218,12 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
 
     ei0 = state.get("event_input") if isinstance(state.get("event_input"), dict) else {}
     bs0 = state.get("build_spec") if isinstance(state.get("build_spec"), dict) else {}
+
+    # Workspace isolation: ensure a clean per-run directory so stale artifacts from
+    # prior (possibly failed) runs never leak into this generation.
+    _run_ws_dir = run_workspace_directory(ctx.settings, tid, gid)
+    ensure_clean_workspace(_run_ws_dir)
+
     payload = {
         "graph_run_id": str(gid),
         "thread_id": state["thread_id"],
@@ -402,6 +413,7 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     )
     if inv.status == "failed":
         ctx.repo.save_role_invocation(inv)
+        mark_workspace_parse_failed(_run_ws_dir)
         raise RoleInvocationFailed(
             phase="generator",
             graph_run_id=gid,
@@ -498,6 +510,7 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             ingested_artifact_role=ingest_role,
         )
     except WorkspaceIngestError as e:
+        mark_workspace_parse_failed(_run_ws_dir)
         fail_ev: dict[str, Any] = {"message": str(e)[:800]}
         if e.details:
             fail_ev["ingest_details"] = e.details

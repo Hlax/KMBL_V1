@@ -13,6 +13,13 @@ import re
 from typing import Any
 
 from kmbl_orchestrator.contracts.frontend_artifact_roles import is_frontend_file_artifact_role
+from kmbl_orchestrator.contracts.scene_manifest_v1 import (
+    SceneManifestV1,
+    build_fingerprint_from_summary_fields,
+    compute_scene_evolution_delta,
+    manifest_to_fingerprint_data,
+    parse_scene_manifest_from_raw,
+)
 from kmbl_orchestrator.runtime.generator_library_policy import GAUSSIAN_SPLAT_LIBRARY_PRIMARY
 from kmbl_orchestrator.runtime.static_vertical_invariants import is_interactive_frontend_vertical
 
@@ -199,6 +206,7 @@ def build_build_candidate_summary_v1(
     event_input: dict[str, Any],
     prior_summary: dict[str, Any] | None = None,
     generator_notes: str | None = None,
+    raw_generator_output: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     Build a compact summary dict. ``artifacts`` should be normalized artifact dicts (with optional content).
@@ -254,6 +262,54 @@ def build_build_candidate_summary_v1(
         if isinstance(prev_inv, list):
             prev_iter = _diff_inventory(prev_inv, inv)
 
+    # ── Scene Manifest V1 + fingerprint ─────────────────────────────────────
+    # Parse generator-emitted scene manifest when available; fall back to
+    # artifact-observable signals for fingerprint.
+    scene_manifest: SceneManifestV1 | None = parse_scene_manifest_from_raw(raw_generator_output)
+    scene_fingerprint_data: dict[str, Any] | None = None
+    if scene_manifest is not None:
+        scene_fingerprint_data = manifest_to_fingerprint_data(scene_manifest)
+    else:
+        # Fallback: build fingerprint from detected signals (no manifest emitted)
+        scene_fingerprint_data = {
+            "scene_fingerprint": build_fingerprint_from_summary_fields({
+                "libraries_detected": libs,
+                "sections_or_modules": outline,
+                "interaction_summary": {"cues": _interaction_cues(blob)},
+                "experience_summary": {
+                    "experience_mode": build_spec.get("experience_mode"),
+                },
+                "file_inventory": inv,
+            }),
+            "geometry_mode": str(build_spec.get("experience_mode") or ""),
+            "library_stack": libs,
+            "portfolio_shell_used": False,  # Cannot determine without manifest
+        }
+
+    # Scene evolution delta: compare current fingerprint against prior
+    scene_evolution_delta: dict[str, Any] | None = None
+    if isinstance(prior_summary, dict):
+        prior_fp_data = prior_summary.get("scene_fingerprint_data")
+        if isinstance(prior_fp_data, dict) and prior_fp_data.get("scene_fingerprint"):
+            scene_evolution_delta = compute_scene_evolution_delta(
+                scene_manifest, prior_fp_data
+            )
+            # If no scene manifest, use fallback fingerprint for comparison
+            if scene_manifest is None and scene_evolution_delta.get("skipped"):
+                current_fp = (scene_fingerprint_data or {}).get("scene_fingerprint", "")
+                prior_fp = prior_fp_data.get("scene_fingerprint", "")
+                if current_fp and prior_fp:
+                    fingerprint_changed = current_fp != prior_fp
+                    scene_evolution_delta = {
+                        "delta_categories": ["fingerprint"] if fingerprint_changed else [],
+                        "delta_score": 1.0 if fingerprint_changed else 0.0,
+                        "weak_delta": not fingerprint_changed,
+                        "prior_fingerprint": prior_fp,
+                        "current_fingerprint": current_fp,
+                        "skipped": False,
+                        "fallback_mode": True,
+                    }
+
     out: dict[str, Any] = {
         "summary_version": SUMMARY_VERSION,
         "lane": lane,
@@ -293,7 +349,13 @@ def build_build_candidate_summary_v1(
         "required_libraries_compliance": required_libraries_compliance,
         "warnings": warnings[:8],
         "previous_iteration_diff_summary": prev_iter,
+        # Scene fingerprint + manifest (new — used by evaluator evolution gate)
+        "scene_fingerprint_data": scene_fingerprint_data,
+        "scene_manifest_present": scene_manifest is not None,
+        "scene_evolution_delta": scene_evolution_delta,
     }
+    if scene_manifest is not None:
+        out["kmbl_scene_manifest_v1"] = scene_manifest.model_dump(mode="python", exclude_none=True)
     if generator_notes and isinstance(generator_notes, str) and generator_notes.strip():
         out["generator_notes_orchestrator_unverified"] = generator_notes.strip()[:400]
     return out

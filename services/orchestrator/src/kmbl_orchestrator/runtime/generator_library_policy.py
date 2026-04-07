@@ -41,6 +41,16 @@ CONTROLLED_ESCALATION_LIBRARIES: tuple[str, ...] = (
     "regl",
 )
 
+# Libraries available in non-default geometry lanes (diagram, SVG, physics).
+# Require geometry_mode contract or explicit execution_contract.escalation_lane.
+GEOMETRY_LANE_LIBRARIES: tuple[str, ...] = (
+    "d3",           # diagram/data-viz geometry reasoning + force layouts
+    "svg.js",       # SVG rendering/manipulation (svg-first lane)
+    "jointjs",      # Relationship / diagram-first habitats
+    "babylon",      # Physics-heavy / engine-like (explicit escalation)
+    "paths.js",     # SVG path generation logic (optional for svg lane)
+)
+
 NOT_DEFAULT_FRAMEWORKS: tuple[str, ...] = (
     "react-three-fiber",
     "babylon.js",
@@ -51,6 +61,17 @@ NOT_DEFAULT_FRAMEWORKS: tuple[str, ...] = (
     "spline",
     "needle engine",
     "needle",
+)
+
+# Anti-patterns that must not appear without identity justification.
+GENERATOR_ANTI_PATTERNS: tuple[str, ...] = (
+    "TorusKnotGeometry without justification",
+    "IcosahedronGeometry without justification",
+    "OrbitControls as primary interaction",
+    "AxesHelper / GridHelper in production output",
+    "Hero canvas decorating normal portfolio page",
+    "Raw tutorial cloning (copy-pasted Three.js example)",
+    "Generic purple/teal gradient without identity palette",
 )
 
 ALLOWED_SHADER_FILE_EXTENSIONS: tuple[str, ...] = (".glsl", ".vert", ".frag", ".wgsl")
@@ -70,6 +91,44 @@ def _libs_list(ec: dict[str, Any]) -> list[str]:
         if isinstance(x, str) and x.strip():
             out.append(x.strip().lower())
     return out
+
+
+def build_geometry_mode_library_policy(geometry_mode: str) -> dict[str, Any]:
+    """
+    Return library recommendations keyed to a geometry_mode value.
+
+    Used by cool_generation_lane and planner to populate execution_contract.allowed_libraries
+    when geometry_contract_v1.mode is known.  Kept in sync with contracts/geometry_contract_v1.py
+    GEOMETRY_MODE_LIBRARY_MAP.
+    """
+    _primary: dict[str, list[str]] = {
+        "three": list(PRIMARY_LANE_DEFAULT_LIBRARIES),
+        "svg": ["svg.js", "gsap"],
+        "pixi": ["pixi"],
+        "diagram": ["d3"],
+        "babylon": ["babylon"],
+        "css_spatial": ["gsap"],
+        "hybrid_three_svg": list(PRIMARY_LANE_DEFAULT_LIBRARIES),
+    }
+    _optional: dict[str, list[str]] = {
+        "three": ["troika-three-text", "camera-controls", "postprocessing"],
+        "svg": ["gsap", "paths.js"],
+        "pixi": ["gsap"],
+        "diagram": ["jointjs"],
+        "babylon": ["gsap"],
+        "css_spatial": [],
+        "hybrid_three_svg": ["troika-three-text"],
+    }
+    mode_key = str(geometry_mode or "three").strip().lower()
+    primary = _primary.get(mode_key, list(PRIMARY_LANE_DEFAULT_LIBRARIES))
+    optional = _optional.get(mode_key, [])
+    return {
+        "geometry_mode": mode_key,
+        "primary_stack": primary,
+        "optional_additions": optional,
+        "anti_patterns": list(GENERATOR_ANTI_PATTERNS),
+        "policy_doc": "docs/openclaw-agents/kmbl-generator/LIBRARIES.md",
+    }
 
 
 def build_generator_library_policy_payload(

@@ -97,7 +97,35 @@ Do **not**:
 
 ## Abstract / immersive direction
 
-When identity supports **spatial** / **portfolio** work, set **`experience_mode`** and optional **`build_spec.technical_research`** `{ explore: [...], reference_patterns: [...] }` — short arrays, not essays.
+When identity supports **spatial** / **creative** work, choose the right **`experience_mode`**:
+
+| Mode | When to use |
+|------|-------------|
+| `webgl_3d_portfolio` | User explicitly wants a **portfolio** (projects, about, contact sections) enhanced with 3D/WebGL. Only when `site_archetype` is `"portfolio"`. |
+| `immersive_identity_experience` | User wants an **identity-led spatial experience** — not a portfolio. Experimental, gallery, story_driven, or ambitious creative identities where the surface is an **experience**, not a resume. |
+| `immersive_spatial_portfolio` | Deepest spatial mode; strong explicit spatial signals in identity. |
+| `flat_standard` | Default for text-heavy, simple complexity, or no spatial signals. |
+
+**Do not** default creative/experimental/gallery identities to `webgl_3d_portfolio` — use `immersive_identity_experience` unless the user explicitly asked for a portfolio.
+
+## Interactive lanes: non-portfolio scene grammar
+
+When building `interactive_frontend_app_v1` with `immersive_identity_experience`:
+
+- **Do not** set `required_sections: ["hero", "projects", "about", "contact"]` — those are portfolio patterns.
+- Use **scene topology** instead of section topology. Choose from:
+  - `immersive_stage`, `spatial_vignette_system`, `narrative_zones`, `layered_world`
+  - `constellation`, `archive_field`, `signal_field`, `editorial_cosmos`
+  - `studio_table`, `memory_map`, `object_theater`, `light_table`, `installation_field`
+- Derive scene topology from identity: **content_types + themes + tone → scene metaphor**.
+- In `creative_brief`, set **`scene_metaphor`**, **`motion_language`**, **`material_hint`**, **`primitive_guidance`** so the generator can justify every 3D choice.
+- The orchestrator injects identity-derived scene grammar when absent — prefer explicit over implicit.
+
+## 3D / geometry discipline (interactive lanes)
+
+- Every geometry choice must be justified by identity. **"It's round and spins" is not a justification.**
+- `TorusKnotGeometry`, `IcosahedronGeometry` without identity reason = generic demo pattern → evaluator will flag.
+- Specify **`primitive_guidance`** in `creative_brief`: what shapes, why, what they represent.
 
 Scale **ambition** to what a **local generator** can finish: prefer **styled single page** over **broken** multi-part WebGL.
 

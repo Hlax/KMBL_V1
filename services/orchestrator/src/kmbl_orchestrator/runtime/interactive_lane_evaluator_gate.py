@@ -8,6 +8,10 @@ import re
 from typing import Any
 
 from kmbl_orchestrator.domain import EvaluationReportRecord
+from kmbl_orchestrator.runtime.interactive_scene_grammar import (
+    GENERIC_THREEJS_DEMO_PATTERNS,
+    PORTFOLIO_SHELL_SECTIONS,
+)
 from kmbl_orchestrator.runtime.literal_success_gate import collect_static_artifact_raw_concat
 from kmbl_orchestrator.runtime.static_vertical_invariants import (
     IMMERSIVE_IDENTITY_ARCHETYPE,
@@ -19,6 +23,12 @@ from kmbl_orchestrator.staging.integrity import scan_interactive_bundle_preview_
 #: Issue code for required-library compliance.  Must survive feedback sanitisation
 #: (generator can and should fix missing library imports).
 REQUIRED_LIBRARY_MISSING_CODE = "required_library_missing"
+
+#: Issue codes for new identity/evolution checks.
+PORTFOLIO_SHELL_REGRESSION_CODE = "portfolio_shell_regression"
+GENERIC_DEMO_PATTERN_CODE = "generic_demo_pattern"
+WEAK_IDENTITY_GROUNDING_CODE = "weak_identity_grounding"
+WEAK_ITERATION_DELTA_CODE = "weak_iteration_delta"
 
 
 # Event / DOM hooks — not exhaustive; enough to separate "static gimmick" from wired behavior.
@@ -38,6 +48,166 @@ _CANVAS_OR_WEBGL_RE = re.compile(
     r"<canvas\b|getContext\s*\(\s*['\"]webgl|three\.|THREE\.",
     re.IGNORECASE,
 )
+
+
+# ---------------------------------------------------------------------------
+# Portfolio-shell regression detection
+# ---------------------------------------------------------------------------
+
+# HTML section id/class patterns that indicate stock portfolio structure
+_PORTFOLIO_SECTION_RE = re.compile(
+    r'\bid\s*=\s*["\'](?P<id>hero|projects|projects[_-]grid|about|contact|timeline|'
+    r'recognitions|selected.work|work|services|testimonials)["\']|'
+    r'\bclass\s*=\s*["\'][^"\']*(?P<cls>hero-section|projects-section|about-section|'
+    r'contact-section|portfolio-section)[^"\']*["\']',
+    re.IGNORECASE,
+)
+
+# Section heading text patterns indicating portfolio IA
+_PORTFOLIO_HEADING_RE = re.compile(
+    r"<h[1-6][^>]*>\s*(?:selected\s+projects?|projects?\s+grid|about\s+me|"
+    r"contact\s+me|my\s+work|timeline\s*&?\s*recognitions?|get\s+in\s+touch)\s*</h[1-6]>",
+    re.IGNORECASE,
+)
+
+# Generic Three.js demo patterns — case-sensitive for class names, insensitive for prose
+_GENERIC_DEMO_RE = re.compile(
+    r"TorusKnotGeometry|IcosahedronGeometry|OctahedronGeometry|"
+    r"OrbitControls|AxesHelper|GridHelper|"
+    r"spinning\s+cube|torus\s+knot|icosahedron",
+    re.IGNORECASE,
+)
+
+
+def _count_portfolio_shell_sections(html_blob: str) -> int:
+    """Count how many distinct portfolio-shell section markers appear in the HTML."""
+    if not html_blob:
+        return 0
+    matches = set()
+    for m in _PORTFOLIO_SECTION_RE.finditer(html_blob):
+        gd = m.group("id") or m.group("cls") or ""
+        if gd:
+            matches.add(gd.lower())
+    for m in _PORTFOLIO_HEADING_RE.finditer(html_blob):
+        matches.add(m.group(0)[:30].lower())
+    return len(matches)
+
+
+def _detect_generic_demo_patterns(raw_text: str) -> list[str]:
+    """Return list of generic Three.js demo pattern names found in artifacts."""
+    found = []
+    for m in _GENERIC_DEMO_RE.finditer(raw_text):
+        token = m.group(0).strip()
+        if token not in found:
+            found.append(token)
+    return found
+
+
+def _is_portfolio_ia_explicitly_requested(build_spec: dict[str, Any]) -> bool:
+    """True when the planner explicitly flagged portfolio IA (archetype or mode)."""
+    sa = (build_spec.get("site_archetype") or "").strip().lower()
+    em = (build_spec.get("experience_mode") or "").strip().lower()
+    return sa == "portfolio" or em == "webgl_3d_portfolio"
+
+
+def _has_scene_grammar_evidence(build_spec: dict[str, Any]) -> bool:
+    """True when the build_spec carries identity-derived scene grammar signals."""
+    cb = build_spec.get("creative_brief")
+    if not isinstance(cb, dict):
+        return False
+    return bool(cb.get("scene_metaphor") or cb.get("motion_language") or cb.get("material_hint"))
+
+
+def _detect_identity_grounding_in_artifacts(raw_text: str, build_spec: dict[str, Any]) -> bool:
+    """
+    Check whether artifacts contain evidence that identity signals shaped the output.
+
+    Returns True only when explicit identity grounding markers are present in the
+    artifact text — regardless of whether the spec contains scene grammar.
+    This ensures generic demo patterns are always flagged unless the generator
+    explicitly annotated its output with grounding evidence.
+
+    Markers checked:
+      - HTML comments: <!-- kmbl-scene-metaphor: ... -->
+      - Data attributes: data-kmbl-scene, data-kmbl-motion
+      - Inline tokens: kmbl-identity-grounded, kmbl-motion-language
+    """
+    marker_re = re.compile(
+        r"kmbl-scene-metaphor|kmbl-motion-language|kmbl-identity-grounded|"
+        r"data-kmbl-scene|data-kmbl-motion",
+        re.IGNORECASE,
+    )
+    return bool(marker_re.search(raw_text))
+
+
+def _compute_iteration_delta_score(
+    build_spec: dict[str, Any],
+    build_candidate: dict[str, Any],
+    iteration_hint: int,
+) -> dict[str, Any]:
+    """
+    Compute iteration delta score from scene evolution data.
+
+    Priority:
+    1. Use ``kmbl_build_candidate_summary_v1.scene_evolution_delta`` (from scene manifest
+       or artifact-observable fingerprint comparison — computed by summary builder when
+       prior_summary was available; cannot silently skip when wired correctly).
+    2. Fall back to ``_kmbl_prior_candidate_fingerprint`` if set externally.
+    3. Fall back to simple library+h1 comparison from summary.
+
+    Returns dict with: delta_score, change_categories, weak_delta, source.
+    """
+    if iteration_hint <= 0:
+        return {"delta_score": None, "change_categories": [], "weak_delta": False, "source": "n/a"}
+
+    current_summary = build_candidate.get("kmbl_build_candidate_summary_v1") or {}
+
+    # Path 1: scene_evolution_delta computed by summary builder (preferred — durable wiring)
+    scene_evo = current_summary.get("scene_evolution_delta")
+    if isinstance(scene_evo, dict) and not scene_evo.get("skipped"):
+        return {
+            "delta_score": scene_evo.get("delta_score"),
+            "change_categories": scene_evo.get("delta_categories") or [],
+            "weak_delta": bool(scene_evo.get("weak_delta")),
+            "prior_fingerprint": scene_evo.get("prior_fingerprint"),
+            "current_fingerprint": scene_evo.get("current_fingerprint"),
+            "source": "scene_evolution_delta",
+        }
+
+    # Path 2: _kmbl_prior_candidate_fingerprint set externally (legacy / explicit wiring)
+    prior = build_candidate.get("_kmbl_prior_candidate_fingerprint")
+    if isinstance(prior, dict):
+        current_libs = set(current_summary.get("libraries_detected") or [])
+        prior_libs = set(prior.get("libraries_detected") or [])
+        prior_h1 = (prior.get("h1_text") or "").lower().strip()
+        outline = current_summary.get("sections_or_modules") or {}
+        current_h1 = str(outline.get("h1_text") or "").lower().strip()
+
+        changes: list[str] = []
+        if current_libs != prior_libs:
+            changes.append("libraries")
+        if prior_h1 and current_h1 and prior_h1 != current_h1:
+            changes.append("h1_copy")
+        if prior.get("geometry_mode") and prior["geometry_mode"] != current_summary.get(
+            "experience_summary", {}
+        ).get("experience_mode"):
+            changes.append("geometry_mode")
+
+        delta = min(1.0, len(changes) / 3.0)
+        return {
+            "delta_score": round(delta, 2),
+            "change_categories": changes,
+            "weak_delta": delta < 0.34,
+            "source": "prior_candidate_fingerprint",
+        }
+
+    # Path 3: no prior data — cannot determine delta for this iteration
+    return {
+        "delta_score": None,
+        "change_categories": [],
+        "weak_delta": False,
+        "source": "no_prior_data",
+    }
 
 
 def _planned_required_interactions(build_spec: dict[str, Any]) -> int:
@@ -217,6 +387,94 @@ def apply_interactive_lane_evaluator_gate(
         "missing": missing_libs,
         "satisfied": len(missing_libs) == 0,
     }
+
+    # ── Portfolio-shell regression gate ─────────────────────────────────────
+    # Flag when an interactive/identity-led build regresses into portfolio IA
+    # (hero/projects/about/contact) without the planner explicitly requesting it.
+    portfolio_ia_requested = _is_portfolio_ia_explicitly_requested(build_spec)
+    if not portfolio_ia_requested and status in ("pass", "partial"):
+        shell_count = _count_portfolio_shell_sections(html_blob)
+        m["portfolio_shell_section_count"] = shell_count
+        # 3+ distinct portfolio sections without explicit portfolio intent = regression
+        if shell_count >= 3:
+            if not _has_code(PORTFOLIO_SHELL_REGRESSION_CODE):
+                new_issues.append(
+                    {
+                        "severity": "high",
+                        "category": "interactive_lane_identity",
+                        "code": PORTFOLIO_SHELL_REGRESSION_CODE,
+                        "message": (
+                            f"Interactive build contains {shell_count} portfolio-shell sections "
+                            "(hero/projects/about/contact/timeline) but site_archetype is not 'portfolio' "
+                            "and experience_mode is not 'webgl_3d_portfolio'. "
+                            "Remove stock portfolio structure; use scene_metaphor from creative_brief "
+                            "as the organizing principle instead."
+                        ),
+                    }
+                )
+    else:
+        m["portfolio_shell_section_count"] = None
+
+    # ── Generic demo pattern gate ────────────────────────────────────────────
+    # Flag when artifacts use stock Three.js tutorial geometry without identity justification.
+    if status in ("pass", "partial"):
+        generic_patterns = _detect_generic_demo_patterns(raw_text)
+        m["generic_threejs_demo_patterns_detected"] = generic_patterns
+        if generic_patterns:
+            # Check if creative_brief has scene_grammar evidence to justify the primitives
+            has_grammar = _has_scene_grammar_evidence(build_spec)
+            # Check if identity grounding markers appear in the output
+            identity_grounded = _detect_identity_grounding_in_artifacts(raw_text, build_spec)
+            if not identity_grounded:
+                if not _has_code(GENERIC_DEMO_PATTERN_CODE):
+                    new_issues.append(
+                        {
+                            "severity": "medium",
+                            "category": "interactive_lane_identity",
+                            "code": GENERIC_DEMO_PATTERN_CODE,
+                            "message": (
+                                f"Artifacts contain generic Three.js demo patterns "
+                                f"({', '.join(generic_patterns[:3])}) without evidence of "
+                                "identity grounding (missing kmbl-scene-metaphor or "
+                                "data-kmbl-scene marker). "
+                                "Replace stock tutorial shapes with geometry justified by "
+                                "the identity brief's scene_metaphor and creative direction."
+                            ),
+                        }
+                    )
+    else:
+        m["generic_threejs_demo_patterns_detected"] = []
+
+    # ── Iteration delta gate ─────────────────────────────────────────────────
+    # For iteration > 0: require noticeable change across categories.
+    iteration_hint = build_candidate.get("_kmbl_iteration_hint") or 0
+    if isinstance(iteration_hint, int) and iteration_hint <= 0:
+        # Also check report's iteration context (passed via metrics by evaluator node)
+        iteration_hint = int(m.get("_iteration_hint") or 0)
+    delta_result = _compute_iteration_delta_score(build_spec, build_candidate, iteration_hint)
+    m["iteration_delta"] = delta_result
+
+    if delta_result.get("weak_delta") and status in ("pass", "partial"):
+        if not _has_code(WEAK_ITERATION_DELTA_CODE):
+            changes = delta_result.get("change_categories") or []
+            source = delta_result.get("source", "unknown")
+            new_issues.append(
+                {
+                    "severity": "medium",
+                    "category": "interactive_lane_evolution",
+                    "code": WEAK_ITERATION_DELTA_CODE,
+                    "message": (
+                        f"Iteration {iteration_hint}: only {len(changes)} measurable change "
+                        f"categor{'y' if len(changes) == 1 else 'ies'} detected "
+                        f"({', '.join(changes) or 'none'}) [source: {source}]. "
+                        "Require noticeable change in at least 2 of: "
+                        "geometry_mode, scene_topology, library_stack, primitive_set, "
+                        "composition_rules, interaction_rules, h1_copy. "
+                        "'More polished version of same page' is not sufficient evolution. "
+                        "Emit kmbl_scene_manifest_v1 in response for structured delta tracking."
+                    ),
+                }
+            )
 
     if new_issues:
         issues = issues + new_issues

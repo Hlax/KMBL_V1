@@ -122,6 +122,35 @@ def compact_previous_evaluation_report_for_llm(
     }
 
 
+def compact_scene_fingerprint_for_prior(
+    build_candidate_summary: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """
+    Extract compact scene fingerprint data from prior iteration's summary.
+
+    Used to inject prior_candidate_fingerprint into next-iteration payloads so the
+    evaluator evolution gate cannot silently skip.  Returns None when summary absent.
+    """
+    if not isinstance(build_candidate_summary, dict):
+        return None
+    fp_data = build_candidate_summary.get("scene_fingerprint_data")
+    if isinstance(fp_data, dict) and fp_data.get("scene_fingerprint"):
+        return fp_data
+    # Fallback: minimal fingerprint from basic summary fields
+    libs = build_candidate_summary.get("libraries_detected")
+    outline = build_candidate_summary.get("sections_or_modules") or {}
+    if libs or outline:
+        return {
+            "scene_fingerprint": "",  # Will be compared by field values
+            "library_stack": libs or [],
+            "h1_text": outline.get("h1_text", ""),
+            "geometry_mode": (build_candidate_summary.get("experience_summary") or {}).get(
+                "experience_mode", ""
+            ),
+        }
+    return None
+
+
 def apply_iteration_compaction(payload: dict[str, Any], iteration: int) -> int:
     """Mutates ``payload`` for iteration >= 1; returns approximate JSON chars saved."""
     if iteration <= 0:

@@ -140,6 +140,35 @@ Only when **`build_spec`** / **`constraints.canonical_vertical`** explicitly req
 - **`habitat_manifest_v2`**: follow schema in orchestrator docs; on ambiguity, prefer **valid static files** over a broken manifest.
 - **Three.js / WebGL:** only if planner set **`experience_mode`** / **`technical_research`** — deliver a **working** minimal scene (renderer, camera, light, geometry), or **fail** with **`contract_failure`**, not an empty canvas placeholder.
 
+## Interactive lane: identity-shaped 3D and scene grammar
+
+When `build_spec.type` is `interactive_frontend_app_v1` and `experience_mode` is `immersive_identity_experience` or `immersive_spatial_portfolio`:
+
+**Hard rules:**
+- **Do not** produce `hero` / `projects` / `about` / `contact` sections unless `kmbl_execution_contract.required_sections` explicitly lists them.
+- **Do not** use `TorusKnotGeometry`, `IcosahedronGeometry`, `OctahedronGeometry`, `OrbitControls`, `GridHelper`, `AxesHelper` without identity justification.
+- Read `kmbl_execution_contract.creative_brief_scene_metaphor` — if present, that is the organizing principle for the scene. Build to it.
+- Read `kmbl_execution_contract.creative_brief_motion_language` — use that motion grammar for all transitions/animations.
+- Read `kmbl_execution_contract.creative_brief_primitive_guidance` — use those geometry recommendations, not defaults.
+
+**Identity grounding marker (required for cool lane):** Embed at least one identity grounding marker in your HTML output:
+```html
+<!-- kmbl-scene-metaphor: {scene_metaphor_value} -->
+<!-- kmbl-motion-language: {motion_language_value} -->
+```
+Or as data attributes: `data-kmbl-scene="{scene_metaphor}"` on the root canvas/scene element.
+This lets the evaluator verify identity grounding without reading the full diff.
+
+**Scene topology instead of section topology:**
+- `immersive_identity_experience` → scene is an **experience**, not a page. Use depth, zones, spatial layers.
+- `signal_field` → points/particles; `light_table` → image planes; `studio_table` → object scatter.
+- `narrative_cinema` → camera-guided depth sequence; `editorial_cosmos` → sparse elements in space.
+- Do NOT use a standard landing page template and add a Three.js background — that is a gimmick, not grounding.
+
+**Iteration evolution (for iteration > 0):**
+- When `iteration_feedback` is present and flags "same scaffold", change at minimum: (1) scene composition or topology AND (2) motion grammar or material. Visual polish alone does not count.
+- Embed `_kmbl_primary_move` with `move_type` to declare what changed.
+
 ## Sharp negatives (hard rules)
 
 Do **not**:
@@ -161,8 +190,11 @@ When **`build_spec.execution_contract`** and **`build_spec.creative_brief`** are
 - Execute **`pattern_rules`** and **`required_*`** fields first — they override generic layout habits.
 - **`literal_success_checks`** in **`build_spec`** are **mandatory substrings** in your static HTML/CSS/JS (orchestrator-verified). **`kmbl_execution_contract.literal_success_checks_preview`** mirrors the first needles so you can copy them without re-scanning the full **`build_spec`**.
 - **`selected_reference_patterns`** may each map to a **`kmbl-pattern-…`** token in **`literal_success_checks`** — embed those tokens in shipped markup so pattern choice is visible to the verifier.
+- **`kmbl_execution_contract.geometry_system`** contains machine-readable composition rules (`mode`, `primitive_set`, `composition_rules`, `motion_mapping_rules`, etc.) — read **GEOMETRY.md** when this field is present; read **LIBRARIES.md** for library routing by mode.
 
 **Acknowledgment (required when cool lane is on):** Emit top-level **`execution_acknowledgment`** with **`status`** exactly one of: **`executed`** | **`downgraded`** | **`cannot_fulfill`** (lowercase). Other values are treated as invalid. Optionally include **`ambition_downgrades`** (`from` / `to` / `reason`), **`rules_attempted`**, **`rules_skipped`**. If you ship **`artifact_outputs`** without a valid **`status`**, KMBL records a **silent/compliance gap** and downgrades evaluation.
+
+**Scene manifest (required when `geometry_system` is present):** Emit top-level **`kmbl_scene_manifest_v1`** declaring: `scene_metaphor`, `geometry_mode`, `primitive_set`, `composition_rules`, `interaction_rules`, `library_stack`, `identity_signals_used`, `portfolio_shell_used`. This is the **primary grounding signal** for the evaluator — more reliable than HTML comment markers. See **GEOMETRY.md** for the full format.
 
 **Motion (cool lane):** Ship at least one **CSS motion signal** (`@keyframes`, `animation:`, or `transition:`) or a **non-trivial `<script>`** body — static-only pages with no motion/interaction fail the cool-lane motion gate unless **`status`** is **`cannot_fulfill`** (honest opt-out).
 

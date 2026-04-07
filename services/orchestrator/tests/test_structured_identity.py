@@ -168,8 +168,13 @@ class TestDeriveExperienceMode:
         mode = derive_experience_mode(si)
         assert mode == "immersive_spatial_portfolio"
 
-    def test_ambitious_image_driven_yields_webgl(self) -> None:
-        """Ambitious + image-driven should yield webgl_3d_portfolio."""
+    def test_ambitious_image_driven_no_archetype_yields_immersive_identity(self) -> None:
+        """Ambitious + image-driven without explicit portfolio archetype → immersive_identity_experience.
+
+        webgl_3d_portfolio is only returned when site_archetype is explicitly "portfolio"
+        AND portfolio content (projects) is present.  A photographer with ambitious/image-driven
+        identity gets an identity-led experience, not a portfolio shell.
+        """
         si = StructuredIdentityProfile(
             themes=["artistic"],
             visual_tendencies=["image-driven"],
@@ -177,6 +182,17 @@ class TestDeriveExperienceMode:
             complexity="ambitious",
         )
         mode = derive_experience_mode(si)
+        assert mode == "immersive_identity_experience"
+
+    def test_ambitious_image_driven_with_portfolio_archetype_yields_webgl(self) -> None:
+        """Ambitious + image-driven + explicit 'portfolio' archetype → webgl_3d_portfolio."""
+        si = StructuredIdentityProfile(
+            themes=["artistic"],
+            visual_tendencies=["image-driven"],
+            content_types=["photography", "projects"],
+            complexity="ambitious",
+        )
+        mode = derive_experience_mode(si, site_archetype="portfolio")
         assert mode == "webgl_3d_portfolio"
 
     def test_portfolio_archetype_with_creative_themes(self) -> None:
@@ -225,7 +241,11 @@ class TestDeriveExperienceMode:
         assert mode == "webgl_3d_portfolio"
 
     def test_gallery_archetype_with_experimental(self) -> None:
-        """Gallery archetype + experimental → webgl_3d_portfolio."""
+        """Gallery archetype + experimental → immersive_identity_experience (not portfolio shell).
+
+        'gallery' is a spatial archetype but NOT a portfolio-IA archetype.
+        Experimental/gallery identities get an identity-led experience, not portfolio sections.
+        """
         si = StructuredIdentityProfile(
             themes=["experimental"],
             visual_tendencies=["motion-heavy"],
@@ -233,7 +253,7 @@ class TestDeriveExperienceMode:
             complexity="ambitious",
         )
         mode = derive_experience_mode(si, site_archetype="gallery")
-        assert mode == "webgl_3d_portfolio"
+        assert mode == "immersive_identity_experience"
 
     def test_default_empty_identity_yields_flat(self) -> None:
         """Empty identity with no signals → flat_standard."""
@@ -258,7 +278,8 @@ class TestDeriveExperienceMode:
         mode_creative = derive_experience_mode(creative)
         mode_editorial = derive_experience_mode(editorial)
         assert mode_creative != mode_editorial
-        assert mode_creative in ("webgl_3d_portfolio", "immersive_spatial_portfolio")
+        # Without explicit portfolio archetype, ambitious creative → immersive_identity_experience
+        assert mode_creative in ("immersive_identity_experience", "immersive_spatial_portfolio")
         assert mode_editorial == "flat_standard"
 
     def test_mode_is_always_valid(self) -> None:
@@ -302,8 +323,9 @@ class TestExperienceModeInBuildSpec:
         )
         mode = derive_experience_mode(si, site_archetype=build_spec.get("site_archetype"))
         build_spec["experience_mode"] = mode
+        # Without explicit portfolio archetype, artistic+ambitious → immersive_identity_experience
         assert build_spec["experience_mode"] in (
-            "webgl_3d_portfolio", "immersive_spatial_portfolio",
+            "webgl_3d_portfolio", "immersive_spatial_portfolio", "immersive_identity_experience",
         )
 
     def test_planner_set_experience_mode_preserved(self) -> None:

@@ -7,11 +7,17 @@ import logging
 import re
 from typing import Any
 
+from kmbl_orchestrator.contracts.geometry_contract_v1 import (
+    derive_geometry_contract,
+    geometry_mode_to_library_recommendations,
+)
 from kmbl_orchestrator.domain import EvaluationReportRecord
 from kmbl_orchestrator.runtime.generator_library_policy import (
     PRIMARY_LANE_DEFAULT_LIBRARIES,
     build_generator_library_policy_payload,
+    build_geometry_mode_library_policy,
 )
+from kmbl_orchestrator.runtime.interactive_scene_grammar import build_scene_grammar_from_identity
 from kmbl_orchestrator.runtime.static_vertical_invariants import is_interactive_frontend_vertical
 
 _log = logging.getLogger(__name__)
@@ -125,6 +131,16 @@ def summarize_execution_contract_for_generator(build_spec: dict[str, Any]) -> di
         "creative_brief_color_strategy": cb_d.get("color_strategy"),
         "creative_brief_layout_concept": cb_d.get("layout_concept"),
         "creative_brief_interaction_goals": cb_d.get("interaction_goals"),
+        # Identity-derived scene grammar — generator must use these to ground 3D/motion choices
+        "creative_brief_scene_metaphor": cb_d.get("scene_metaphor"),
+        "creative_brief_scene_metaphor_description": cb_d.get("scene_metaphor_description"),
+        "creative_brief_motion_language": cb_d.get("motion_language"),
+        "creative_brief_motion_language_description": cb_d.get("motion_language_description"),
+        "creative_brief_material_hint": cb_d.get("material_hint"),
+        "creative_brief_material_hint_description": cb_d.get("material_hint_description"),
+        "creative_brief_primitive_guidance": cb_d.get("primitive_guidance"),
+        "creative_brief_layout_instruction": cb_d.get("layout_instruction"),
+        "creative_brief_scene_rationale": cb_d.get("scene_rationale"),
         # Allowed libraries for the generator to know what CDN imports are blessed
         "allowed_libraries": ec.get("allowed_libraries"),
         # Required interactions preview for generator awareness
@@ -133,12 +149,26 @@ def summarize_execution_contract_for_generator(build_spec: dict[str, Any]) -> di
             if isinstance(ec.get("required_interactions"), list)
             else 0
         ),
+        # Geometry contract — machine-readable composition rules for 3D/interactive builds
+        "geometry_system": ec.get("geometry_system"),
     }
     if is_interactive_frontend_vertical(build_spec, {}):
         out["primary_lane_default_libraries"] = list(PRIMARY_LANE_DEFAULT_LIBRARIES)
         out["generator_library_policy"] = build_generator_library_policy_payload(ec, build_spec)
         out["escalation_lane"] = ec.get("escalation_lane")
     return out
+
+
+def _is_portfolio_ia_requested(build_spec: dict[str, Any]) -> bool:
+    """True when the planner explicitly requested portfolio information architecture.
+
+    Checks site_archetype and experience_mode for explicit portfolio signals.
+    Does NOT default to True — absence of signal means non-portfolio / open layout.
+    """
+    sa = (build_spec.get("site_archetype") or "").strip().lower()
+    em = (build_spec.get("experience_mode") or "").strip().lower()
+    # Explicit portfolio archetype OR experience mode that implies portfolio IA
+    return sa == "portfolio" or em == "webgl_3d_portfolio"
 
 
 def apply_cool_generation_lane_presets(
@@ -151,6 +181,15 @@ def apply_cool_generation_lane_presets(
     Merge default execution obligations and literal needles when the lane is active.
 
     Preserves planner-authored fields when already strong; fills gaps only.
+
+    Key behavior:
+    - For interactive lanes (interactive_frontend_app_v1) or identity-led experience
+      modes (immersive_identity_experience, immersive_spatial_portfolio), do NOT inject
+      portfolio section defaults (hero/proof_or_work/contact_or_cta).
+    - Only inject portfolio section defaults when site_archetype is "portfolio" or
+      experience_mode is "webgl_3d_portfolio" — i.e. explicit portfolio IA intent.
+    - Always inject identity-derived scene grammar into the creative_brief so the
+      generator has concrete, identity-grounded direction.
     """
     if not cool_generation_lane_active(event_input, build_spec):
         return build_spec, {"applied": False}
@@ -163,7 +202,20 @@ def apply_cool_generation_lane_presets(
     ec.setdefault("lane", COOL_GENERATION_LANE_V1)
     ec.setdefault("surface_type", "single_page_static")
     ec.setdefault("layout_mode", "editorial_split")
-    ec.setdefault("required_sections", ["hero", "proof_or_work", "contact_or_cta"])
+
+    # Only inject portfolio section defaults when explicitly requested.
+    # Interactive lanes and identity-led experience modes must NOT be forced into
+    # hero/proof_or_work/contact_or_cta — that collapses them into portfolio shells.
+    interactive_vertical = is_interactive_frontend_vertical(bs, event_input)
+    portfolio_ia = _is_portfolio_ia_requested(bs)
+
+    if not interactive_vertical and portfolio_ia:
+        # Explicit portfolio IA on a static/cool lane — preserve portfolio defaults
+        ec.setdefault("required_sections", ["hero", "proof_or_work", "contact_or_cta"])
+    elif not interactive_vertical and not ec.get("required_sections"):
+        # Static non-portfolio: neutral section default (avoids portfolio forcing)
+        ec.setdefault("required_sections", ["primary_surface", "contact_or_cta"])
+    # Interactive lanes: no required_sections default; planner owns that entirely
 
     spr = ec.get("selected_reference_patterns")
     if not (isinstance(spr, list) and len(spr) >= 1):
@@ -216,22 +268,87 @@ def apply_cool_generation_lane_presets(
     merged_lit = _dedupe_literal_needles(planner_needles, extra)
     bs["literal_success_checks"] = merged_lit[:24]
 
+    # Build identity-derived scene grammar and inject into creative_brief.
+    # This gives the generator concrete, identity-grounded direction rather than
+    # generic "identity-forward editorial" language.
+    scene_grammar = build_scene_grammar_from_identity(identity_brief, structured_identity)
+    scene_direction = scene_grammar.to_creative_direction()
+
     cb = bs.get("creative_brief")
-    if not isinstance(cb, dict) or not cb.get("mood"):
-        bs["creative_brief"] = {
-            **(cb if isinstance(cb, dict) else {}),
-            "mood": "distinctive identity-forward editorial",
-            "direction_summary": (
-                (cb.get("direction_summary") if isinstance(cb, dict) else None)
-                or "Cool generation lane: real hero imagery, typographic hierarchy, non-generic motion."
-            ),
-        }
+    cb_dict = cb if isinstance(cb, dict) else {}
+
+    # Merge: preserve planner-authored fields, add scene grammar where absent.
+    merged_cb: dict[str, Any] = dict(cb_dict)
+    if not merged_cb.get("mood"):
+        merged_cb["mood"] = "distinctive identity-forward"
+    if not merged_cb.get("direction_summary"):
+        merged_cb["direction_summary"] = (
+            "Cool generation lane: real identity imagery at scale, "
+            "non-generic motion rooted in identity tone, and scene composition "
+            "derived from the identity brief — not a tutorial scaffold."
+        )
+
+    # Inject scene grammar fields — only fill gaps (preserve planner intent).
+    if not merged_cb.get("scene_metaphor"):
+        merged_cb["scene_metaphor"] = scene_direction["scene_metaphor"]
+        merged_cb["scene_metaphor_description"] = scene_direction["scene_metaphor_description"]
+    if not merged_cb.get("motion_language"):
+        merged_cb["motion_language"] = scene_direction["motion_language"]
+        merged_cb["motion_language_description"] = scene_direction["motion_language_description"]
+    if not merged_cb.get("material_hint"):
+        merged_cb["material_hint"] = scene_direction["material_hint"]
+        merged_cb["material_hint_description"] = scene_direction["material_hint_description"]
+    if not merged_cb.get("primitive_guidance"):
+        merged_cb["primitive_guidance"] = scene_direction["primitive_guidance"]
+    if scene_direction.get("scene_rationale") and not merged_cb.get("scene_rationale"):
+        merged_cb["scene_rationale"] = scene_direction["scene_rationale"]
+
+    # For interactive/immersive lanes: add explicit anti-portfolio instruction
+    em = (bs.get("experience_mode") or "").strip().lower()
+    if interactive_vertical or em in (
+        "immersive_identity_experience",
+        "immersive_spatial_portfolio",
+    ):
+        merged_cb["layout_instruction"] = (
+            "Do NOT produce hero/projects/about/contact portfolio structure. "
+            "Use scene_metaphor and scene grammar as the organizing principle. "
+            "Sections may be spatial zones, narrative beats, or experiential layers — "
+            "not standard portfolio cards."
+        )
+
+    bs["creative_brief"] = merged_cb
+
+    # Derive geometry contract and inject into execution_contract.geometry_system.
+    # This gives the generator explicit, machine-readable composition rules rather
+    # than only scene adjectives in the creative brief.
+    geo_contract = derive_geometry_contract(identity_brief, structured_identity, bs)
+    geo_dict = geo_contract.to_compact_dict()
+    ec["geometry_system"] = geo_dict
+
+    # Align allowed_libraries with geometry mode when planner didn't specify them
+    if interactive_vertical:
+        mode = geo_contract.mode
+        al = ec.get("allowed_libraries")
+        if not isinstance(al, list) or len([x for x in al if isinstance(x, str) and x.strip()]) == 0:
+            mode_policy = build_geometry_mode_library_policy(mode)
+            ec["allowed_libraries"] = mode_policy["primary_stack"]
+            _log.info(
+                "cool_generation_lane: defaulted allowed_libraries to %s for geometry_mode=%s",
+                mode_policy["primary_stack"],
+                mode,
+            )
 
     meta = {
         "applied": True,
         "lane": COOL_GENERATION_LANE_V1,
         "literal_needles_count": len(bs["literal_success_checks"]),
         "identity_image_needle": identity_image_needle,
+        "scene_grammar_applied": True,
+        "scene_metaphor": scene_grammar.scene_metaphor,
+        "motion_language": scene_grammar.motion_language,
+        "portfolio_ia_sections_injected": not interactive_vertical and portfolio_ia,
+        "geometry_mode": geo_contract.mode,
+        "geometry_contract_applied": True,
     }
     _log.info(
         "cool_generation_lane presets merged literal_needles=%s patterns=%d",
@@ -399,4 +516,5 @@ __all__ = [
     "literal_success_checks_preview_strings",
     "reference_pattern_to_literal_token",
     "summarize_execution_contract_for_generator",
+    "_is_portfolio_ia_requested",
 ]

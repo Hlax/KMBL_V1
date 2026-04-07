@@ -272,12 +272,19 @@ def extract_structured_identity(
 EXPERIENCE_MODES = frozenset({
     "webgl_3d_portfolio",
     "immersive_spatial_portfolio",
+    "immersive_identity_experience",
     "model_centric_experience",
     "flat_standard",
 })
 
-# Spatial archetypes that strongly signal immersive mode
+# Spatial archetypes that strongly signal immersive/interactive mode.
+# Note: "portfolio" is kept here for backwards compatibility in mode detection,
+# but the derivation rules distinguish portfolio-IA (webgl_3d_portfolio) from
+# identity-led spatial experiences (immersive_identity_experience).
 _SPATIAL_ARCHETYPES = {"portfolio", "gallery", "experimental", "story_driven"}
+
+# Archetypes that explicitly want portfolio information architecture (hero/work/about/contact).
+_PORTFOLIO_IA_ARCHETYPES = {"portfolio"}
 
 
 def derive_experience_mode_with_confidence(
@@ -290,24 +297,44 @@ def derive_experience_mode_with_confidence(
 
     Returns ``{"experience_mode": str, "experience_confidence": float}``.
     Confidence (0.0–1.0) reflects signal strength for the winning rule.
+
+    Key distinction:
+    - ``webgl_3d_portfolio``: portfolio information architecture (hero/work/about/contact)
+      with 3D/WebGL decoration. Only when site_archetype is explicitly "portfolio" AND
+      there is portfolio content (projects, photography, etc.).
+    - ``immersive_identity_experience``: spatial/creative experience that is identity-led
+      but NOT portfolio-shaped. Use for experimental, gallery, story_driven, or ambitious
+      creative identities where the surface should be an experience not a resume.
+    - ``immersive_spatial_portfolio``: deepest spatial mode; for very strong spatial signals.
     """
     themes = set(structured_identity.themes)
     visual = set(structured_identity.visual_tendencies)
     content = set(structured_identity.content_types)
     complexity = structured_identity.complexity
+    sa = (site_archetype or "").strip().lower()
+    is_portfolio_archetype = sa in _PORTFOLIO_IA_ARCHETYPES
 
-    # Rule 1: Explicit spatial visual tendency → immersive
+    # Rule 1: Explicit spatial visual tendency → most immersive mode
     if "spatial" in visual:
         return {"experience_mode": "immersive_spatial_portfolio", "experience_confidence": 0.9}
 
-    # Rule 2: Ambitious + visual-heavy → webgl_3d
+    # Rule 2: Ambitious + visual-heavy
+    #   → portfolio archetype with portfolio content: webgl_3d_portfolio
+    #   → non-portfolio or creative: immersive_identity_experience
     if complexity == "ambitious" and visual & {"image-driven", "motion-heavy"}:
-        return {"experience_mode": "webgl_3d_portfolio", "experience_confidence": 0.85}
+        portfolio_content = content & {"projects", "photography", "design", "art"}
+        if is_portfolio_archetype and portfolio_content:
+            return {"experience_mode": "webgl_3d_portfolio", "experience_confidence": 0.85}
+        return {"experience_mode": "immersive_identity_experience", "experience_confidence": 0.85}
 
-    # Rule 3: Spatial archetype + creative theme signals → webgl_3d
+    # Rule 3: Spatial archetype + creative theme signals
+    #   → explicitly portfolio archetype: webgl_3d_portfolio (portfolio IA + 3D)
+    #   → other spatial archetypes (gallery/experimental/story_driven): identity-led experience
     creative_themes = themes & {"cinematic", "experimental", "artistic"}
-    if site_archetype and site_archetype in _SPATIAL_ARCHETYPES and creative_themes:
-        return {"experience_mode": "webgl_3d_portfolio", "experience_confidence": 0.8}
+    if sa and sa in _SPATIAL_ARCHETYPES and creative_themes:
+        if is_portfolio_archetype:
+            return {"experience_mode": "webgl_3d_portfolio", "experience_confidence": 0.8}
+        return {"experience_mode": "immersive_identity_experience", "experience_confidence": 0.8}
 
     # Rule 4: Text-heavy with no visual signals → flat
     text_only_content = content <= {"writing"} and content  # writing only, non-empty
@@ -318,14 +345,21 @@ def derive_experience_mode_with_confidence(
     if complexity == "simple" and not (visual & {"spatial", "motion-heavy", "image-driven"}):
         return {"experience_mode": "flat_standard", "experience_confidence": 0.8}
 
-    # Rule 6a: Moderate or above with any visual/portfolio signal → webgl_3d
+    # Rule 6a: Moderate+ complexity with portfolio content + visual signals
+    #   → only webgl_3d_portfolio when archetype explicitly requests portfolio IA
     portfolio_content = content & {"projects", "photography", "design", "art"}
     if portfolio_content and (visual or creative_themes):
-        return {"experience_mode": "webgl_3d_portfolio", "experience_confidence": 0.7}
+        if is_portfolio_archetype:
+            return {"experience_mode": "webgl_3d_portfolio", "experience_confidence": 0.7}
+        return {"experience_mode": "immersive_identity_experience", "experience_confidence": 0.7}
 
-    # Rule 6b: Site archetype is spatial even without strong creative themes
-    if site_archetype and site_archetype in _SPATIAL_ARCHETYPES:
-        return {"experience_mode": "webgl_3d_portfolio", "experience_confidence": 0.7}
+    # Rule 6b: Spatial site archetype without strong creative themes
+    #   → portfolio archetype: webgl_3d_portfolio
+    #   → non-portfolio spatial: immersive_identity_experience
+    if sa and sa in _SPATIAL_ARCHETYPES:
+        if is_portfolio_archetype:
+            return {"experience_mode": "webgl_3d_portfolio", "experience_confidence": 0.65}
+        return {"experience_mode": "immersive_identity_experience", "experience_confidence": 0.65}
 
     # Rule 7: Fallback
     return {"experience_mode": "flat_standard", "experience_confidence": 0.4}
@@ -344,12 +378,20 @@ def derive_experience_mode(
 
     Decision logic:
       1. If visual_tendencies include 'spatial' → immersive_spatial_portfolio
-      2. If complexity is 'ambitious' + visual heavy (image-driven or motion-heavy) → webgl_3d_portfolio
-      3. If site_archetype is spatial (portfolio/gallery/experimental) + creative themes → webgl_3d_portfolio
+      2. If complexity is 'ambitious' + visual heavy:
+           - portfolio archetype + portfolio content → webgl_3d_portfolio
+           - otherwise → immersive_identity_experience
+      3. If site_archetype is spatial + creative themes:
+           - portfolio archetype → webgl_3d_portfolio
+           - other spatial (gallery/experimental/story_driven) → immersive_identity_experience
       4. If content_types are text-heavy (writing only, no visual) → flat_standard
       5. If complexity is 'simple' and no spatial signals → flat_standard
-      6a. Moderate+ complexity with portfolio/visual content + visual/creative signals → webgl_3d_portfolio
-      6b. Spatial site_archetype without strong creative themes → webgl_3d_portfolio
+      6a. Moderate+ complexity with portfolio content + visual signals:
+           - portfolio archetype → webgl_3d_portfolio
+           - otherwise → immersive_identity_experience
+      6b. Spatial site_archetype without creative themes:
+           - portfolio archetype → webgl_3d_portfolio
+           - otherwise → immersive_identity_experience
       7. Fallback → flat_standard
     """
     result = derive_experience_mode_with_confidence(

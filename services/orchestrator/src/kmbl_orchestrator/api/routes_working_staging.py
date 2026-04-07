@@ -201,7 +201,16 @@ def get_working_staging_preview(
         media_type="text/html; charset=utf-8",
         headers={
             "X-Content-Type-Options": "nosniff",
-            "Content-Security-Policy": "default-src 'none'; img-src data: https:; font-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'",
+            "Content-Security-Policy": (
+                "default-src 'none'; "
+                "img-src data: blob: https:; "
+                "font-src data: https:; "
+                "style-src 'unsafe-inline' https:; "
+                "script-src 'unsafe-inline' https:; "
+                "connect-src 'self' https:; "
+                "worker-src blob:; "
+                "child-src blob:"
+            ),
             "Cache-Control": "private, no-store",
         },
     )

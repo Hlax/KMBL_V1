@@ -35,4 +35,5 @@ def test_apply_iteration_compaction_reduces_chars() -> None:
     )
     assert payload["event_input"].get("crawl_context_compact") is not None
     assert payload["structured_identity"].get("_kmbl_compacted") is True
-    assert payload["kmbl_implementation_reference_cards"] == []
+    # Reference cards are capped to 3 on iteration >= 1 (not cleared entirely)
+    assert payload["kmbl_implementation_reference_cards"] == [{"id": 1}]

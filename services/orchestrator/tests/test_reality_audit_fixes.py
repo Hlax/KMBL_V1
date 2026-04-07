@@ -462,7 +462,8 @@ class TestFileStagingEndpoint:
         assert resp.status_code == 200
         csp = resp.headers.get("content-security-policy", "")
         assert "connect-src 'self'" in csp
-        assert "https://unpkg.com" in csp and "https://cdn.jsdelivr.net" in csp
+        # CSP uses broad https: scheme-source which covers all HTTPS CDNs
+        assert "https:" in csp
 
 
 # ---------------------------------------------------------------------------

@@ -291,9 +291,14 @@ def get_staging_static_preview(
         headers={
             "X-Content-Type-Options": "nosniff",
             "Content-Security-Policy": (
-                "default-src 'none'; img-src data: https:; font-src data:; "
-                "style-src 'unsafe-inline'; script-src 'unsafe-inline'; "
-                "connect-src 'self' https://unpkg.com https://cdn.jsdelivr.net"
+                "default-src 'none'; "
+                "img-src data: blob: https:; "
+                "font-src data: https:; "
+                "style-src 'unsafe-inline' https:; "
+                "script-src 'unsafe-inline' https:; "
+                "connect-src 'self' https:; "
+                "worker-src blob:; "
+                "child-src blob:"
             ),
             "Cache-Control": "private, no-store",
         },

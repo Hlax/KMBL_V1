@@ -55,6 +55,7 @@ from kmbl_orchestrator.runtime.run_events import RunEventType, append_graph_run_
 from kmbl_orchestrator.runtime.working_staging_read import (
     get_working_staging_for_thread_resilient,
 )
+from kmbl_orchestrator.runtime.demo_preview_grounding import compute_demo_preview_grounding_state
 from kmbl_orchestrator.runtime.preview_reachability import manifest_first_evaluator_grounding_satisfied
 from kmbl_orchestrator.runtime.session_staging_links import resolve_evaluator_preview_resolution
 from kmbl_orchestrator.runtime.static_vertical_invariants import (
@@ -266,6 +267,42 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             },
             thread_id=tid,
         )
+
+    # ── Demo/public-mode grounding contract ─────────────────────────────────
+    # Compute the three explicit grounding-contract fields from the (possibly
+    # smoke-overridden) preview_resolution.  Emit a dedicated event when demo
+    # mode requires grounding but cannot satisfy it so the gap is never silent.
+    grounding_state = compute_demo_preview_grounding_state(preview_resolution)
+    if (
+        not getattr(ctx.settings, "orchestrator_smoke_contract_evaluator", False)
+        and grounding_state["preview_grounding_required"]
+        and not grounding_state["preview_grounding_satisfied"]
+    ):
+        append_graph_run_event(
+            ctx.repo,
+            gid,
+            RunEventType.EVALUATOR_DEMO_GROUNDING_DEGRADED,
+            {
+                "kind": "demo_preview_grounding",
+                "message": (
+                    "Demo/public mode requires a browser-reachable preview URL but none is "
+                    "available. Evaluation will be marked degraded (pass→partial). "
+                    "Set KMBL_ORCHESTRATOR_PUBLIC_BASE_URL to a publicly reachable tunnel URL."
+                ),
+                "preview_grounding_mode": grounding_state["preview_grounding_mode"],
+                "preview_grounding_fallback_reason": grounding_state["preview_grounding_fallback_reason"],
+                "orchestrator_public_base_source": preview_resolution.get("orchestrator_public_base_source"),
+            },
+            thread_id=tid,
+        )
+        _log.warning(
+            "graph_run graph_run_id=%s demo_preview_grounding_degraded "
+            "mode=%s fallback_reason=%s",
+            gid,
+            grounding_state["preview_grounding_mode"],
+            grounding_state["preview_grounding_fallback_reason"],
+        )
+
     skip_llm, skip_reason = should_skip_evaluator_llm(bc_slim, bs_for_skip, ei_for_skip)
     omit_snippets, snippet_policy_reason = should_omit_evaluator_snippets_from_llm_payload(
         bc_slim=bc_slim,
@@ -483,6 +520,10 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     _prev_m["orchestrator_public_base_source"] = preview_resolution.get(
         "orchestrator_public_base_source"
     )
+    # Explicit grounding-contract fields (demo/public-mode aware).
+    _prev_m["preview_grounding_required"] = grounding_state["preview_grounding_required"]
+    _prev_m["preview_grounding_satisfied"] = grounding_state["preview_grounding_satisfied"]
+    _prev_m["preview_grounding_fallback_reason"] = grounding_state["preview_grounding_fallback_reason"]
     report = report.model_copy(update={"metrics_json": _prev_m})
     ev_input = state.get("event_input") if isinstance(state.get("event_input"), dict) else {}
     bs_ev = build_evaluation_contract(state.get("build_spec") or {})
@@ -564,6 +605,35 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         event_input=ev_input if isinstance(ev_input, dict) else {},
         build_candidate=bc_gate,
     )
+
+    # ── Demo/public-mode grounding gate ─────────────────────────────────────
+    # In demo mode, a "pass" that was not grounded in a browser-reachable preview
+    # is dishonest — the evaluator may have inspected artifacts only.  Adjust
+    # pass→partial so callers can tell the result is unverified against the real
+    # rendered surface.  We do NOT crash or block; iteration can continue.
+    if (
+        not getattr(ctx.settings, "orchestrator_smoke_contract_evaluator", False)
+        and grounding_state["preview_grounding_required"]
+        and not grounding_state["preview_grounding_satisfied"]
+        and report.status == "pass"
+    ):
+        _demo_issues = list(report.issues_json)
+        _demo_issues.append({
+            "code": "demo_preview_grounding_not_satisfied",
+            "message": (
+                "Adjusted pass→partial: demo/public mode requires a browser-reachable "
+                "preview but the evaluator ran without one. "
+                "Set KMBL_ORCHESTRATOR_PUBLIC_BASE_URL to a publicly reachable URL "
+                "to satisfy browser grounding."
+            ),
+        })
+        _demo_m = dict(report.metrics_json or {})
+        _demo_m["demo_preview_grounding_pass_adjusted"] = True
+        report = report.model_copy(update={
+            "status": "partial",
+            "issues_json": _demo_issues,
+            "metrics_json": _demo_m,
+        })
 
     # ── 3D content guardrail for spatial experience modes ────────────────
     # Soft policy: do not force fail when the LLM evaluator already passed — use partial + metrics

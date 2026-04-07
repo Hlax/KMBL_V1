@@ -16,6 +16,10 @@ from kmbl_orchestrator.runtime.static_vertical_invariants import (
 )
 from kmbl_orchestrator.staging.integrity import scan_interactive_bundle_preview_risks
 
+#: Issue code for required-library compliance.  Must survive feedback sanitisation
+#: (generator can and should fix missing library imports).
+REQUIRED_LIBRARY_MISSING_CODE = "required_library_missing"
+
 
 # Event / DOM hooks — not exhaustive; enough to separate "static gimmick" from wired behavior.
 _INTERACTION_SIGNAL_RE = re.compile(
@@ -186,6 +190,34 @@ def apply_interactive_lane_evaluator_gate(
                 }
             )
 
+    # ── Required-library compliance gate ─────────────────────────────────
+    # Deterministic: compare build_spec required_libraries (or allowed_libraries
+    # when no explicit required set) against libraries actually detected in
+    # artifact source code.  Missing libraries → actionable issue for generator.
+    req_libs, detected_libs, missing_libs = _required_library_compliance(
+        build_spec, build_candidate,
+    )
+    if missing_libs and status in ("pass", "partial"):
+        if not _has_code(REQUIRED_LIBRARY_MISSING_CODE):
+            new_issues.append(
+                {
+                    "severity": "high",
+                    "category": "interactive_lane_deterministic",
+                    "code": REQUIRED_LIBRARY_MISSING_CODE,
+                    "message": (
+                        f"required_libraries {req_libs!r} specified in execution contract but "
+                        f"artifacts only contain evidence of {detected_libs!r}. "
+                        f"Missing: {missing_libs!r}. Add CDN <script> tags or ES module imports."
+                    ),
+                }
+            )
+    m["required_libraries_compliance"] = {
+        "required": req_libs,
+        "detected": detected_libs,
+        "missing": missing_libs,
+        "satisfied": len(missing_libs) == 0,
+    }
+
     if new_issues:
         issues = issues + new_issues
         if status == "pass":
@@ -202,3 +234,51 @@ def apply_interactive_lane_evaluator_gate(
             "metrics_json": m,
         }
     )
+
+
+# ---------------------------------------------------------------------------
+# Required-library compliance helpers
+# ---------------------------------------------------------------------------
+
+def _required_library_compliance(
+    build_spec: dict[str, Any],
+    build_candidate: dict[str, Any],
+) -> tuple[list[str], list[str], list[str]]:
+    """Return ``(required, detected, missing)`` library name lists.
+
+    ``required`` is drawn from ``execution_contract.required_libraries`` first;
+    if that field is absent/empty, falls back to ``execution_contract.allowed_libraries``
+    so that the primary interactive lane default (three + gsap) is enforced even when
+    the planner did not produce the newer ``required_libraries`` field.
+
+    ``detected`` comes from the build-candidate summary_v1 or, if unavailable,
+    from the raw artifact text using the same regex detection as the summary builder.
+    """
+    ec = build_spec.get("execution_contract") if isinstance(build_spec.get("execution_contract"), dict) else {}
+    req_raw = ec.get("required_libraries")
+    if not isinstance(req_raw, list) or not req_raw:
+        req_raw = ec.get("allowed_libraries")
+    if not isinstance(req_raw, list):
+        return [], [], []
+    required = sorted({str(x).strip().lower() for x in req_raw if isinstance(x, str) and x.strip()})
+    if not required:
+        return [], [], []
+
+    # Prefer the orchestrator-built summary (already computed); fall back to raw artifact scan.
+    summ = build_candidate.get("kmbl_build_candidate_summary_v1")
+    if isinstance(summ, dict):
+        detected_raw = summ.get("libraries_detected")
+    else:
+        detected_raw = None
+    if isinstance(detected_raw, list):
+        detected = sorted({str(x).strip().lower() for x in detected_raw if isinstance(x, str) and x.strip()})
+    else:
+        # Inline detection fallback
+        from kmbl_orchestrator.runtime.build_candidate_summary_v1 import _detect_libraries_artifact, _concat_text
+
+        arts = build_candidate.get("artifact_outputs") or []
+        blob = _concat_text([a for a in arts if isinstance(a, dict)])
+        detected = _detect_libraries_artifact(blob)
+
+    missing = [lib for lib in required if lib not in detected]
+    return required, detected, missing

@@ -29,6 +29,7 @@ _log = logging.getLogger(__name__)
 _TRACKED_EC_KEYS = frozenset(
     {
         "allowed_libraries",
+        "required_libraries",
         "required_interactions",
         "interactive_runtime_tier",
         "webgl_ambition_ack",
@@ -49,13 +50,14 @@ class InteractiveExecutionContractV1(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     allowed_libraries: list[str] = Field(default_factory=list)
+    required_libraries: list[str] = Field(default_factory=list)
     required_interactions: list[dict[str, Any]] = Field(default_factory=list)
     interactive_runtime_tier: str = "bounded_preview"
     webgl_ambition_ack: str | None = None
     lane_escalation_hint: str | None = None
     escalation_lane: str | None = None
 
-    @field_validator("allowed_libraries", mode="before")
+    @field_validator("allowed_libraries", "required_libraries", mode="before")
     @classmethod
     def _coerce_libs(cls, v: Any) -> list[str]:
         if v is None:
@@ -217,6 +219,17 @@ def apply_interactive_build_spec_hardening(
     if not isinstance(al, list) or len([x for x in al if isinstance(x, str) and x.strip()]) == 0:
         ec["allowed_libraries"] = list(PRIMARY_LANE_DEFAULT_LIBRARIES)
         fixes.append("allowed_libraries_defaulted_primary_lane")
+
+    # required_libraries: formalize when absent.  If planner set allowed but not
+    # required, inherit allowed as required for the primary interactive lane.
+    rl = ec.get("required_libraries")
+    if not isinstance(rl, list) or len([x for x in rl if isinstance(x, str) and x.strip()]) == 0:
+        al_effective = ec.get("allowed_libraries")
+        if isinstance(al_effective, list):
+            ec["required_libraries"] = list(al_effective)
+        else:
+            ec["required_libraries"] = list(PRIMARY_LANE_DEFAULT_LIBRARIES)
+        fixes.append("required_libraries_defaulted_from_allowed")
 
     # Heavy WebGPU ambition modes: append wgsl so execution_contract signals WGSL/WebGPU path (not default for flat modes).
     em_libs = (bs.get("experience_mode") or "").strip().lower()

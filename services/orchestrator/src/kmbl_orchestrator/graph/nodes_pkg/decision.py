@@ -103,6 +103,48 @@ def decision_router(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             thread_id=UUID(state["thread_id"]),
         )
 
+    # ── Weakly-grounded retry cap ─────────────────────────────────────────
+    # When the evaluator ran without browser-reachable preview (artifact-only),
+    # further retries beyond a configurable cap are unlikely to improve quality
+    # because feedback is based on weak grounding.  Cap retries to avoid token
+    # waste in local-dev / non-tunnel environments.
+    weak_cap = int(getattr(ctx.settings, "kmbl_weakly_grounded_max_iterations", 0))
+    if decision == "iterate" and weak_cap > 0:
+        grounding_mode = str(metrics.get("preview_grounding_mode") or "").strip()
+        # "browser" (from normalized mode) or "browser_reachable" (raw resolution value)
+        # both indicate actual browser access.  Everything else is weak.
+        weakly_grounded = grounding_mode not in ("browser", "browser_reachable")
+        if weakly_grounded and iteration >= weak_cap:
+            decision = "stage"
+            _log.info(
+                "decision_router graph_run_id=%s weakly_grounded_retry_cap "
+                "iteration=%d cap=%d grounding_mode=%s "
+                "rerouting iterate→stage (artifact-only evaluation cap reached)",
+                gid,
+                iteration,
+                weak_cap,
+                grounding_mode,
+            )
+            append_graph_run_event(
+                ctx.repo,
+                gid,
+                RunEventType.WEAKLY_GROUNDED_RETRY_CAP,
+                {
+                    "message": (
+                        f"Weakly-grounded retry cap reached: iteration {iteration} >= cap {weak_cap}. "
+                        f"Evaluator grounding mode is '{grounding_mode}' (not browser-reachable). "
+                        "Routing to stage (degraded) to avoid token waste on artifact-only feedback loops. "
+                        "Set KMBL_ORCHESTRATOR_PUBLIC_BASE_URL to a tunnel URL for browser-grounded evaluation, "
+                        "or increase KMBL_WEAKLY_GROUNDED_MAX_ITERATIONS if more retries are needed."
+                    ),
+                    "evaluation_status": status,
+                    "iteration_index": iteration,
+                    "weakly_grounded_max_iterations": weak_cap,
+                    "preview_grounding_mode": grounding_mode,
+                },
+                thread_id=UUID(state["thread_id"]),
+            )
+
     if status not in ("pass", "partial"):
         append_graph_run_event(
             ctx.repo,

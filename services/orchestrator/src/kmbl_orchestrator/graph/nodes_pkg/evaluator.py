@@ -534,6 +534,17 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     _prev_m["preview_grounding_required"] = grounding_state["preview_grounding_required"]
     _prev_m["preview_grounding_satisfied"] = grounding_state["preview_grounding_satisfied"]
     _prev_m["preview_grounding_fallback_reason"] = grounding_state["preview_grounding_fallback_reason"]
+    # Canonical single-field grounding evidence quality for downstream policy and dashboards.
+    # "browser" = evaluator had a browser-reachable preview (OpenClaw mcporter can inspect).
+    # "artifact_only" = preview URL exists but is not browser-reachable (localhost/private).
+    # "none" = no usable preview URL at all.
+    _pgm = preview_resolution.get("preview_grounding_mode", "unavailable")
+    if _pgm == "browser_reachable":
+        _prev_m["evaluator_grounding_evidence_quality"] = "browser"
+    elif _pgm == "operator_local_only":
+        _prev_m["evaluator_grounding_evidence_quality"] = "artifact_only"
+    else:
+        _prev_m["evaluator_grounding_evidence_quality"] = "none"
     report = report.model_copy(update={"metrics_json": _prev_m})
     ev_input = state.get("event_input") if isinstance(state.get("event_input"), dict) else {}
     bs_ev = build_evaluation_contract(state.get("build_spec") or {})

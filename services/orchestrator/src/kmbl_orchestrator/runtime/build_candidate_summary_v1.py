@@ -237,6 +237,17 @@ def build_build_candidate_summary_v1(
         "library_detection_provenance": "artifact_source_code",
     }
 
+    # Required-library compliance: explicit pass/fail surface for evaluator and operator.
+    req_raw = ec.get("required_libraries") if isinstance(ec.get("required_libraries"), list) else []
+    req_s = sorted({str(x).strip().lower() for x in req_raw if isinstance(x, str) and x.strip()})
+    req_missing = [r for r in req_s if r not in libs]
+    required_libraries_compliance: dict[str, Any] = {
+        "required": req_s,
+        "detected": libs,
+        "missing": req_missing,
+        "satisfied": len(req_missing) == 0,
+    }
+
     prev_iter: dict[str, Any] | None = None
     if isinstance(prior_summary, dict) and prior_summary.get("file_inventory"):
         prev_inv = prior_summary.get("file_inventory")
@@ -279,6 +290,7 @@ def build_build_candidate_summary_v1(
             ),
         },
         "compliance_summary": compliance_summary,
+        "required_libraries_compliance": required_libraries_compliance,
         "warnings": warnings[:8],
         "previous_iteration_diff_summary": prev_iter,
     }

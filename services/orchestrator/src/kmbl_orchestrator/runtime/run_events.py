@@ -107,6 +107,8 @@ class RunEventType:
     CANDIDATE_PREVIEW_UNREACHABLE_PRIVATE_HOST = "candidate_preview_unreachable_due_to_private_host"
     # Demo/public-mode: grounding required but not satisfied — evaluation marked degraded.
     EVALUATOR_DEMO_GROUNDING_DEGRADED = "evaluator_demo_grounding_degraded"
+    # Decision router: weakly-grounded retry cap reached — iterate rerouted to stage.
+    WEAKLY_GROUNDED_RETRY_CAP = "weakly_grounded_retry_cap"
 
     # Habitat materialization lifecycle (local workspace as evictable cache layer)
     HABITAT_MATERIALIZED = "habitat_materialized"

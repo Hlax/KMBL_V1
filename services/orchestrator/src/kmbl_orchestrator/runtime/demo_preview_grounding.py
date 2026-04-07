@@ -182,6 +182,9 @@ def sanitize_feedback_for_generator(
     ``GROUNDING_ISSUE_CODE``) must be removed so the LLM does not treat an
     infra gap as a UI/code defect to fix.
 
+    Issues that the generator **can** act on (e.g. ``required_library_missing``)
+    are always preserved — see ``_GENERATOR_ACTIONABLE_ISSUE_CODES``.
+
     For grounding-only partials this will result in an empty ``issues`` list,
     which is the correct signal — the build needs no code changes.
     For mixed partials (quality + grounding) only the grounding issue is stripped;

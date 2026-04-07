@@ -59,3 +59,47 @@ Deploy the orchestrator per `services/orchestrator/DEPLOY.md` and set `NEXT_PUBL
 
 - `docs/16_DEPLOYMENT_ARCHITECTURE.md` — long-term Vercel + VPS split
 - `apps/control-plane/.env.example` — `NEXT_PUBLIC_ORCHESTRATOR_URL` examples
+
+## Evaluator browser grounding (important for quality loops)
+
+The KMBL evaluator uses **OpenClaw mcporter Playwright** to open a real browser tab against the candidate preview during evaluation. This gives the evaluator actual DOM/console/visual evidence rather than only inspecting JSON artifacts.
+
+For this to work, the **preview URL must be browser-reachable from the OpenClaw environment**.
+
+### What happens without a reachable preview
+
+| Scenario | Evaluator behaviour | Retry impact |
+|----------|--------------------|----|
+| `KMBL_ORCHESTRATOR_PUBLIC_BASE_URL` set to tunnel URL | Full browser grounding via mcporter | Normal — retries based on real rendered evidence |
+| No public base (localhost derived) | Artifact-only evaluation | **Weakly grounded** — retries capped at `KMBL_WEAKLY_GROUNDED_MAX_ITERATIONS` (default 3) to avoid token waste |
+| `KMBL_EVALUATOR_ALLOW_PRIVATE_PREVIEW_FETCH=true` | Allows localhost URLs through to mcporter | Only works when OpenClaw runs **on the same machine** as the orchestrator |
+
+### Recommended local-dev setup
+
+1. Start a tunnel as described above (cloudflared or ngrok).
+2. Set **both** env vars in your orchestrator `.env`:
+
+   ```
+   NEXT_PUBLIC_ORCHESTRATOR_URL=https://<tunnel-host>
+   KMBL_ORCHESTRATOR_PUBLIC_BASE_URL=https://<tunnel-host>
+   ```
+
+   The first is for the control-plane frontend; the second tells the orchestrator to build browser-reachable preview URLs for the evaluator.
+
+3. If OpenClaw runs **locally** on the same machine and you don't need a tunnel:
+
+   ```
+   KMBL_EVALUATOR_ALLOW_PRIVATE_PREVIEW_FETCH=true
+   ```
+
+   This bypasses the private-host gateway block so localhost preview URLs reach mcporter.
+
+### Checking grounding status
+
+After a graph run completes, check the evaluation report metrics:
+
+- `evaluator_grounding_evidence_quality`: `"browser"` (good), `"artifact_only"` (weak), or `"none"` (no preview)
+- `preview_grounding_mode`: raw resolution mode from orchestrator
+- `preview_grounding_degraded`: `true` when grounding was expected but unavailable
+
+If you see repeated `WEAKLY_GROUNDED_RETRY_CAP` events in the run timeline, that means the evaluator hit the retry cap because it lacked browser evidence. Fix: set `KMBL_ORCHESTRATOR_PUBLIC_BASE_URL` to a tunnel URL.

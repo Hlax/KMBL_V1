@@ -215,11 +215,81 @@ def test_manifest_first_workspace_ingest_completes_graph(
     assert (completed.payload_json or {}).get("file_count") == 1
 
 
-def test_manifest_first_inline_html_skips_ingest_fails(
+def test_generator_contract_failure_approval_timeout_fails_fast(
     tmp_path: Any,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Manifest + sandbox present but inline HTML blocks ingest → manifest-first violation."""
+    settings = _settings_mf(tmp_path, manifest_first=False)
+    monkeypatch.setattr("kmbl_orchestrator.roles.invoke.get_settings", lambda: settings)
+
+    repo = InMemoryRepository()
+    invoker = DefaultRoleInvoker(settings=settings)
+    orig = KiloClawStubClient.invoke_role
+
+    tid_s, gid_s = persist_graph_run_start(
+        repo,
+        thread_id=None,
+        graph_run_id=None,
+        identity_id=None,
+        trigger_type="prompt",
+        event_input={},
+    )
+    gid_u = UUID(gid_s)
+
+    def wrapped(
+        self: KiloClawStubClient,
+        role_type: Any,
+        provider_config_key: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        if role_type == "planner":
+            return _apply_role_contract("planner", _planner_static_vertical())
+        if role_type == "generator":
+            raw = {
+                "contract_failure": {
+                    "code": "approval_timeout",
+                    "message": "The approved write command was denied by gateway before file creation, so no artifact could be persisted.",
+                    "recoverable": True,
+                },
+                "selected_urls": [
+                    "https://harveylacsina.com/",
+                    "https://harveylacsina.com/about",
+                    "https://threejs.org/examples",
+                ],
+            }
+            return _apply_role_contract("generator", raw)
+        return orig(self, role_type, provider_config_key, payload)
+
+    with patch.object(KiloClawStubClient, "invoke_role", wrapped):
+        with pytest.raises(RoleInvocationFailed) as exc:
+            run_graph(
+                repo=repo,
+                invoker=invoker,
+                settings=settings,
+                initial={
+                    "thread_id": tid_s,
+                    "graph_run_id": gid_s,
+                    "event_input": {},
+                },
+            )
+
+    det = exc.value.detail or {}
+    assert exc.value.phase == "generator"
+    assert det.get("error_kind") == "contract_failure"
+    assert det.get("code") == "approval_timeout"
+    assert det.get("recoverable") is True
+
+    evs = repo.list_graph_run_events(gid_u, limit=200)
+    types = [e.event_type for e in evs]
+    assert RunEventType.GENERATOR_INVOCATION_STARTED in types
+    assert RunEventType.GENERATOR_INVOCATION_COMPLETED not in types
+
+
+def test_manifest_first_inline_html_is_replaced_by_workspace_ingest(
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Manifest + sandbox present: workspace files override inline HTML for manifest-first runs."""
     settings = _settings_mf(tmp_path, manifest_first=True)
     monkeypatch.setattr("kmbl_orchestrator.roles.invoke.get_settings", lambda: settings)
 
@@ -272,25 +342,31 @@ def test_manifest_first_inline_html_skips_ingest_fails(
         return orig(self, role_type, provider_config_key, payload)
 
     with patch.object(KiloClawStubClient, "invoke_role", wrapped):
-        with pytest.raises(RoleInvocationFailed) as exc:
-            run_graph(
-                repo=repo,
-                invoker=invoker,
-                settings=settings,
-                initial={
-                    "thread_id": tid_s,
-                    "graph_run_id": gid_s,
-                    "event_input": {},
-                },
-            )
-    det = exc.value.detail or {}
-    assert det.get("error_kind") == "contract_validation"
-    assert (det.get("details") or {}).get("error_kind") == "manifest_first_ingest_skipped_or_empty"
+        final_state = run_graph(
+            repo=repo,
+            invoker=invoker,
+            settings=settings,
+            initial={
+                "thread_id": tid_s,
+                "graph_run_id": gid_s,
+                "event_input": {},
+            },
+        )
+    build_candidate_id = final_state.get("build_candidate_id")
+    persisted_candidate = repo.get_build_candidate(UUID(str(build_candidate_id)))
+    assert persisted_candidate is not None
+    artifact_outputs = persisted_candidate.artifact_refs_json or []
+    html_artifact = next(
+        a for a in artifact_outputs
+        if isinstance(a, dict) and a.get("path") == "component/preview/index.html"
+    )
+    assert "blocks ingest" not in html_artifact.get("content", "")
+    assert "<html><body>x</body></html>" in html_artifact.get("content", "")
 
     evs = repo.list_graph_run_events(gid_u, limit=200)
     types = [e.event_type for e in evs]
-    assert RunEventType.WORKSPACE_INGEST_SKIPPED_INLINE_HTML in types
-    assert RunEventType.MANIFEST_FIRST_VIOLATION in types
+    assert RunEventType.WORKSPACE_INGEST_COMPLETED in types
+    assert RunEventType.MANIFEST_FIRST_VIOLATION not in types
 
 
 def test_manifest_first_evaluator_runs_without_browser_preview_when_summary_v2_ok(

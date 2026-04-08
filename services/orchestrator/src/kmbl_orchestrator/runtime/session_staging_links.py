@@ -140,8 +140,13 @@ def resolve_evaluator_preview_resolution(
         graph_run_id=str(graph_run_id),
         thread_id=str(thread_id),
     )
-    cand_prev = links.get("orchestrator_candidate_preview_url")
-    orch = links.get("orchestrator_staging_preview_url")
+    canonical = resolve_canonical_demo_preview(
+        settings,
+        graph_run_id=str(graph_run_id),
+        thread_id=str(thread_id),
+    )
+    canonical_prev = canonical.get("canonical_preview_url")
+    canonical_source = canonical.get("canonical_preview_source") or "none"
     has_candidate_path = bool(links.get("orchestrator_candidate_preview_path"))
     bc = build_candidate or {}
     bc_pv = bc.get("preview_url")
@@ -149,12 +154,9 @@ def resolve_evaluator_preview_resolution(
 
     operator_preview_url: str | None = None
     operator_source = "none"
-    if isinstance(cand_prev, str) and cand_prev.strip():
-        operator_preview_url = cand_prev.strip()
-        operator_source = "orchestrator_candidate_preview"
-    elif isinstance(orch, str) and orch.strip():
-        operator_preview_url = orch.strip()
-        operator_source = "orchestrator_staging_preview"
+    if isinstance(canonical_prev, str) and canonical_prev.strip():
+        operator_preview_url = canonical_prev.strip()
+        operator_source = str(canonical_source)
     elif bc_preview:
         operator_preview_url = bc_preview
         operator_source = "build_candidate_preview_url"
@@ -163,14 +165,19 @@ def resolve_evaluator_preview_resolution(
 
     browser_preview_url: str | None = None
     browser_source = "none"
-    for u, src in _orchestrator_browser_url_candidates(
-        settings,
-        graph_run_id,
-        allow_private=allow_private,
-    ):
-        browser_preview_url = u
-        browser_source = src
-        break
+    if isinstance(canonical_prev, str) and canonical_prev.strip():
+        if allow_private or not preview_host_blocked_by_openclaw_default(canonical_prev):
+            browser_preview_url = canonical_prev.strip()
+            browser_source = str(canonical_source)
+    if browser_preview_url is None:
+        for u, src in _orchestrator_browser_url_candidates(
+            settings,
+            graph_run_id,
+            allow_private=allow_private,
+        ):
+            browser_preview_url = u
+            browser_source = src
+            break
     if browser_preview_url is None and bc_preview and _is_absolute_http(bc_preview):
         if allow_private or not preview_host_blocked_by_openclaw_default(bc_preview):
             browser_preview_url = bc_preview
@@ -241,13 +248,23 @@ def resolve_evaluator_preview_resolution(
         "preview_url_host_class": preview_url_host_class,
         "orchestrator_public_base_url_configured": public_base_configured,
         "orchestrator_public_base_source": base_source,
+        "canonical_preview_url": canonical_prev,
+        "canonical_preview_source": canonical_source,
+        "canonical_preview_fallback": bool(canonical.get("canonical_preview_fallback", False)),
         "preview_grounding": preview_grounding,
         "preview_grounding_degraded": preview_grounding_degraded,
         "preview_grounding_degrade_reason": preview_grounding_degrade_reason,
         "preview_paths_present": has_candidate_path,
         "kmbl_evaluator_allow_private_preview_fetch": allow_private,
         # Materialization coherence: does a registered habitat back the preview URL?
-        **_materialization_coherence(thread_id, graph_run_id),
+        **{
+            key: value
+            for key, value in canonical.items()
+            if key.startswith("candidate_preview_")
+            or key.startswith("staging_preview_")
+            or key.startswith("live_habitat_")
+            or key == "preview_materialization_coherent"
+        },
     }
 
 

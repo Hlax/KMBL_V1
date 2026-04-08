@@ -22,6 +22,9 @@ from kmbl_orchestrator.contracts.ui_gallery_strip_v1 import (
     resolve_gallery_artifact_refs_in_patch,
 )
 from kmbl_orchestrator.domain import BuildCandidateRecord
+from kmbl_orchestrator.runtime.generator_wire_compact_v1 import (
+    compact_generator_output_payload_for_persistence,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -554,6 +557,16 @@ def normalize_generator_output(
         raw_with_audit["_normalization_enrichments"] = enrichment_paths
     if rescue_paths:
         raw_with_audit["_normalization_rescues"] = rescue_paths
+    workspace_first = bool(
+        isinstance(raw.get("workspace_manifest_v1"), dict)
+        and isinstance(raw.get("sandbox_ref"), str)
+        and raw.get("sandbox_ref", "").strip()
+    )
+    if workspace_first:
+        raw_with_audit, _ = compact_generator_output_payload_for_persistence(
+            raw_with_audit,
+            workspace_first=True,
+        )
 
     return BuildCandidateRecord(
         build_candidate_id=candidate_id,

@@ -564,6 +564,16 @@ def build_crawl_context_for_planner(
         "top_inspiration_pages": top_inspiration_pages,
         "external_inspiration_available": bool(state.external_inspiration_urls),
         "is_exhausted": state.crawl_status == "exhausted",
+        "identity_pages_crawled": len(
+            [u for u in state.visited_urls if is_same_domain(u, state.root_url)]
+        ),
+        "identity_pages_exhausted": len(
+            [u for u in state.unvisited_urls if is_same_domain(u, state.root_url)]
+        )
+        == 0,
+        "inspiration_crawling_active": state.crawl_phase == "inspiration_expansion",
+        "next_uncrawled_identity_page": next_urls[0] if next_urls else None,
+        "compact_reference_summaries_stored": len(state.page_summaries),
         "grounding_available": has_real_data,
         "rendered_evidence_count": rendered_evidence_count,
         "resume": {

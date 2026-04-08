@@ -100,8 +100,8 @@ class Settings(BaseSettings):
             "graph_max_iterations_default",
         ),
     )
-    # When true, pivot/stagnation may route iterate → planner (legacy). Hard replan conditions
-    # (build_spec_invalid, vertical mismatch, etc.) always route to planner regardless.
+    # When true, pivot/stagnation may route iterate → planner (legacy). Otherwise same-session
+    # replanning only happens for explicit operator/evaluator replan signals.
     graph_replan_on_iterate_enabled: bool = Field(
         default=False,
         validation_alias=AliasChoices(

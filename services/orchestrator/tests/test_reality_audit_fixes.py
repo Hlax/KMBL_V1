@@ -192,6 +192,45 @@ class TestAdvanceCrawlFrontier:
         # External inspiration should have been seeded
         assert len(state.external_inspiration_urls) > 0
 
+    def test_generator_selected_urls_persist_when_planner_omits(self):
+        from kmbl_orchestrator.autonomous.loop_service import _advance_crawl_frontier
+
+        repo = InMemoryRepository()
+        iid = uuid4()
+        loop = self._make_loop(iid)
+
+        state = get_or_create_crawl_state(repo, iid, "https://example.com")
+        repo.upsert_crawl_state(
+            state.model_copy(
+                update={
+                    "unvisited_urls": [
+                        "https://example.com/about",
+                        "https://example.com/work",
+                    ]
+                }
+            )
+        )
+
+        _advance_crawl_frontier(
+            repo,
+            loop,
+            {
+                "graph_run_id": str(uuid4()),
+                "build_spec": {"selected_urls": []},
+                "build_candidate": {
+                    "updated_state": {
+                        "selected_urls": ["https://example.com/work"],
+                    }
+                },
+            },
+        )
+
+        updated = repo.get_crawl_state(iid)
+        assert updated is not None
+        assert "https://example.com/work" in updated.visited_urls
+        provenance = updated.visit_provenance.get("https://example.com/work", {})
+        assert provenance.get("source") == "selected_by_session_output"
+
     def test_external_seeding_idempotent(self):
         """External inspiration is only seeded once."""
         from kmbl_orchestrator.autonomous.loop_service import _maybe_seed_external
@@ -240,6 +279,21 @@ class TestIdentityAwareInspiration:
         iid = uuid4()
         urls = _derive_inspiration_urls_for_identity(repo, iid)
         assert urls is None  # Will use defaults
+
+
+def test_crawl_context_exposes_identity_exhaustion_and_next_page() -> None:
+    repo = InMemoryRepository()
+    iid = uuid4()
+    state = get_or_create_crawl_state(repo, iid, "https://example.com")
+    ctx = build_crawl_context_for_planner(state)
+    assert ctx["identity_pages_crawled"] == 0
+    assert ctx["next_uncrawled_identity_page"] == "https://example.com/"
+    assert ctx["identity_pages_exhausted"] is False
+
+    state = record_page_visit(repo, iid, "https://example.com", summary="Home")
+    ctx = build_crawl_context_for_planner(state)
+    assert ctx["identity_pages_crawled"] == 1
+    assert ctx["identity_pages_exhausted"] is True
 
 
 # ---------------------------------------------------------------------------

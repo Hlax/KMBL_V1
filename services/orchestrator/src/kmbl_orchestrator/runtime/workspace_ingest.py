@@ -197,21 +197,6 @@ def ingest_workspace_manifest_if_present(
     if not isinstance(sr_raw, str) or not sr_raw.strip():
         return raw, None, None
 
-    ao_existing = raw.get("artifact_outputs")
-    if isinstance(ao_existing, list) and ao_existing:
-        for a in ao_existing:
-            if not isinstance(a, dict) or str(a.get("role") or "") not in FRONTEND_FILE_ARTIFACT_ROLES:
-                continue
-            p = str(a.get("path") or a.get("file_path") or "").lower()
-            c = str(a.get("content") or "")
-            if p.endswith((".html", ".htm")) and c.strip():
-                _log.debug("workspace_ingest_skipped: inline static HTML already present")
-                return raw, None, "inline_html"
-            head = c[:1200].lower()
-            if "<html" in head or "<!doctype html" in head:
-                _log.debug("workspace_ingest_skipped: inline HTML content already present")
-                return raw, None, "inline_html"
-
     try:
         manifest = WorkspaceManifestV1.model_validate(wm_raw)
     except Exception as e:
@@ -287,6 +272,7 @@ def ingest_workspace_manifest_if_present(
         "sandbox_ref": str(sandbox),
         "file_count": len(ingested),
         "total_bytes": total_bytes,
+        "workspace_authoritative": True,
     }
     raw["_workspace_ingest"] = stats
     return raw, stats, None

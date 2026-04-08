@@ -8,6 +8,7 @@ from uuid import uuid4
 import pytest
 
 from kmbl_orchestrator.config import Settings
+from kmbl_orchestrator.normalize.generator import normalize_generator_output
 from kmbl_orchestrator.runtime.workspace_ingest import (
     WorkspaceIngestError,
     compute_workspace_ingest_preflight,
@@ -222,3 +223,80 @@ def test_ingest_rejects_escape(tmp_path: Path) -> None:
 def test_default_generator_workspace_root_is_absolute() -> None:
     p = default_generator_workspace_root()
     assert p.is_absolute()
+
+
+def test_manifest_ingest_replaces_inline_frontend_with_workspace_copy(tmp_path: Path) -> None:
+    root = tmp_path / "wsroot"
+    root.mkdir()
+    tid = uuid4()
+    gid = uuid4()
+    sandbox = root / str(tid) / str(gid)
+    comp = sandbox / "component" / "preview"
+    comp.mkdir(parents=True)
+    disk_html = "<!DOCTYPE html><html><body>workspace copy</body></html>"
+    (comp / "index.html").write_text(disk_html, encoding="utf-8")
+
+    s = Settings.model_construct(
+        kmbl_generator_workspace_root=str(root),
+        kmbl_workspace_ingest_max_bytes_total=2_000_000,
+    )
+    raw = {
+        "workspace_manifest_v1": {
+            "version": 1,
+            "files": [{"path": "component/preview/index.html"}],
+            "entry_html": "component/preview/index.html",
+        },
+        "sandbox_ref": str(sandbox),
+        "artifact_outputs": [
+            {
+                "role": "interactive_frontend_app_v1",
+                "path": "component/preview/index.html",
+                "language": "html",
+                "content": "<!DOCTYPE html><html><body>inline copy</body></html>",
+            }
+        ],
+    }
+    out, stats, inline_skip = ingest_workspace_manifest_if_present(
+        raw,
+        settings=s,
+        thread_id=tid,
+        graph_run_id=gid,
+        ingested_artifact_role="interactive_frontend_app_v1",
+    )
+    assert inline_skip is None
+    assert stats is not None
+    artifact_outputs = out.get("artifact_outputs")
+    assert isinstance(artifact_outputs, list)
+    assert artifact_outputs[0]["content"] == disk_html
+    assert stats["workspace_authoritative"] is True
+
+
+def test_normalize_generator_output_compacts_workspace_first_raw_payload() -> None:
+    raw = {
+        "workspace_manifest_v1": {
+            "version": 1,
+            "files": [{"path": "component/preview/index.html"}],
+            "entry_html": "component/preview/index.html",
+        },
+        "sandbox_ref": "C:/tmp/workspace",
+        "artifact_outputs": [
+            {
+                "role": "interactive_frontend_app_v1",
+                "path": "component/preview/index.html",
+                "language": "html",
+                "content": "<!DOCTYPE html><html><body>very large inline payload</body></html>",
+            }
+        ],
+        "updated_state": {"revision": 1},
+    }
+    candidate = normalize_generator_output(
+        raw,
+        thread_id=uuid4(),
+        graph_run_id=uuid4(),
+        generator_invocation_id=uuid4(),
+        build_spec_id=uuid4(),
+    )
+    artifact = candidate.raw_payload_json["artifact_outputs"][0]
+    assert artifact.get("content") is None
+    assert artifact["content_omitted"] is True
+    assert artifact.get("content_snippet")

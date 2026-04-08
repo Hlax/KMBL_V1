@@ -55,8 +55,8 @@ def test_hard_replan_evaluator_build_spec_invalid() -> None:
         "build_spec": {"type": "interactive_frontend_app_v1"},
         "event_input": {},
     }
-    assert compute_hard_replan_reason(st) == "evaluator_build_spec_invalid"
-    assert should_route_to_planner_on_iterate(st, s) is True
+    assert compute_hard_replan_reason(st) is None
+    assert should_route_to_planner_on_iterate(st, s) is False
 
 
 def test_hard_replan_canonical_vertical_mismatch() -> None:
@@ -66,14 +66,15 @@ def test_hard_replan_canonical_vertical_mismatch() -> None:
         "build_spec": {"type": "static_frontend_file_v1"},
         "event_input": {"constraints": {"canonical_vertical": "interactive_frontend_app_v1"}},
     }
-    assert compute_hard_replan_reason(st) == "canonical_vertical_mismatch"
-    assert should_route_to_planner_on_iterate(st, s) is True
+    assert compute_hard_replan_reason(st) is None
+    assert should_route_to_planner_on_iterate(st, s) is False
 
 
 def test_hard_replan_empty_build_spec_type() -> None:
     s = Settings()
     st = {"build_spec": {}, "event_input": {}}
-    assert compute_hard_replan_reason(st) == "no_recognized_frontend_surface"
+    assert compute_hard_replan_reason(st) is None
+    assert should_route_to_planner_on_iterate(st, s) is False
 
 
 def test_hard_replan_operator_force() -> None:
@@ -82,6 +83,19 @@ def test_hard_replan_operator_force() -> None:
         "event_input": {"constraints": {"kmbl_force_replan": True}},
     }
     assert compute_hard_replan_reason(st) == "operator_force_replan"
+
+
+def test_explicit_evaluator_replan_signal_routes_to_planner() -> None:
+    s = Settings(graph_replan_on_iterate_enabled=False)
+    st = {
+        "evaluation_report": {
+            "issues": [{"type": "explicit_replan_requested"}],
+        },
+        "build_spec": {"type": "interactive_frontend_app_v1"},
+        "event_input": {},
+    }
+    assert compute_hard_replan_reason(st) == "evaluator_explicit_replan_requested"
+    assert should_route_to_planner_on_iterate(st, s) is True
 
 
 def test_resolve_iterate_planner_skipped_legacy_flag() -> None:

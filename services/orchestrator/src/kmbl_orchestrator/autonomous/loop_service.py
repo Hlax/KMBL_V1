@@ -642,11 +642,13 @@ def advance_crawl_frontier_after_graph(
 
         build_spec_urls = extract_urls_from_build_spec(build_spec)
         raw_payload_urls = _extract_raw_payload_urls(repo, graph_result)
+        session_selected_urls = _extract_session_selected_urls(graph_result, root_url=state.root_url)
 
         # --- Resolve using tiered priority ---
         report = resolve_evidence(
             offered_urls=offered_urls,
             planner_selected_urls=planner_selected,
+            session_selected_urls=session_selected_urls,
             build_spec_urls=build_spec_urls,
             raw_payload_urls=raw_payload_urls,
             root_url=state.root_url,
@@ -872,11 +874,23 @@ def advance_crawl_frontier_after_graph(
         if graph_run_id:
             try:
                 gid = _to_uuid(graph_run_id)
+                crawl_payload = report.to_dict()
+                internal_visited = [u for u in state.visited_urls if u.startswith(state.root_url)]
+                internal_remaining = [u for u in state.unvisited_urls if u.startswith(state.root_url)]
+                crawl_payload.update(
+                    {
+                        "identity_pages_crawled": len(internal_visited),
+                        "compact_reference_summaries_stored": len(state.page_summaries),
+                        "inspiration_crawling_active": state.crawl_phase == "inspiration_expansion",
+                        "next_uncrawled_identity_page": offered_urls[0] if offered_urls else None,
+                        "identity_pages_exhausted": len(internal_remaining) == 0,
+                    }
+                )
                 append_graph_run_event(
                     repo,
                     gid,
                     RunEventType.CRAWL_FRONTIER_ADVANCED,
-                    payload=report.to_dict(),
+                    payload=crawl_payload,
                 )
                 # Emit planner compliance event for monitoring
                 append_graph_run_event(
@@ -953,6 +967,44 @@ def _extract_raw_payload_urls(
             str(exc)[:200],
         )
         return []
+
+
+def _extract_session_selected_urls(
+    graph_result: dict[str, Any],
+    *,
+    root_url: str | None,
+) -> list[str]:
+    """Extract selected_urls from generator/build-candidate session outputs."""
+    from kmbl_orchestrator.identity.crawl_evidence import _resolve_planner_url
+
+    urls: list[str] = []
+    seen: set[str] = set()
+
+    def _add_many(raw_value: Any) -> None:
+        if not isinstance(raw_value, list):
+            return
+        for item in raw_value:
+            if not isinstance(item, str) or not item.strip():
+                continue
+            resolved = _resolve_planner_url(item, root_url)
+            if resolved and resolved not in seen:
+                seen.add(resolved)
+                urls.append(resolved)
+
+    def _walk(node: Any) -> None:
+        if not isinstance(node, dict):
+            return
+        _add_many(node.get("selected_urls"))
+        updated_state = node.get("updated_state")
+        if isinstance(updated_state, dict):
+            _add_many(updated_state.get("selected_urls"))
+        proposed_changes = node.get("proposed_changes")
+        if isinstance(proposed_changes, dict):
+            _add_many(proposed_changes.get("selected_urls"))
+
+    _walk(graph_result.get("build_candidate"))
+    _walk(graph_result.get("raw_generator_output"))
+    return urls
 
 
 def _collect_allowed_domains(state: "CrawlStateRecord") -> set[str]:

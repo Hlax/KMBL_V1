@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from kmbl_orchestrator.config import Settings
+from kmbl_orchestrator.runtime.habitat_lifecycle import (
+    clear_registry_for_tests,
+)
 from kmbl_orchestrator.runtime.preview_reachability import (
     classify_preview_url_host,
     manifest_first_evaluator_grounding_satisfied,
@@ -10,6 +13,10 @@ from kmbl_orchestrator.runtime.preview_reachability import (
     summary_v2_supports_offline_evaluator_grounding,
 )
 from kmbl_orchestrator.runtime.session_staging_links import resolve_evaluator_preview_resolution
+
+
+def setup_function() -> None:
+    clear_registry_for_tests()
 
 
 def test_classify_localhost_vs_private_vs_public() -> None:
@@ -36,10 +43,11 @@ def test_resolve_localhost_operator_browser_none_allow_private_restores() -> Non
         thread_id="t",
         build_candidate={},
     )
-    assert r["operator_preview_url"] == "http://127.0.0.1:8010/orchestrator/runs/g/candidate-preview"
+    assert r["operator_preview_url"] == "http://127.0.0.1:8010/orchestrator/runs/g/staging-preview"
     assert r["preview_url"] is None
     assert r["preview_grounding_mode"] == "operator_local_only"
     assert r["preview_url_browser_reachable_expected"] is False
+    assert r["canonical_preview_fallback"] is True
 
     s2 = Settings(
         orchestrator_public_base_url="http://127.0.0.1:8010",
@@ -51,9 +59,25 @@ def test_resolve_localhost_operator_browser_none_allow_private_restores() -> Non
         thread_id="t",
         build_candidate={},
     )
-    assert r2["preview_url"] == "http://127.0.0.1:8010/orchestrator/runs/g/candidate-preview"
+    assert r2["preview_url"] == "http://127.0.0.1:8010/orchestrator/runs/g/staging-preview"
     assert r2["preview_grounding_mode"] == "browser_reachable"
     assert r2["preview_url_browser_reachable_expected"] is True
+
+
+def test_public_build_candidate_preview_used_when_no_public_orchestrator_base() -> None:
+    s = Settings(
+        orchestrator_public_base_url="",
+        kmbl_env="production",
+    )
+    r = resolve_evaluator_preview_resolution(
+        s,
+        graph_run_id="g",
+        thread_id="t",
+        build_candidate={"preview_url": "https://preview.example.com/run/g"},
+    )
+    assert r["preview_url"] == "https://preview.example.com/run/g"
+    assert r["preview_url_source"] == "build_candidate_preview_url"
+    assert r["preview_grounding_mode"] == "browser_reachable"
 
 
 def test_manifest_first_grounding_offline_summary() -> None:

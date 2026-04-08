@@ -26,16 +26,18 @@ class EvidenceTier:
 
     VERIFIED_FETCH = 1
     SELECTED_BY_PLANNER = 2
-    BUILD_SPEC_STRUCTURED = 3
-    RAW_PAYLOAD_TEXT = 4
-    FRONTIER_FALLBACK = 5
+    SELECTED_BY_SESSION_OUTPUT = 3
+    BUILD_SPEC_STRUCTURED = 4
+    RAW_PAYLOAD_TEXT = 5
+    FRONTIER_FALLBACK = 6
 
     _LABELS: dict[int, str] = {
         1: "verified_fetch",
         2: "selected_by_planner",
-        3: "build_spec_structured",
-        4: "raw_payload_text",
-        5: "frontier_fallback",
+        3: "selected_by_session_output",
+        4: "build_spec_structured",
+        5: "raw_payload_text",
+        6: "frontier_fallback",
     }
 
     @classmethod
@@ -81,6 +83,7 @@ class CrawlAdvancementReport:
     offered_urls: list[str] = field(default_factory=list)
     mentioned_urls: list[str] = field(default_factory=list)
     planner_selected_urls: list[str] = field(default_factory=list)
+    session_selected_urls: list[str] = field(default_factory=list)
     selected_urls: list[str] = field(default_factory=list)
     verified_urls: list[str] = field(default_factory=list)
     downgraded_urls: list[dict[str, str]] = field(default_factory=list)
@@ -100,6 +103,7 @@ class CrawlAdvancementReport:
             "offered_urls": self.offered_urls,
             "mentioned_urls": self.mentioned_urls,
             "planner_selected_urls": self.planner_selected_urls,
+            "session_selected_urls": self.session_selected_urls,
             "selected_urls": self.selected_urls,
             "verified_urls": self.verified_urls,
             "downgraded_urls": self.downgraded_urls,
@@ -258,6 +262,7 @@ def resolve_evidence(
     *,
     offered_urls: list[str],
     planner_selected_urls: list[str] | None = None,
+    session_selected_urls: list[str] | None = None,
     build_spec_urls: list[str],
     raw_payload_urls: list[str],
     root_url: str,
@@ -268,9 +273,10 @@ def resolve_evidence(
     Priority order (strongest first):
       1. verified_fetch       — assigned post-resolution by caller via ``try_upgrade_to_verified``
       2. selected_by_planner  — explicit ``selected_urls`` from planner output ∩ offered
-      3. build_spec_structured — URLs from structured build_spec ∩ offered
-      4. raw_payload_text     — URLs from raw payload ∩ offered (capped + domain-filtered)
-      5. frontier_fallback    — first offered URL
+    3. selected_by_session_output — explicit selected URLs from session output ∩ offered
+    4. build_spec_structured — URLs from structured build_spec ∩ offered
+    5. raw_payload_text     — URLs from raw payload ∩ offered (capped + domain-filtered)
+    6. frontier_fallback    — first offered URL
 
     Returns a full CrawlAdvancementReport for observability.
     """
@@ -278,6 +284,7 @@ def resolve_evidence(
         offered_urls=list(offered_urls),
         mentioned_urls=list(dict.fromkeys(build_spec_urls + raw_payload_urls)),
         planner_selected_urls=list(planner_selected_urls or []),
+        session_selected_urls=list(session_selected_urls or []),
     )
 
     # Build a normalized lookup for offered URLs (FIX 3)
@@ -296,7 +303,23 @@ def resolve_evidence(
             report.evidence_tier_used = EvidenceTier.label(EvidenceTier.SELECTED_BY_PLANNER)
             return report
 
-    # --- Tier 3: build_spec structured ---
+    if session_selected_urls:
+        session_matched = _match_against_offered(session_selected_urls, offered_norm)
+        if session_matched:
+            evidence = [
+                UrlEvidence(
+                    url=u,
+                    tier=EvidenceTier.SELECTED_BY_SESSION_OUTPUT,
+                    source="selected_by_session_output",
+                )
+                for u in session_matched
+            ]
+            report.final_visited = evidence
+            report.selected_urls = session_matched
+            report.evidence_tier_used = EvidenceTier.label(EvidenceTier.SELECTED_BY_SESSION_OUTPUT)
+            return report
+
+    # --- Tier 4: build_spec structured ---
     bs_matched = _match_against_offered(build_spec_urls, offered_norm)
     if bs_matched:
         evidence = [
@@ -308,7 +331,7 @@ def resolve_evidence(
         report.evidence_tier_used = EvidenceTier.label(EvidenceTier.BUILD_SPEC_STRUCTURED)
         return report
 
-    # --- Tier 4: raw payload text (with guards) ---
+    # --- Tier 5: raw payload text (with guards) ---
     rp_matched = _match_against_offered(raw_payload_urls, offered_norm)
     if rp_matched:
         # Guard 1: same-domain or allowed
@@ -332,7 +355,7 @@ def resolve_evidence(
             report.evidence_tier_used = EvidenceTier.label(EvidenceTier.RAW_PAYLOAD_TEXT)
             return report
 
-    # --- Tier 5: frontier fallback ---
+    # --- Tier 6: frontier fallback ---
     if offered_urls:
         fallback = offered_urls[0]
         report.final_visited = [

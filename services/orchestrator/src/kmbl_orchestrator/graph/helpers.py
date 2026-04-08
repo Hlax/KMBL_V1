@@ -407,11 +407,13 @@ def legacy_would_route_to_planner_on_iterate(
 
 
 def compute_hard_replan_reason(state: dict[str, Any]) -> str | None:
-    """Deterministic replan triggers (new build_spec) — independent of pivot/stagnation heuristics."""
+    """Explicit same-session replan triggers only."""
     ei = state.get("event_input") if isinstance(state.get("event_input"), dict) else {}
     cons = ei.get("constraints") if isinstance(ei.get("constraints"), dict) else {}
     if cons.get("kmbl_force_replan") is True:
         return "operator_force_replan"
+    if cons.get("kmbl_explicit_replan") is True:
+        return "operator_explicit_replan"
 
     ev = state.get("evaluation_report") if isinstance(state.get("evaluation_report"), dict) else {}
     issues = ev.get("issues")
@@ -421,19 +423,11 @@ def compute_hard_replan_reason(state: dict[str, Any]) -> str | None:
                 continue
             for key in ("type", "id", "criterion"):
                 v = iss.get(key)
-                if isinstance(v, str) and v.strip().lower() == "build_spec_invalid":
-                    return "evaluator_build_spec_invalid"
-
-    bs = state.get("build_spec") if isinstance(state.get("build_spec"), dict) else {}
-    bst = (bs.get("type") or "").strip().lower()
-    cv_raw = cons.get("canonical_vertical")
-    if isinstance(cv_raw, str) and cv_raw.strip():
-        if bst and cv_raw.strip().lower() != bst:
-            return "canonical_vertical_mismatch"
-
-    # Only when build_spec is present in state but lacks a vertical type (planner output incomplete).
-    if isinstance(state.get("build_spec"), dict) and not (bs.get("type") or "").strip():
-        return "no_recognized_frontend_surface"
+                if not isinstance(v, str):
+                    continue
+                token = v.strip().lower()
+                if token in {"explicit_replan_requested", "operator_explicit_replan"}:
+                    return "evaluator_explicit_replan_requested"
 
     return None
 
@@ -464,8 +458,7 @@ def should_route_to_planner_on_iterate(
 ) -> bool:
     """True when iterate should re-invoke planner (new build_spec) instead of generator-only retry.
 
-    - **Hard replan** (evaluator build_spec_invalid, vertical mismatch, empty type, operator flag)
-      always routes to planner when iterate.
+        - **Explicit replan** signals route to planner when iterate.
     - **Legacy** (pivot / stagnation) only when ``graph_replan_on_iterate_enabled`` is True.
 
     See ``docs/OPERATOR_LOOP_AND_IDENTITY.md``.

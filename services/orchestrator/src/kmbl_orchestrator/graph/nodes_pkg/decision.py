@@ -148,7 +148,7 @@ def decision_router(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
                         f"Weakly-grounded retry cap reached: iteration {iteration} >= cap {weak_cap}. "
                         f"Evaluator grounding mode is '{grounding_mode}' (not browser-reachable). "
                         "Routing to stage (degraded) to avoid token waste on artifact-only feedback loops. "
-                        "Set KMBL_ORCHESTRATOR_PUBLIC_BASE_URL to a tunnel URL for browser-grounded evaluation, "
+                        "Provide a browser-reachable preview via KMBL_ORCHESTRATOR_PUBLIC_BASE_URL or a public build_candidate preview URL, "
                         "or increase KMBL_WEAKLY_GROUNDED_MAX_ITERATIONS if more retries are needed."
                     ),
                     "evaluation_status": status,

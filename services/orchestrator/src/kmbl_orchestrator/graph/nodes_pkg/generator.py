@@ -704,7 +704,9 @@ def generator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             detail = {
                 "status": "failed",
                 "error_kind": "contract_failure",
+                "code": cf["code"],
                 "message": cf["message"],
+                "recoverable": bool(cf.get("recoverable", False)),
                 "details": {"code": cf["code"], "contract_failure": cf},
             }
             _persist_invocation_failure(

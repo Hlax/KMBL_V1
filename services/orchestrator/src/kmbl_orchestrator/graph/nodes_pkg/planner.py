@@ -28,6 +28,9 @@ from kmbl_orchestrator.graph.state import GraphState
 from kmbl_orchestrator.normalize import normalize_planner_output
 from kmbl_orchestrator.normalize.planner_canonicalize import canonicalize_planner_raw
 from kmbl_orchestrator.runtime.cool_generation_lane import apply_cool_generation_lane_presets
+from kmbl_orchestrator.runtime.immersive_contract_hardening import (
+    harden_immersive_planner_output,
+)
 from kmbl_orchestrator.runtime.static_vertical_invariants import (
     WEBGL_EXPERIENCE_MODES,
     clamp_experience_mode_for_static_vertical,
@@ -409,6 +412,10 @@ def planner_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         thread_id=tid,
     )
 
+    raw, immersive_meta = harden_immersive_planner_output(raw, ei_habitat)
+    if immersive_meta is not None:
+        raw.setdefault("_kmbl_planner_metadata", {})["immersive_contract_hardening"] = immersive_meta
+
     prior_fp: str | None = None
     if effective in ("fresh_start", "rebuild_informed") and iteration_idx == 0:
         ws_reset = get_working_staging_for_thread_resilient(
@@ -459,12 +466,18 @@ def planner_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         )
     else:
         h = raw.get("_kmbl_planner_metadata", {}).get("interactive_build_spec_hardening")
-        if isinstance(h, dict) and h.get("interactive_vertical"):
+        ih = raw.get("_kmbl_planner_metadata", {}).get("immersive_contract_hardening")
+        if (isinstance(h, dict) and h.get("interactive_vertical")) or isinstance(ih, dict):
+            payload: dict[str, Any] = {}
+            if isinstance(h, dict):
+                payload["hardening"] = h
+            if isinstance(ih, dict):
+                payload["immersive_contract_hardening"] = ih
             append_graph_run_event(
                 ctx.repo,
                 gid,
                 RunEventType.INTERACTIVE_BUILD_SPEC_NORMALIZED,
-                {"hardening": h},
+                payload,
                 thread_id=tid,
             )
 

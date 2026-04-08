@@ -101,9 +101,10 @@ class TestEvaluatorPreviewCoherence:
         expected_staging = f"http://127.0.0.1:9090/orchestrator/runs/{gid}/staging-preview"
         assert canon["canonical_preview_url"] == expected_staging
         assert canon["canonical_preview_fallback"] is True
-        # Evaluator operator URL uses candidate path (always tries candidate first)
-        expected_candidate = f"http://127.0.0.1:9090/orchestrator/runs/{gid}/candidate-preview"
-        assert ev_res["operator_preview_url"] == expected_candidate
+        # Evaluator now follows the same canonical staging fallback instead of a dead candidate path.
+        assert ev_res["operator_preview_url"] == expected_staging
+        assert ev_res["canonical_preview_url"] == expected_staging
+        assert ev_res["canonical_preview_fallback"] is True
         # Browser preview_url is None because localhost is not browser-reachable by default
         assert ev_res["preview_url"] is None
         assert ev_res["preview_grounding_mode"] == "operator_local_only"

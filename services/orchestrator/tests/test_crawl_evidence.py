@@ -79,7 +79,7 @@ class TestEvidenceTier:
 
     def test_labels(self) -> None:
         assert EvidenceTier.label(1) == "verified_fetch"
-        assert EvidenceTier.label(5) == "frontier_fallback"
+        assert EvidenceTier.label(6) == "frontier_fallback"
         assert "unknown" in EvidenceTier.label(99)
 
 
@@ -289,7 +289,7 @@ class TestProvenanceRecording:
         assert norm_url in state.visit_provenance
         prov = state.visit_provenance[norm_url]
         assert prov["source"] == "build_spec_structured"
-        assert prov["tier"] == 3
+        assert prov["tier"] == EvidenceTier.BUILD_SPEC_STRUCTURED
         assert prov["run_id"] == "run-123"
         assert "recorded_at" in prov
 
@@ -312,13 +312,13 @@ class TestProvenanceRecording:
         record_page_visit(
             repo, iid, "https://example.com/a",
             provenance_source="build_spec_structured",
-            provenance_tier=3,
+            provenance_tier=EvidenceTier.BUILD_SPEC_STRUCTURED,
             run_id="run-1",
         )
         state = record_page_visit(
             repo, iid, "https://example.com/b",
             provenance_source="frontier_fallback",
-            provenance_tier=5,
+            provenance_tier=EvidenceTier.FRONTIER_FALLBACK,
             run_id="run-2",
         )
         # Both provenance entries exist
@@ -343,7 +343,7 @@ class TestCrawlAdvancementReport:
         d = report.to_dict()
         assert d["offered_urls"] == ["https://a.com"]
         assert d["evidence_tier_used"] == "build_spec_structured"
-        assert d["final_visited"][0]["tier"] == 3
+        assert d["final_visited"][0]["tier"] == EvidenceTier.BUILD_SPEC_STRUCTURED
         assert d["final_visited"][0]["source"] == "build_spec_structured"
 
 
@@ -615,11 +615,24 @@ class TestPlannerSelectedUrls:
         report = resolve_evidence(
             offered_urls=["https://example.com/a", "https://example.com/b"],
             planner_selected_urls=["https://example.com/a"],
+            session_selected_urls=["https://example.com/b"],
             build_spec_urls=[],
             raw_payload_urls=["https://example.com/b"],
             root_url="https://example.com",
         )
         assert report.evidence_tier_used == "selected_by_planner"
+
+    def test_session_selected_beats_build_spec_when_planner_omitted(self) -> None:
+        report = resolve_evidence(
+            offered_urls=["https://example.com/a", "https://example.com/b"],
+            planner_selected_urls=[],
+            session_selected_urls=["https://example.com/b"],
+            build_spec_urls=["https://example.com/a"],
+            raw_payload_urls=[],
+            root_url="https://example.com",
+        )
+        assert report.evidence_tier_used == "selected_by_session_output"
+        assert report.final_visited[0].url == "https://example.com/b"
 
     def test_fallback_not_fired_when_selected_exists(self) -> None:
         """When planner selects URLs, fallback is NOT used."""
@@ -650,6 +663,7 @@ class TestPlannerSelectedUrls:
         report = resolve_evidence(
             offered_urls=["https://example.com/a"],
             planner_selected_urls=["https://example.com/a"],
+            session_selected_urls=[],
             build_spec_urls=[],
             raw_payload_urls=[],
             root_url="https://example.com",
@@ -657,6 +671,19 @@ class TestPlannerSelectedUrls:
         assert report.planner_selected_urls == ["https://example.com/a"]
         d = report.to_dict()
         assert d["planner_selected_urls"] == ["https://example.com/a"]
+
+    def test_session_selected_urls_in_report(self) -> None:
+        report = resolve_evidence(
+            offered_urls=["https://example.com/a"],
+            planner_selected_urls=[],
+            session_selected_urls=["https://example.com/a"],
+            build_spec_urls=[],
+            raw_payload_urls=[],
+            root_url="https://example.com",
+        )
+        assert report.session_selected_urls == ["https://example.com/a"]
+        d = report.to_dict()
+        assert d["session_selected_urls"] == ["https://example.com/a"]
 
     def test_integration_selected_by_planner_provenance(self) -> None:
         """End-to-end: planner selected_urls get tier-2 provenance."""

@@ -52,6 +52,62 @@ _DEFAULT_PATTERN_RULES: tuple[str, ...] = (
 )
 
 
+def build_generator_reference_doc_hints(
+    build_spec: dict[str, Any],
+    event_input: dict[str, Any],
+) -> dict[str, Any]:
+    """Determine which agent workspace docs the generator should load for this run.
+
+    Injected as ``kmbl_generator_reference_docs`` in
+    ``summarize_execution_contract_for_generator``.  The agent reads ``required``
+    unconditionally and ``recommended`` when context budget allows.
+    """
+    ec = build_spec.get("execution_contract") if isinstance(build_spec.get("execution_contract"), dict) else {}
+    cool = cool_generation_lane_active(event_input, build_spec)
+    gs = ec.get("geometry_system")
+    steps = build_spec.get("steps")
+    n_steps = len(steps) if isinstance(steps, list) else 0
+    habitat = ec.get("habitat_strategy")
+    em = (build_spec.get("experience_mode") or "").lower()
+    immersive = em in ("immersive_identity_experience", "immersive_spatial_portfolio")
+    libs = ec.get("allowed_libraries") or []
+    non_default_lib = set(libs) - {"three", "gsap"}
+
+    required: list[str] = []
+    recommended: list[str] = []
+    reasons: list[str] = []
+
+    if cool:
+        required.append("EVALUATOR_GUIDANCE")
+        reasons.append("cool_generation_lane_active=true")
+    if cool or gs or immersive:
+        recommended.append("REFERENCE_PATTERNS")
+        reasons.append("geometry_system or immersive experience_mode or cool lane")
+    if gs or immersive:
+        recommended.append("GEOMETRY")
+        reasons.append("geometry_system present or immersive mode")
+    if non_default_lib or (isinstance(gs, dict) and gs.get("mode") not in (None, "three")):
+        recommended.append("LIBRARIES")
+        reasons.append("non-default library stack")
+    if n_steps >= 5 or habitat:
+        recommended.append("COOL_LANE_STRATEGY")
+        reasons.append(f"steps={n_steps} or habitat_strategy present")
+
+    # Deduplicate while preserving order
+    seen: set[str] = set()
+    unique_reasons: list[str] = []
+    for r in reasons:
+        if r not in seen:
+            seen.add(r)
+            unique_reasons.append(r)
+
+    return {
+        "required": required,
+        "recommended": recommended,
+        "trigger_reason": "; ".join(unique_reasons) or "standard run",
+    }
+
+
 def cool_generation_lane_active(
     event_input: dict[str, Any],
     build_spec: dict[str, Any],
@@ -163,6 +219,8 @@ def summarize_execution_contract_for_generator(build_spec: dict[str, Any]) -> di
         out["primary_lane_default_libraries"] = list(PRIMARY_LANE_DEFAULT_LIBRARIES)
         out["generator_library_policy"] = build_generator_library_policy_payload(ec, build_spec)
         out["escalation_lane"] = ec.get("escalation_lane")
+    # Observability: which agent workspace docs should the generator load for this run
+    out["kmbl_generator_reference_docs"] = build_generator_reference_doc_hints(build_spec, {})
     return out
 
 
@@ -553,6 +611,7 @@ __all__ = [
     "apply_cool_generation_lane_presets",
     "apply_cool_lane_execution_acknowledgment_gates",
     "apply_cool_lane_silent_acknowledgment_gate",
+    "build_generator_reference_doc_hints",
     "cool_generation_lane_active",
     "literal_success_checks_preview_strings",
     "reference_pattern_to_literal_token",

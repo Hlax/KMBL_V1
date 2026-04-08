@@ -9,9 +9,51 @@ KMBL invokes this workspace with a **JSON payload**; you return **one JSON objec
 SOUL is policy-only. Load heavy references only when needed to avoid truncation.
 
 **Conditional reads (load when payload signals require):**
-- **LIBRARIES.md** — when `kmbl_execution_contract.geometry_system` or `allowed_libraries` references a non-default library stack. Contains per-geometry-mode library routing, anti-patterns, and scene manifest format.
-- **GEOMETRY.md** — when `experience_mode` is `immersive_identity_experience` / `immersive_spatial_portfolio` or `geometry_system` is present. Contains scene topology reference, composition principles, primitive selection discipline, and scene manifest emission format.
-- For mixed-lane execution contracts (`execution_contract.lane_mix` / `canvas_system` present), read both **GEOMETRY.md** and **LIBRARIES.md** before composing the final JSON.
+
+### Geometry + Library stack
+- **GEOMETRY.md** — when `experience_mode` is `immersive_identity_experience` / `immersive_spatial_portfolio`, or `kmbl_execution_contract.geometry_system` is present. Contains scene topology reference, composition principles, primitive selection discipline, and scene manifest emission format.
+- **LIBRARIES.md** — when `kmbl_execution_contract.geometry_system.mode` is non-default (`svg`, `pixi`, `diagram`, `babylon`, `hybrid_three_svg`) **or** `allowed_libraries` contains anything beyond `["three","gsap"]` **or** `generator_library_policy.flags.gaussian_splat_lane_active` is `true`. Contains per-geometry-mode library routing, anti-patterns, practical selection guide, CDN links, and token-aware strategy.
+- For mixed-lane execution contracts (`execution_contract.lane_mix` / `canvas_system` present), read both **GEOMETRY.md** and **LIBRARIES.md** before composing.
+
+### Cool generation lane (immersive / interactive experiences)
+- **EVALUATOR_GUIDANCE.md** — **always** when `cool_generation_lane_active` is `true` (payload field `kmbl_generator_reference_docs` will list it, or check `event_input.cool_generation_lane == true` or `execution_contract.lane == "cool_generation_v1"`). Contains what passes vs. fails evaluation for immersive experiences, evaluation checklist, passing topology examples, and pre-emit checklist. **Read before composing any immersive artifact.**
+- **REFERENCE_PATTERNS.md** — when `kmbl_execution_contract.geometry_system` is present **or** `experience_mode` is `immersive_identity_experience` / `immersive_spatial_portfolio` **or** `payload.kmbl_generator_reference_docs` includes `REFERENCE_PATTERNS`. Contains copy-adaptable code for Constellation, Editorial Cosmos, Light Table, Immersive Stage, D3 force graph, hybrid 3D+SVG, multi-zone, and multi-run patterns.
+- **COOL_LANE_STRATEGY.md** — when `build_spec.steps` has **5 or more** entries, **or** `execution_contract.habitat_strategy` is non-null, **or** `payload.kmbl_generator_reference_docs` includes `COOL_LANE_STRATEGY`. Contains multi-zone in-page strategy (scroll-driven zones), multi-run habitat batching, token budget planning, and pass/fail decision tree. Read **before** choosing between single-page and multi-run approaches.
+
+### Read order for immersive interactive runs
+When `cool_generation_lane_active` is true:
+1. **BOOTSTRAP.md** → **SOUL.md** (policy only, load first)
+2. **EVALUATOR_GUIDANCE.md** (what passes evaluation)
+3. **GEOMETRY.md** (if `geometry_system` present)
+4. **REFERENCE_PATTERNS.md** (concrete code patterns for your scene topology)
+5. **COOL_LANE_STRATEGY.md** (if ≥5 steps or habitat_strategy present)
+6. **LIBRARIES.md** (if non-default lib stack)
+7. Compose JSON response
+
+### Observability: `kmbl_generator_reference_docs`
+Orchestrator may inject `kmbl_generator_reference_docs` into the payload — a list of workspace doc names the orchestrator determined are relevant for this run. When present, load each named doc. Example:
+```json
+{
+  "kmbl_generator_reference_docs": {
+    "recommended": ["EVALUATOR_GUIDANCE", "REFERENCE_PATTERNS", "GEOMETRY", "LIBRARIES"],
+    "required": ["EVALUATOR_GUIDANCE"],
+    "trigger_reason": "cool lane + immersive + geometry_system present"
+  }
+}
+```
+Always read `required` docs. Read `recommended` docs when context budget allows.
+
+### Observability: emit `generator_docs_read`
+When reading conditional docs (in cool-lane or immersive runs), emit a `generator_docs_read` field in your JSON response. This allows evaluator and orchestrator to verify routing:
+
+```json
+{
+  "generator_docs_read": ["EVALUATOR_GUIDANCE", "REFERENCE_PATTERNS", "GEOMETRY"],
+  "artifact_outputs": [...]
+}
+```
+
+This is **not** a machine-enforced field — it is traceability only. Evaluator uses it for observability but will not reject runs that omit it.
 
 **Do not** use file-read tools to open paths like `docs/.../*.md`, repo checkouts, or **`node_modules/openclaw/...`** — those paths are not part of your generator **workspace** and will fail (**ENOENT**). Policy for this role is only in these instruction files and the inbound JSON **payload** (especially **`workspace_context`**).
 

@@ -54,6 +54,192 @@ Default when `geometry_system` absent: **`three` + `gsap`**.
 - **React Three Fiber:** npm-build-required; preview pipeline does not support. Do not use.
 - **Babylon for generic sites:** overkill; adds large bundle; use only for physics/engine-specific briefs.
 - **Purple/teal gradient default:** only use if identity_brief.palette_hex supports it. Generic developer gradients are the palette equivalent of tutorial geometry.
+- **Multiple geometry_modes in one run:** Do not mix `three`, `svg`, `pixi`, and `babylon` in one artifact. Pick one and commit.
+- **Asset bottlenecks:** Do not embed large texture maps inline; use CDN or relative paths under `component/assets/`. Keep base64 data URIs under 50KB.
+- **Unused library bloat:** If you only need `three` + `gsap` for a scene, do not load `postprocessing`, `troika-three-text`, and `camera-controls` speculatively.
+
+## Practical library selection guide
+
+### When to use Three.js (default)
+- Identity involves **spatial, 3D, or immersive** themes
+- Scene topology is `constellation`, `editorial_cosmos`, `light_table`, `immersive_stage`, `layered_world`, or similar
+- Interaction is **pointer-driven parallax**, **scroll-linked depth**, or **object-centric** rotation
+- Best for: hero subjects, abstract geometry, spatial navigation, 3D text
+
+**Example identity signals triggering Three.js:**
+- "minimalist 3D aesthetic"
+- "interactive spatial portfolio"
+- "cinematic depth"
+- "particle/constellation networking"
+
+**Approximate bundle size:** ~200KB gzipped (includes animation helpers)
+
+---
+
+### When to use SVG (svg.js or raw SVG)
+- Identity is **2D, illustrative, or graphic-first**
+- Scene topology is `diagram` or `interactive_network` or flat/poster-like
+- Content is **shapes, paths, text vectors** (no photographic elements)
+- Interaction is **draw/animate strokes**, **node/link manipulation**, or **interactive infographic**
+- Best for: brand marks, network graphs, data viz, illustrative layouts
+
+**Example identity signals triggering SVG:**
+- "graphic design, not spatial"
+- "vector illustration heavy"
+- "systems/network visualization"
+- "hand-drawn or geometric mark"
+
+**When to choose svg.js:** Dynamic SVG generation (e.g., growing paths, DOM-heavy animation).
+**When to use raw SVG:** Static or CSS-animated content (simpler, smaller footprint).
+
+**Approximate bundle size:** ~50KB (if using svg.js); raw SVG is zero overhead.
+
+---
+
+### When to use D3 (diagram mode)
+- Identity involves **data relationships, networks, hierarchies, or graph structures**
+- Scene topology is `graph_layout` or `network_field`
+- Interaction is **zoom/pan**, **node highlight**, **force simulation**, or **hierarchy navigation**
+- Best for: org charts, dependency graphs, knowledge maps, relational diagrams
+
+**Example identity signals triggering D3:**
+- "networked / distributed"
+- "systems thinking"
+- "knowledge mapping"
+- "force-directed relationships"
+
+**Modular import pattern (lightweight):**
+```javascript
+import * as d3 from 'https://cdn.jsdelivr.net/npm/d3@7/+esm';
+// or pick individual modules
+import { forceSimulation, forceLink } from 'https://cdn.jsdelivr.net/npm/d3-force@3/+esm';
+```
+
+**Approximate bundle size:** ~100–200KB depending on submodules; ESM + tree-shake reduces overhead.
+
+---
+
+### When to use PixiJS (pixi mode)
+- Identity is **2D canvas animation, sprite-heavy, or frame-based-motion**
+- Scene topology is `motion_field` or **2D-first** design
+- Interaction is **particle effects**, **sprite pooling**, **high-frame-rate animation**,or **game-like motion**
+- Best for: motion branding, sprite atlases, real-time particle systems, playful 2D experiences
+
+**Example identity signals triggering PixiJS:**
+- "playful, energetic 2D animation"
+- "sprite-driven or frame-animation"
+- "high-performance particle field"
+- "arcade / game aesthetic"
+
+**Approximate bundle size:** ~200KB gzipped (includes renderer, stage, sprites).
+
+---
+
+### When to use Babylon.js (babylon mode)
+- Identity is **advanced 3D: physics, game engine behavior, or complex rendering**
+- Brief explicitly requires **rigid body physics**, **collision detection**, or **game loop**
+- Scene topology is `object_theater` with **physics-driven interactions**
+- Interaction is **throwing objects**, **gravity simulation**, or **physics-based animation**
+- Best for: product showcases with physics, VR-like experiences, complex mechanical scenes
+
+**Example identity signals triggering Babylon:**
+- "physics-driven interaction"
+- "game-like or kinetic experience"
+- "complex 3D mechanics"
+- Only if brief **explicitly** calls for physics (do not default to Babylon)
+
+**Note:** Bundle is larger (~800K–1.2MB); use only when truly necessary.
+
+**Approximate bundle size:** ~800KB–1.2MB gzipped (full engine); use tree-shaking or trimmed build if possible.
+
+---
+
+### When to use Gaussian Splat (escalation, rare)
+- **Only when `execution_contract.escalation_lane == "gaussian_splat_v1"`**
+- Identity is based on **captured / scanned 3D** (photogrammetry, NeRF, real-world scanning)
+- Brief explicitly calls for **"captured 3D reality"** or **"scanned environment"**
+- Do **not** use for generic 3D or default immersive experiences
+
+**Library:** `https://github.com/antimatter15/gaussian-splats-3d` (Three-compatible wrapper)
+
+**Asset pipeline:** `.splat` or `.ply` files under `component/assets/`
+
+**Bundle overhead:** Splat assets vary; typical splat: 10–50MB (delivered externally, not embedded)
+
+**Example identity signals (rare):** 
+- "photographic 3D reality"
+- "scanned environment or monument"
+- Only if captured assets are provided or plan-signed
+
+---
+
+### When to use Hybrid (Three.js + SVG)
+- Primary experience is **3D scene**, but **UI/annotations are 2D**
+- Example: 3D object with SVG labels, or 3D scene with 2D overlay controls
+- Interaction: **pointer drives 3D; overlay updates 2D annotations**
+
+**Pattern:**
+```html
+<div style="position: relative;">
+  <canvas id="three-stage"></canvas>
+  <svg id="annotations"></svg> <!-- positioned absolutely, screen-space -->
+</div>
+```
+
+**Use when:** 3D scene needs dynamic 2D labels, callouts, or UI that stays fixed on screen while 3D rotates.
+
+**Avoid:** Mixing two full-featured 3D renderers (e.g., Three.js + Babylon side-by-side) — choose one.
+
+---
+
+## Library CDN links (recommended)
+
+| Library | CDN | Version | Bundle size |
+|---------|-----|---------|---|
+| Three.js | `https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js` | 0.160.0 | ~200KB |
+| GSAP | `https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js` | 3.12.5 | ~40KB |
+| D3 (full) | `https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js` | 7.x | ~200KB |
+| D3 (modular) | `https://cdn.jsdelivr.net/npm/d3@7/+esm` | 7.x | varies (~50-100KB per module) |
+| SVG.js | `https://cdn.jsdelivr.net/npm/svg.js@3/dist/svg.min.js` | 3.x | ~50KB |
+| PixiJS | `https://cdn.jsdelivr.net/npm/pixi.js@7/dist/pixi.min.js` | 7.x | ~200KB |
+| Babylon.js | `https://cdn.babylonjs.com/babylon.js` | Nightly or stable | ~800KB–1.2MB |
+| Gaussian Splats 3D | `https://cdn.jsdelivr.net/npm/gaussian-splats-3d@0.7.1/build/index.js` | 0.7.1 | ~50KB + asset overhead |
+
+---
+
+## Scene manifest library_stack field
+
+Always declare the actual library stack in scene manifest:
+
+```json
+{
+  "library_stack": ["three", "gsap"],
+  "optional_libraries": []
+}
+```
+
+or
+
+```json
+{
+  "library_stack": ["d3"],
+  "optional_libraries": ["jointjs"]
+}
+```
+
+Evaluator uses this to verify **no undeclared escalations** (e.g., if manifest says `three` only, but response loads Babylon, evaluator flags).
+
+---
+
+## Token-aware library strategy
+
+If approach token budget constraints:
+
+1. **Minimize library count:** One primary + one animation (e.g., `three` + `gsap`, not `three` + `gsap` + `postprocessing` + `troika`).
+2. **Use CDN always:** Zero overhead for serving from CDN. Local bundling requires npm/build overhead.
+3. **Avoid image-heavy assets:** Textures, splat files, photographic planes all add bulk to artifact size + load time. Prefer procedural geometry or stylized visuals.
+4. **Defer optional escalations:** If unclear whether `troika-three-text` or `postprocessing` is necessary, start without. Add only if manifest justifies.
+5. **Batch multi-lib experiences:** If brief requires both 3D (`three`) and data viz (`d3`), split across multi-run habitat (primary: 3D, secondary: diagram).
 
 ## Scene manifest requirement (cool lane)
 

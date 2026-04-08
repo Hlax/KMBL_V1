@@ -117,7 +117,7 @@ class TestSoftenPortfolioEvaluationTargets:
         ei = self._identity_url_event_input()
         out, fixes = soften_portfolio_evaluation_targets(raw, ei)
         assert fixes == []
-        assert out is raw  # no mutation, same object
+        assert out is raw  # no mutation path returns original object
 
     def test_noop_when_not_identity_url_scenario(self) -> None:
         raw = {
@@ -129,7 +129,7 @@ class TestSoftenPortfolioEvaluationTargets:
         ei = {"scenario": "kmbl_static_frontend_pass_n_v1", "constraints": {"canonical_vertical": "static_frontend_file_v1"}}
         out, fixes = soften_portfolio_evaluation_targets(raw, ei)
         assert fixes == []
-        assert out is raw
+        assert out is raw  # no mutation path returns original object
 
     def test_noop_when_interactive_vertical(self) -> None:
         raw = {

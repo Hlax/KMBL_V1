@@ -432,6 +432,45 @@ def compute_hard_replan_reason(state: dict[str, Any]) -> str | None:
     return None
 
 
+def compute_identity_static_structural_replan_reason(state: dict[str, Any]) -> str | None:
+    """Scoped replan trigger for identity-url static runs with structural-stuck feedback.
+
+    This provides one bounded planner replan opportunity when evaluator feedback
+    indicates layout sameness (not general polish work).
+    """
+    from kmbl_orchestrator.runtime.static_vertical_invariants import is_static_frontend_vertical
+
+    event_input = state.get("event_input") if isinstance(state.get("event_input"), dict) else {}
+    scenario = event_input.get("scenario")
+    if scenario != "kmbl_identity_url_static_v1":
+        return None
+
+    build_spec = state.get("build_spec") if isinstance(state.get("build_spec"), dict) else {}
+    if not is_static_frontend_vertical(build_spec, event_input):
+        return None
+
+    iteration_index = int(state.get("iteration_index") or 0)
+    if iteration_index > 1:
+        return None
+
+    report = state.get("evaluation_report") if isinstance(state.get("evaluation_report"), dict) else {}
+    issues = report.get("issues")
+    if not isinstance(issues, list):
+        return None
+
+    for issue in issues:
+        if not isinstance(issue, dict):
+            continue
+        for key in ("type", "id", "criterion"):
+            raw = issue.get(key)
+            if not isinstance(raw, str):
+                continue
+            token = raw.strip().lower()
+            if token in {"layout_stagnation", "archetype_mismatch"}:
+                return f"identity_url_static_structural_stuck:{token}"
+    return None
+
+
 def resolve_iterate_planner_routing(
     state: dict[str, Any],
     settings: Settings,
@@ -444,6 +483,9 @@ def resolve_iterate_planner_routing(
     hard = compute_hard_replan_reason(state)
     if hard:
         return True, hard, False
+    structural = compute_identity_static_structural_replan_reason(state)
+    if structural:
+        return True, structural, False
     legacy = legacy_would_route_to_planner_on_iterate(state, settings)
     if settings.graph_replan_on_iterate_enabled and legacy:
         return True, "legacy_pivot_or_stagnation", False

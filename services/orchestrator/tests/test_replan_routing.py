@@ -108,6 +108,90 @@ def test_resolve_iterate_planner_skipped_legacy_flag() -> None:
     assert legacy_would_route_to_planner_on_iterate(st, s) is True
 
 
+def test_identity_url_static_layout_stagnation_routes_to_planner() -> None:
+    s = Settings(graph_replan_on_iterate_enabled=False)
+    st = {
+        "iteration_index": 1,
+        "build_spec": {"type": "static_frontend_file_v1"},
+        "event_input": {"scenario": "kmbl_identity_url_static_v1"},
+        "evaluation_report": {"issues": [{"type": "layout_stagnation"}]},
+    }
+    route, reason, skipped = resolve_iterate_planner_routing(st, s)
+    assert route is True
+    assert reason == "identity_url_static_structural_stuck:layout_stagnation"
+    assert skipped is False
+
+
+def test_identity_url_static_archetype_mismatch_routes_to_planner() -> None:
+    s = Settings(graph_replan_on_iterate_enabled=False)
+    st = {
+        "iteration_index": 1,
+        "build_spec": {"type": "static_frontend_file_v1"},
+        "event_input": {"scenario": "kmbl_identity_url_static_v1"},
+        "evaluation_report": {"issues": [{"type": "archetype_mismatch"}]},
+    }
+    route, reason, skipped = resolve_iterate_planner_routing(st, s)
+    assert route is True
+    assert reason == "identity_url_static_structural_stuck:archetype_mismatch"
+    assert skipped is False
+
+
+def test_identity_url_static_polish_only_preserves_generator_retry() -> None:
+    s = Settings(graph_replan_on_iterate_enabled=False)
+    st = {
+        "iteration_index": 1,
+        "build_spec": {"type": "static_frontend_file_v1"},
+        "event_input": {"scenario": "kmbl_identity_url_static_v1"},
+        "evaluation_report": {"issues": [{"type": "visual_polish"}]},
+    }
+    route, reason, skipped = resolve_iterate_planner_routing(st, s)
+    assert route is False
+    assert reason is None
+    assert skipped is False
+
+
+def test_non_identity_url_stagnation_preserves_existing_behavior() -> None:
+    s = Settings(graph_replan_on_iterate_enabled=False)
+    st = {
+        "iteration_index": 1,
+        "build_spec": {"type": "static_frontend_file_v1"},
+        "event_input": {"scenario": "kmbl_other_static_scenario"},
+        "evaluation_report": {"issues": [{"type": "layout_stagnation"}]},
+    }
+    route, reason, skipped = resolve_iterate_planner_routing(st, s)
+    assert route is False
+    assert reason is None
+    assert skipped is False
+
+
+def test_interactive_lane_preserves_existing_behavior() -> None:
+    s = Settings(graph_replan_on_iterate_enabled=False)
+    st = {
+        "iteration_index": 1,
+        "build_spec": {"type": "interactive_frontend_app_v1"},
+        "event_input": {"scenario": "kmbl_identity_url_static_v1"},
+        "evaluation_report": {"issues": [{"type": "layout_stagnation"}]},
+    }
+    route, reason, skipped = resolve_iterate_planner_routing(st, s)
+    assert route is False
+    assert reason is None
+    assert skipped is False
+
+
+def test_identity_url_static_structural_replan_is_bounded_after_first_replan_window() -> None:
+    s = Settings(graph_replan_on_iterate_enabled=False)
+    st = {
+        "iteration_index": 2,
+        "build_spec": {"type": "static_frontend_file_v1"},
+        "event_input": {"scenario": "kmbl_identity_url_static_v1"},
+        "evaluation_report": {"issues": [{"type": "layout_stagnation"}]},
+    }
+    route, reason, skipped = resolve_iterate_planner_routing(st, s)
+    assert route is False
+    assert reason is None
+    assert skipped is False
+
+
 def test_planner_role_input_accepts_replan_context() -> None:
     from kmbl_orchestrator.contracts.role_inputs import validate_role_input
 

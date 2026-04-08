@@ -43,11 +43,11 @@ def test_resolve_localhost_operator_browser_none_allow_private_restores() -> Non
         thread_id="t",
         build_candidate={},
     )
-    assert r["operator_preview_url"] == "http://127.0.0.1:8010/orchestrator/runs/g/staging-preview"
+    assert r["operator_preview_url"] == "http://127.0.0.1:8010/orchestrator/runs/g/candidate-preview"
     assert r["preview_url"] is None
     assert r["preview_grounding_mode"] == "operator_local_only"
     assert r["preview_url_browser_reachable_expected"] is False
-    assert r["canonical_preview_fallback"] is True
+    assert r["preview_owner"] == "candidate_preview"
 
     s2 = Settings(
         orchestrator_public_base_url="http://127.0.0.1:8010",
@@ -59,7 +59,7 @@ def test_resolve_localhost_operator_browser_none_allow_private_restores() -> Non
         thread_id="t",
         build_candidate={},
     )
-    assert r2["preview_url"] == "http://127.0.0.1:8010/orchestrator/runs/g/staging-preview"
+    assert r2["preview_url"] == "http://127.0.0.1:8010/orchestrator/runs/g/candidate-preview"
     assert r2["preview_grounding_mode"] == "browser_reachable"
     assert r2["preview_url_browser_reachable_expected"] is True
 

@@ -12,7 +12,7 @@ KMBL orchestrates; KiloClaw runs this workspace. The evaluator **assesses only**
 
 ### Browser automation (read-only preview)
 
-When **`preview_url`** is present (orchestrator may set it to the **staging-preview** URL for this run) and criteria/targets warrant it, use **mcporter** Playwright when the gateway exposes it:
+When **`preview_url`** is present (orchestrator sets it to the **canonical reachable preview** for this run, which may be candidate-preview, staging-preview fallback, or a public build-candidate preview URL) and criteria/targets warrant it, use **mcporter** Playwright when the gateway exposes it:
 
 1. `mcporter call playwright.browser_navigate url=<preview_url>`
 2. `mcporter call playwright.browser_snapshot`
@@ -20,6 +20,8 @@ When **`preview_url`** is present (orchestrator may set it to the **staging-prev
 4. `mcporter call playwright.browser_close`
 
 Confirm load health, inspect structure vs **evaluation_targets**, and surface console/runtime issues. Use **`previous_evaluation_report`** when present to compare **visual delta** across iterations. For the **locked static frontend** vertical, KMBL may also attach orchestrator-side preview checks—your narrative in **summary** / **issues** should still align with **what actually rendered**; do not claim **pass** if the preview surface is blank, errored, or missing required visible content.
+
+Do not fabricate or rewrite preview URLs from localhost assumptions. If the provided **`preview_url`** is unreachable and no other payload evidence gives you a truthful public surface, record that limitation and score accordingly.
 
 **Pass X:** “Page loaded” in **metrics** must correspond to a **real** navigation/check when you used browser tooling; if you could not verify load, say so and set **status** accordingly—**KMBL** owns routing and will not treat decorative **metrics** as green lights. If the environment supports it, you may attach **screenshots** as **evaluation evidence** in **artifacts** / **metrics**—evidence only, not a repair step.
 

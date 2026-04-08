@@ -90,15 +90,29 @@ def _detect_libraries(blob: str) -> list[str]:
     return _detect_libraries_artifact(blob)
 
 
+def _extract_tag_text(html: str, tag: str, max_chars: int) -> str:
+    m = re.search(rf"<{tag}[^>]*>([\s\S]*?)</{tag}>", html, re.I)
+    if not m:
+        return ""
+    inner = m.group(1)
+    # Strip nested tags/comments/scripts/styles; keep visible text only.
+    text = re.sub(r"<!--.*?-->", " ", inner, flags=re.S)
+    text = re.sub(r"<script[\s\S]*?</script>", " ", text, flags=re.I)
+    text = re.sub(r"<style[\s\S]*?</style>", " ", text, flags=re.I)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:max_chars]
+
+
 def _html_outline(html: str) -> dict[str, Any]:
     low = html.lower()
     tags = ("main", "header", "footer", "nav", "section", "article", "canvas", "video")
     present = [t for t in tags if f"<{t}" in low or f"<{t} " in low]
-    title_m = re.search(r"<title[^>]*>([^<]{0,120})", html, re.I)
-    h1_m = re.search(r"<h1[^>]*>([^<]{0,160})", html, re.I)
+    title_text = _extract_tag_text(html, "title", 120)
+    h1_text = _extract_tag_text(html, "h1", 160)
     return {
-        "title_text": (title_m.group(1).strip() if title_m else "")[:120],
-        "h1_text": (h1_m.group(1).strip() if h1_m else "")[:160],
+        "title_text": title_text,
+        "h1_text": h1_text,
         "landmark_tags": present[:12],
     }
 

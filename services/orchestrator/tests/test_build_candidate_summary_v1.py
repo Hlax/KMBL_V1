@@ -112,6 +112,21 @@ def test_summary_pixi_lane() -> None:
     assert "pixi" in s["libraries_detected"]
 
 
+def test_summary_extracts_nested_h1_text() -> None:
+    arts = [
+        {
+            "role": "static_frontend_file_v1",
+            "path": "component/preview/index.html",
+            "language": "html",
+            "content": "<html><body><h1><span>Meow Wolf</span> Immersive Story</h1></body></html>",
+        },
+    ]
+    bs = {"type": "interactive_frontend_app_v1"}
+    ei = {"constraints": {"canonical_vertical": "interactive_frontend_app_v1"}}
+    s = build_build_candidate_summary_v1(arts, build_spec=bs, event_input=ei)
+    assert s["sections_or_modules"]["h1_text"] == "Meow Wolf Immersive Story"
+
+
 def test_strip_artifacts_omits_content() -> None:
     slim = strip_artifact_contents(_artifacts_three_gsap())
     assert all("content" not in x for x in slim)

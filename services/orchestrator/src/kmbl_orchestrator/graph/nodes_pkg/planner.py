@@ -57,6 +57,8 @@ from kmbl_orchestrator.runtime.generator_iteration_compact_v1 import (
     build_spec_digest,
     compact_crawl_context_for_replan,
 )
+from kmbl_orchestrator.identity.crawl_evidence import match_planner_selections_to_offered
+from kmbl_orchestrator.identity.page_fetch import extract_urls_from_build_spec
 from kmbl_orchestrator.staging.facts import (
     build_working_staging_facts,
     working_staging_facts_to_payload,
@@ -294,6 +296,23 @@ def planner_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     # extract_planner_selected_urls() can find them regardless of where
     # the planner placed them.  Merge with any already inside build_spec.
     _hoist_selected_urls_into_build_spec(raw)
+
+    selected_urls_backfill = _backfill_selected_urls_from_crawl_context(
+        raw,
+        cc=crawl_context if isinstance(crawl_context, dict) else None,
+        identity_url=identity_url,
+        iteration_index=iteration_idx,
+    )
+    if selected_urls_backfill:
+        md = raw.setdefault("_kmbl_planner_metadata", {})
+        md["selected_urls_backfill"] = selected_urls_backfill
+        append_graph_run_event(
+            ctx.repo,
+            gid,
+            RunEventType.PLANNER_CRAWL_COMPLIANCE,
+            {"kind": "selected_urls_backfill", **selected_urls_backfill},
+            thread_id=tid,
+        )
 
     wire_fixes = canonicalize_planner_raw(raw)
     if wire_fixes:
@@ -593,3 +612,58 @@ def _hoist_selected_urls_into_build_spec(raw: dict[str, Any]) -> None:
             merged.append(u)
 
     bs["selected_urls"] = merged
+
+
+def _backfill_selected_urls_from_crawl_context(
+    raw: dict[str, Any],
+    *,
+    cc: dict[str, Any] | None,
+    identity_url: str | None,
+    iteration_index: int,
+) -> dict[str, Any] | None:
+    """Backfill ``build_spec.selected_urls`` when planner omitted it on identity runs.
+
+    Priority:
+    1) URLs already referenced in build_spec that intersect offered frontier URLs.
+    2) First offered frontier URL as a minimal identity carry-through default.
+    """
+    bs = raw.get("build_spec")
+    if not isinstance(bs, dict):
+        return None
+
+    existing = bs.get("selected_urls")
+    if isinstance(existing, list) and any(isinstance(u, str) and u.strip() for u in existing):
+        return None
+    if not isinstance(cc, dict):
+        return None
+    if iteration_index != 0:
+        return None
+    if not isinstance(identity_url, str) or not identity_url.strip():
+        return None
+
+    offered_raw = cc.get("next_urls_to_crawl")
+    if not isinstance(offered_raw, list):
+        return None
+    offered = [u for u in offered_raw if isinstance(u, str) and u.strip()]
+    if not offered:
+        return None
+
+    referenced_urls = extract_urls_from_build_spec(bs)
+    matched = match_planner_selections_to_offered(referenced_urls, offered)
+    if matched:
+        bs["selected_urls"] = matched
+        return {
+            "applied": True,
+            "source": "build_spec_referenced",
+            "count": len(matched),
+        }
+
+    default_pick = offered[:1]
+    if not default_pick:
+        return None
+    bs["selected_urls"] = default_pick
+    return {
+        "applied": True,
+        "source": "frontier_default",
+        "count": len(default_pick),
+    }

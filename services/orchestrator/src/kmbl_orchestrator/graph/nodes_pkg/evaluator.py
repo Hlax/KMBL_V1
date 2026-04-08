@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
@@ -174,6 +175,105 @@ def _build_pass_rubric_v1(report: Any) -> dict[str, Any]:
     }
 
 
+def _issue_code(issue: dict[str, Any]) -> str:
+    for key in ("code", "type", "id", "criterion"):
+        v = issue.get(key)
+        if isinstance(v, str) and v.strip():
+            return v.strip().lower()
+    return ""
+
+
+def _issue_mentions_h1(issue: dict[str, Any]) -> bool:
+    for key in ("message", "detail", "selector", "target", "expected"):
+        v = issue.get(key)
+        if isinstance(v, str) and "h1" in v.lower():
+            return True
+    return False
+
+
+def _build_candidate_has_h1_evidence(build_candidate: dict[str, Any]) -> bool:
+    s1 = (
+        build_candidate.get("kmbl_build_candidate_summary_v1")
+        if isinstance(build_candidate.get("kmbl_build_candidate_summary_v1"), dict)
+        else {}
+    )
+    if s1:
+        som = s1.get("sections_or_modules") if isinstance(s1.get("sections_or_modules"), dict) else {}
+        h1 = str(som.get("h1_text") or s1.get("h1_text") or "").strip()
+        if h1:
+            return True
+    arts = build_candidate.get("artifact_outputs")
+    if isinstance(arts, list):
+        for a in arts:
+            if not isinstance(a, dict):
+                continue
+            c = a.get("content")
+            if isinstance(c, str) and re.search(r"<h1\\b", c, flags=re.I):
+                return True
+    return False
+
+
+def reconcile_evaluator_false_negatives(
+    report: Any,
+    *,
+    build_candidate: dict[str, Any],
+    preview_resolution: dict[str, Any],
+) -> Any:
+    """Drop known false-negative issues when deterministic local evidence contradicts them."""
+    issues = report.issues_json if isinstance(getattr(report, "issues_json", None), list) else []
+    if not issues:
+        return report
+
+    has_operator_preview = bool(
+        isinstance(preview_resolution.get("operator_preview_url"), str)
+        and preview_resolution.get("operator_preview_url", "").strip()
+    )
+    has_h1 = _build_candidate_has_h1_evidence(build_candidate)
+
+    filtered: list[dict[str, Any]] = []
+    dropped_missing_preview = 0
+    dropped_missing_h1 = 0
+    for it in issues:
+        if not isinstance(it, dict):
+            filtered.append(it)
+            continue
+        code = _issue_code(it)
+        low_blob = " ".join(
+            str(it.get(k) or "") for k in ("message", "detail", "target", "selector")
+        ).lower()
+
+        if has_operator_preview and (
+            "missing_preview" in code
+            or "preview_unavailable" in code
+            or "missing preview" in low_blob
+            or "preview unavailable" in low_blob
+        ):
+            dropped_missing_preview += 1
+            continue
+
+        if has_h1 and (
+            ("missing_element" in code and _issue_mentions_h1(it))
+            or "missing_h1" in code
+            or ("missing" in low_blob and "h1" in low_blob)
+        ):
+            dropped_missing_h1 += 1
+            continue
+
+        filtered.append(it)
+
+    if dropped_missing_preview == 0 and dropped_missing_h1 == 0:
+        return report
+
+    metrics = dict(report.metrics_json or {})
+    metrics["kmbl_issue_reconciliation_v1"] = {
+        "dropped_missing_preview": dropped_missing_preview,
+        "dropped_missing_h1": dropped_missing_h1,
+        "operator_preview_present": has_operator_preview,
+        "h1_evidence_present": has_h1,
+    }
+    return report.model_copy(update={"issues_json": filtered, "metrics_json": metrics})
+
+
 def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     """Invoke the evaluator role and persist the evaluation report."""
     gid = UUID(state["graph_run_id"])
@@ -268,6 +368,13 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         if isinstance(pu_raw, str) and pu_raw.strip()
         else None
     )
+    opu_raw = preview_resolution.get("operator_preview_url")
+    operator_preview_url = (
+        opu_raw.strip()
+        if isinstance(opu_raw, str) and opu_raw.strip()
+        else None
+    )
+    preview_url_for_payload = preview_url or operator_preview_url
     if getattr(ctx.settings, "orchestrator_smoke_contract_evaluator", False):
         _log.info(
             "evaluator smoke_contract_evaluator graph_run_id=%s — clearing preview_url "
@@ -424,8 +531,9 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             if iter_hint > 0 and isinstance(state.get("structured_identity"), dict)
             else state.get("structured_identity")
         ),
-        # Prefer live assembled staging preview for Playwright / visual grounding
-        "preview_url": preview_url,
+        # Prefer browser-reachable preview; fall back to operator-local URL to avoid false
+        # "missing_preview" judgments when artifacts and local materialization are present.
+        "preview_url": preview_url_for_payload,
         "preview_resolution": preview_resolution,
         "iteration_context": {
             "iteration_index": iter_hint,
@@ -574,6 +682,11 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         graph_run_id=gid,
         evaluator_invocation_id=inv.role_invocation_id,
         build_candidate_id=UUID(bcid),
+    )
+    report = reconcile_evaluator_false_negatives(
+        report,
+        build_candidate=bc_gate,
+        preview_resolution=preview_resolution,
     )
     _prev_m = dict(report.metrics_json or {})
     _prev_m["preview_grounding"] = preview_resolution.get("preview_grounding")

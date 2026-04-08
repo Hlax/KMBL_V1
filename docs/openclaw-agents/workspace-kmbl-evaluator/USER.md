@@ -6,7 +6,7 @@
 
 ## Inputs
 
-**Orchestrator wire shape (`EvaluatorRoleInput`):** **`thread_id`**, **`build_candidate`**, **`success_criteria`**, **`evaluation_targets`**, **`iteration_hint`**, and optionally **`working_staging_facts`**, **`user_rating_context`**, **`identity_brief`**, **`preview_url`** (resolved: prefers orchestrator **staging-preview** when **`ORCHESTRATOR_PUBLIC_BASE_URL`** is set), **`iteration_context`**, **`previous_evaluation_report`** (prior evaluator JSON on this run when **`iteration_hint` > 0** — use for sameness / visual-delta), **`kmbl_interactive_lane_expectations`** (when the graph is **`interactive_frontend_app_v1`** — same structured hints as the generator; use for **fair** scoring of bounded interactivity vs static editorial vs over-ambitious WebGL asks).
+**Orchestrator wire shape (`EvaluatorRoleInput`):** **`thread_id`**, **`build_candidate`**, **`success_criteria`**, **`evaluation_targets`**, **`iteration_hint`**, and optionally **`working_staging_facts`**, **`user_rating_context`**, **`identity_brief`**, **`preview_url`** (resolved by KMBL as the **canonical reachable preview** for this candidate: it may be a candidate-preview URL, a staging-preview fallback, or a public build-candidate preview URL when that is the only honest external surface), **`iteration_context`**, **`previous_evaluation_report`** (prior evaluator JSON on this run when **`iteration_hint` > 0** — use for sameness / visual-delta), **`kmbl_interactive_lane_expectations`** (when the graph is **`interactive_frontend_app_v1`** — same structured hints as the generator; use for **fair** scoring of bounded interactivity vs static editorial vs over-ambitious WebGL asks).
 
 **There is no `build_spec` key** on the JSON KMBL sends to this role. The planner’s **`build_spec`** row lives in KMBL’s database; the orchestrator forwards **`success_criteria`** and **`evaluation_targets`** sliced from that plan. Use those arrays (plus **`identity_brief`** when present) as the checklist—**do not invent** new success conditions.
 
@@ -77,7 +77,7 @@ When you judge visual quality, you may emit **`metrics.design_rubric`** as ordin
 
 These weights are **documentation for humans**; your scores are still independent ordinals. **KMBL** may treat very low **`design_quality`** and **`originality`** on **`partial`** as a signal to **pivot** the generator (major layout change)—that does **not** override required-target truth or replace an honest **`fail`** when criteria are not met.
 
-**Preview / surface honesty:** If the static preview did not load, required checks did not run, or **`metrics`** indicate an unhealthy preview (e.g. `preview_load_failed`, nested `preview.ok: false`), do not return **`pass`**—use **`partial`**, **`fail`**, or **`blocked`** as appropriate. The orchestrator may downgrade an inconsistent **`pass`** when preview metrics disagree.
+**Preview / surface honesty:** If the static preview did not load, required checks did not run, or **`metrics`** indicate an unhealthy preview (e.g. `preview_load_failed`, nested `preview.ok: false`), do not return **`pass`**—use **`partial`**, **`fail`**, or **`blocked`** as appropriate. The orchestrator may downgrade an inconsistent **`pass`** when preview metrics disagree. Prefer the **resolved `preview_url` KMBL gives you** over localhost-only guesses or hand-assembled URLs; if no reachable public preview exists, say so plainly instead of pretending the candidate was observable.
 
 ## Rules
 

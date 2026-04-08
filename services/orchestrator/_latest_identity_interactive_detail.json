@@ -1,0 +1,1074 @@
+{
+  "start": {
+    "graph_run_id": "be6fe7b1-7ab0-41e4-b92a-0500add121d7",
+    "thread_id": "009ce8e9-a0ec-41d1-ba78-ad27200f21c1",
+    "status": "starting",
+    "failure_phase": null,
+    "failure": null,
+    "error_kind": null,
+    "error_message": null,
+    "scenario_preset": "identity_url_bundle_v1",
+    "effective_event_input": {
+      "scenario": "kmbl_identity_url_bundle_v1",
+      "task": "Build a frontend reflecting the identity from https://harveylacsina.com/ (harvey lacsina). Planner: analyze identity_context, crawl_context, and structured_identity to choose the build_spec.type that best serves the identity's goals, visual ambition, and interaction needs \u2014 while keeping scope controlled. Use static_frontend_file_v1 for text-first editorial or portfolio pages where layout and typography carry the design. Use interactive_frontend_app_v1 when the identity signals spatial/motion/3D ambition, meaningful user interaction, or a multi-file component structure (organized JS/CSS, light Three.js, canvas, or scroll-driven motion) that clearly improves the product. Generator: honor build_spec.type \u2014 produce artifact_outputs (and/or workspace ingest) matching the chosen vertical. Include build_spec.creative_brief with direction_summary, color_strategy, layout_concept, and interaction_goals so the generator has rich context.",
+      "identity_url": "https://harveylacsina.com/",
+      "constraints": {
+        "scope": "identity_url_vertical",
+        "deterministic": false,
+        "planner_is_creative_director": true,
+        "kmbl_frontend_vertical_policy": "planner_choice",
+        "kmbl_interactive_bundle_guardrails": {
+          "max_component_files_soft_cap": 24,
+          "avoid_heavy_runtime": true
+        }
+      },
+      "cool_generation_lane": true,
+      "kmbl_habitat_session": "continue",
+      "kmbl_repository_preflight": {
+        "state": "healthy",
+        "preflight_tier": "healthy_write_proven",
+        "probe": "thread_select_limit_1+kmbl_repository_write_path_canary",
+        "elapsed_ms": 1143.25,
+        "write_path_proven": true,
+        "write_path_unproven": false,
+        "write_canary_status": "ok",
+        "block_phase": null,
+        "dispatch_context": "post_orchestrator_runs_start"
+      },
+      "kmbl_session_staging": {
+        "graph_run_id": "be6fe7b1-7ab0-41e4-b92a-0500add121d7",
+        "thread_id": "009ce8e9-a0ec-41d1-ba78-ad27200f21c1",
+        "orchestrator_staging_preview_path": "/orchestrator/runs/be6fe7b1-7ab0-41e4-b92a-0500add121d7/staging-preview",
+        "orchestrator_candidate_preview_path": "/orchestrator/runs/be6fe7b1-7ab0-41e4-b92a-0500add121d7/candidate-preview",
+        "orchestrator_working_staging_json_path": "/orchestrator/working-staging/009ce8e9-a0ec-41d1-ba78-ad27200f21c1",
+        "control_plane_staging_preview_path": "/api/runs/be6fe7b1-7ab0-41e4-b92a-0500add121d7/staging-preview",
+        "control_plane_live_habitat_path": "/habitat/live/009ce8e9-a0ec-41d1-ba78-ad27200f21c1",
+        "note": "Stable for this graph_run_id: redirects to the current working staging for the run's thread. The HTML preview updates as generator iterations apply \u2014 use it to see the latest surface without re-reading full artifact history. JSON GET returns the full working_staging payload. The control plane also exposes /habitat/live/{thread_id} for a human-visible live surface (distinct from frozen staging snapshots for review). For evaluator/browser grounding during iterate loops, prefer orchestrator_candidate_preview_url (latest build_candidate for this graph_run) over working_staging preview \u2014 see candidate-preview route.",
+        "orchestrator_public_base_source": "derived_local",
+        "orchestrator_candidate_preview_url": "http://127.0.0.1:8010/orchestrator/runs/be6fe7b1-7ab0-41e4-b92a-0500add121d7/candidate-preview",
+        "orchestrator_staging_preview_url": "http://127.0.0.1:8010/orchestrator/runs/be6fe7b1-7ab0-41e4-b92a-0500add121d7/staging-preview",
+        "orchestrator_working_staging_json_url": "http://127.0.0.1:8010/orchestrator/working-staging/009ce8e9-a0ec-41d1-ba78-ad27200f21c1"
+      }
+    },
+    "identity_id": "ea29377c-e5d0-41a8-bf08-fa051b8173b9",
+    "session_staging": {
+      "graph_run_id": "be6fe7b1-7ab0-41e4-b92a-0500add121d7",
+      "thread_id": "009ce8e9-a0ec-41d1-ba78-ad27200f21c1",
+      "orchestrator_staging_preview_path": "/orchestrator/runs/be6fe7b1-7ab0-41e4-b92a-0500add121d7/staging-preview",
+      "orchestrator_candidate_preview_path": "/orchestrator/runs/be6fe7b1-7ab0-41e4-b92a-0500add121d7/candidate-preview",
+      "orchestrator_working_staging_json_path": "/orchestrator/working-staging/009ce8e9-a0ec-41d1-ba78-ad27200f21c1",
+      "control_plane_staging_preview_path": "/api/runs/be6fe7b1-7ab0-41e4-b92a-0500add121d7/staging-preview",
+      "control_plane_live_habitat_path": "/habitat/live/009ce8e9-a0ec-41d1-ba78-ad27200f21c1",
+      "note": "Stable for this graph_run_id: redirects to the current working staging for the run's thread. The HTML preview updates as generator iterations apply \u2014 use it to see the latest surface without re-reading full artifact history. JSON GET returns the full working_staging payload. The control plane also exposes /habitat/live/{thread_id} for a human-visible live surface (distinct from frozen staging snapshots for review). For evaluator/browser grounding during iterate loops, prefer orchestrator_candidate_preview_url (latest build_candidate for this graph_run) over working_staging preview \u2014 see candidate-preview route.",
+      "orchestrator_staging_preview_url": "http://127.0.0.1:8010/orchestrator/runs/be6fe7b1-7ab0-41e4-b92a-0500add121d7/staging-preview",
+      "orchestrator_candidate_preview_url": "http://127.0.0.1:8010/orchestrator/runs/be6fe7b1-7ab0-41e4-b92a-0500add121d7/candidate-preview",
+      "orchestrator_working_staging_json_url": "http://127.0.0.1:8010/orchestrator/working-staging/009ce8e9-a0ec-41d1-ba78-ad27200f21c1"
+    },
+    "repository_preflight": {
+      "state": "healthy",
+      "preflight_tier": "healthy_write_proven",
+      "probe": "thread_select_limit_1+kmbl_repository_write_path_canary",
+      "elapsed_ms": 1143.25,
+      "write_path_proven": true,
+      "write_path_unproven": false,
+      "write_canary_status": "ok",
+      "block_phase": null,
+      "dispatch_context": "post_orchestrator_runs_start"
+    }
+  },
+  "final_status": "failed",
+  "detail": {
+    "summary": {
+      "graph_run_id": "be6fe7b1-7ab0-41e4-b92a-0500add121d7",
+      "thread_id": "009ce8e9-a0ec-41d1-ba78-ad27200f21c1",
+      "identity_id": "ea29377c-e5d0-41a8-bf08-fa051b8173b9",
+      "graph_run_identity_id": "ea29377c-e5d0-41a8-bf08-fa051b8173b9",
+      "trigger_type": "prompt",
+      "status": "failed",
+      "interrupt_requested_at": null,
+      "started_at": "2026-04-08T16:06:59.666679+00:00",
+      "ended_at": "2026-04-08T16:10:48.672302+00:00",
+      "max_iteration_index": 1,
+      "latest_checkpoint_id": "e2873b08-18c6-4644-9f93-1450ca30c55e",
+      "run_state_hint": "failed",
+      "attention_state": "needs_investigation",
+      "attention_reason": "Run failed \u2014 check timeline and role errors.",
+      "resume_count": 0,
+      "last_resumed_at": null,
+      "openclaw_transport_trace": {
+        "openclaw_transport_configured": "auto",
+        "openclaw_transport_resolved": "http",
+        "openclaw_stub_mode": false,
+        "openclaw_api_key_present": true,
+        "openclaw_auto_resolution_note": "api_key_present_selected_http",
+        "openclaw_openclaw_cli_path": null
+      },
+      "quality_metrics": {
+        "event_count": 0,
+        "generator_invocation_flag_count": 0
+      },
+      "pressure_summary": {
+        "note": "Lightweight governance signals from persisted graph_run_event rows and role_invocation metadata \u2014 extensible; not a full autonomy policy.",
+        "normalization_rescue_event_count": 0,
+        "working_staging_update_event_count": 0,
+        "staging_snapshot_created_event_count": 0,
+        "staging_snapshot_skipped_event_count": 0,
+        "latest_evaluation_status": "partial",
+        "evaluation_is_partial_or_fail": true
+      },
+      "working_staging_present": false,
+      "run_observability": {
+        "manifest_first_event_counts": {
+          "workspace_ingest_not_attempted": 0,
+          "workspace_ingest_started": 1,
+          "workspace_ingest_completed": 1,
+          "workspace_ingest_failed": 0,
+          "workspace_ingest_skipped_inline_html": 0,
+          "manifest_first_violation": 0,
+          "evaluator_grounding_unavailable": 0
+        },
+        "last_evaluator_preview_resolution": {
+          "preview_url": null,
+          "preview_grounding": "ok",
+          "preview_url_source": "none",
+          "preview_url_present": true,
+          "operator_preview_url": "http://127.0.0.1:8010/orchestrator/runs/be6fe7b1-7ab0-41e4-b92a-0500add121d7/candidate-preview",
+          "preview_url_absolute": true,
+          "canonical_preview_url": "http://127.0.0.1:8010/orchestrator/runs/be6fe7b1-7ab0-41e4-b92a-0500add121d7/candidate-preview",
+          "preview_paths_present": true,
+          "preview_grounding_mode": "operator_local_only",
+          "preview_url_host_class": "localhost",
+          "preview_url_is_absolute": false,
+          "canonical_preview_source": "candidate_preview_via_derived_local",
+          "preview_grounding_reason": "private_host_blocked_by_gateway_policy",
+          "live_habitat_materialized": false,
+          "canonical_preview_fallback": false,
+          "preview_grounding_degraded": true,
+          "operator_preview_url_source": "candidate_preview_via_derived_local",
+          "staging_preview_materialized": false,
+          "candidate_preview_materialized": true,
+          "orchestrator_public_base_source": "derived_local",
+          "operator_preview_url_is_absolute": true,
+          "preview_grounding_degrade_reason": "private_host_blocked_by_gateway_policy",
+          "preview_materialization_coherent": true,
+          "preview_url_localhost_or_private": true,
+          "preview_url_browser_reachable_expected": false,
+          "orchestrator_public_base_url_configured": false,
+          "kmbl_evaluator_allow_private_preview_fetch": false
+        },
+        "role_payload_telemetry_v1": [
+          {
+            "role_invocation_id": "aa35beaa-3de7-49b3-b19f-da19255a0485",
+            "role_type": "planner",
+            "iteration_index": 0,
+            "started_at": "2026-04-08T16:07:07.084676+00:00",
+            "role": "planner",
+            "telemetry_version": 1,
+            "payload_byte_count": 30805,
+            "payload_char_count": 30701,
+            "payload_governor_v1": {
+              "role": "planner",
+              "was_trimmed": false,
+              "governor_version": 1,
+              "trimmed_sections": [],
+              "budget_target_chars": 180000,
+              "dropped_snippet_count": 0,
+              "dropped_reference_count": 0,
+              "final_payload_char_count": 30701,
+              "initial_payload_char_count": 30701,
+              "chars_saved_by_governor_trim": 0,
+              "dropped_observed_reference_count": 0
+            },
+            "payload_budget_notes": "governor_ok",
+            "reference_card_count": 12,
+            "rough_token_estimate": 7675,
+            "artifact_output_count": 0,
+            "artifact_first_payload": false,
+            "snippet_non_empty_count": 0,
+            "has_build_candidate_summary": false,
+            "has_build_candidate_summary_v2": false,
+            "summary_replaced_full_artifacts": false,
+            "artifact_outputs_content_omitted_count": 0,
+            "artifact_outputs_inline_content_char_count": 0
+          },
+          {
+            "role_invocation_id": "2d87e182-842d-4f6a-9a95-57230d146c09",
+            "role_type": "generator",
+            "iteration_index": 0,
+            "started_at": "2026-04-08T16:08:32.933611+00:00",
+            "role": "generator",
+            "telemetry_version": 1,
+            "payload_byte_count": 51376,
+            "payload_char_count": 51234,
+            "payload_governor_v1": {
+              "role": "generator",
+              "was_trimmed": false,
+              "governor_version": 1,
+              "trimmed_sections": [],
+              "budget_target_chars": 220000,
+              "dropped_snippet_count": 0,
+              "dropped_reference_count": 0,
+              "final_payload_char_count": 51234,
+              "initial_payload_char_count": 51234,
+              "chars_saved_by_governor_trim": 0,
+              "dropped_observed_reference_count": 0
+            },
+            "payload_budget_notes": "governor_ok",
+            "reference_card_count": 9,
+            "rough_token_estimate": 12808,
+            "artifact_output_count": 0,
+            "artifact_first_payload": false,
+            "snippet_non_empty_count": 0,
+            "has_build_candidate_summary": false,
+            "has_build_candidate_summary_v2": false,
+            "summary_replaced_full_artifacts": false,
+            "execution_contract_size_guardrails_v1": {
+              "within_budget": true,
+              "guardrail_version": 1,
+              "section_char_counts": {
+                "lane_mix": 803,
+                "canvas_system": 433,
+                "geometry_system": 1138,
+                "execution_contract": 3940,
+                "source_transformation_policy": 323
+              },
+              "over_budget_sections": [],
+              "section_char_budgets": {
+                "lane_mix": 2000,
+                "canvas_system": 3000,
+                "geometry_system": 4500,
+                "execution_contract": 14000,
+                "source_transformation_policy": 2500
+              }
+            },
+            "artifact_outputs_content_omitted_count": 0,
+            "artifact_outputs_inline_content_char_count": 0
+          },
+          {
+            "role_invocation_id": "b2597e0c-2024-421f-86c7-eade87ae9755",
+            "role_type": "evaluator",
+            "iteration_index": 0,
+            "started_at": "2026-04-08T16:10:03.736687+00:00",
+            "role": "evaluator",
+            "telemetry_version": 1,
+            "payload_byte_count": 20429,
+            "payload_char_count": 20405,
+            "payload_governor_v1": {
+              "role": "evaluator",
+              "was_trimmed": false,
+              "governor_version": 1,
+              "trimmed_sections": [],
+              "budget_target_chars": 160000,
+              "dropped_snippet_count": 0,
+              "dropped_reference_count": 0,
+              "final_payload_char_count": 20405,
+              "initial_payload_char_count": 20405,
+              "chars_saved_by_governor_trim": 0,
+              "dropped_observed_reference_count": 0
+            },
+            "payload_budget_notes": "governor_ok",
+            "reference_card_count": 0,
+            "rough_token_estimate": 5101,
+            "artifact_output_count": 1,
+            "artifact_first_payload": true,
+            "snippet_non_empty_count": 1,
+            "has_build_candidate_summary": true,
+            "has_build_candidate_summary_v2": true,
+            "summary_replaced_full_artifacts": true,
+            "full_artifact_content_char_count": 12196,
+            "kmbl_evaluator_snippet_policy_v1": {
+              "reason_code": "operator_preview_not_browser_reachable_openclaw",
+              "snippets_suppressed_for_llm": false
+            },
+            "artifact_outputs_content_omitted_count": 1,
+            "artifact_outputs_inline_content_char_count": 0,
+            "estimated_content_chars_saved_vs_full_inline": 12196
+          },
+          {
+            "role_invocation_id": "15928930-f6fe-4560-9000-75b834367cdf",
+            "role_type": "generator",
+            "iteration_index": 1,
+            "started_at": "2026-04-08T16:10:43.575894+00:00",
+            "role": "generator",
+            "telemetry_version": 1,
+            "payload_byte_count": 37600,
+            "payload_char_count": 37538,
+            "payload_governor_v1": {
+              "role": "generator",
+              "was_trimmed": false,
+              "governor_version": 1,
+              "trimmed_sections": [],
+              "budget_target_chars": 220000,
+              "dropped_snippet_count": 0,
+              "dropped_reference_count": 0,
+              "final_payload_char_count": 37538,
+              "initial_payload_char_count": 37538,
+              "chars_saved_by_governor_trim": 0,
+              "dropped_observed_reference_count": 0
+            },
+            "payload_budget_notes": "governor_ok",
+            "reference_card_count": 8,
+            "rough_token_estimate": 9384,
+            "artifact_output_count": 0,
+            "artifact_first_payload": false,
+            "snippet_non_empty_count": 0,
+            "has_build_candidate_summary": false,
+            "has_build_candidate_summary_v2": false,
+            "summary_replaced_full_artifacts": false,
+            "chars_saved_from_iteration_compaction": 23841,
+            "execution_contract_size_guardrails_v1": {
+              "within_budget": true,
+              "guardrail_version": 1,
+              "section_char_counts": {
+                "lane_mix": 803,
+                "canvas_system": 433,
+                "geometry_system": 1138,
+                "execution_contract": 3940,
+                "source_transformation_policy": 323
+              },
+              "over_budget_sections": [],
+              "section_char_budgets": {
+                "lane_mix": 2000,
+                "canvas_system": 3000,
+                "geometry_system": 4500,
+                "execution_contract": 14000,
+                "source_transformation_policy": 2500
+              }
+            },
+            "artifact_outputs_content_omitted_count": 0,
+            "artifact_outputs_inline_content_char_count": 0
+          }
+        ]
+      },
+      "interactive_lane_operator_view": {
+        "present": true,
+        "execution_contract_signals": {},
+        "generator_library_policy_flags": {
+          "escalation_lane": null,
+          "contract_includes_pixi": false,
+          "gaussian_splat_lane_active": false,
+          "contract_includes_minimal_shader_gl": false
+        },
+        "library_compliance_hints": [],
+        "reference_summary": {
+          "implementation_reference_count": 3,
+          "inspiration_reference_count": 2,
+          "planner_observed_reference_count": 3,
+          "curated_library_version": 1,
+          "lane_bucket": "wgsl_webgpu",
+          "preferred_lane_hint": null,
+          "implementation_ids": [
+            "ref_webgpu_fundamentals",
+            "ref_mdn_webgpu",
+            "ref_three_manual"
+          ],
+          "inspiration_ids": [
+            "ref_awwwards",
+            "ref_codrops"
+          ],
+          "observed_urls": [
+            "https://harveylacsina.com/project/righteous-eats",
+            "https://harveylacsina.com/project/servicenow-x-nhl",
+            "https://harveylacsina.com/project/columbia-journalism-review"
+          ]
+        },
+        "preview_pipeline_notes": [],
+        "planner_invocation_reference_meta": {
+          "source": "planner_input_payload",
+          "planner_observed_reference_count": 5
+        }
+      },
+      "build_candidate_summary_brief": {
+        "summary_version": 2,
+        "lane": "interactive_frontend_app_v1",
+        "escalation_lane": null,
+        "artifact_count": 1,
+        "entrypoints": [
+          "component/preview/index.html"
+        ],
+        "libraries_detected": [
+          "gsap",
+          "three"
+        ],
+        "file_inventory_count": 1,
+        "warnings_count": 0
+      }
+    },
+    "operator_actions": [],
+    "role_invocations": [
+      {
+        "role_invocation_id": "aa35beaa-3de7-49b3-b19f-da19255a0485",
+        "role_type": "planner",
+        "status": "completed",
+        "iteration_index": 0,
+        "started_at": "2026-04-08T16:07:07.084676+00:00",
+        "ended_at": "2026-04-08T16:08:29.98888+00:00",
+        "provider": "openclaw",
+        "provider_config_key": "kmbl-planner",
+        "routing_hints": null,
+        "routing_fact_source": "none",
+        "openclaw_transport_trace": {
+          "openclaw_transport_configured": "auto",
+          "openclaw_transport_resolved": "http",
+          "openclaw_stub_mode": false,
+          "openclaw_api_key_present": true,
+          "openclaw_auto_resolution_note": "api_key_present_selected_http",
+          "openclaw_openclaw_cli_path": null
+        },
+        "normalization_rescue": null,
+        "payload_telemetry": {
+          "role": "planner",
+          "telemetry_version": 1,
+          "payload_byte_count": 30805,
+          "payload_char_count": 30701,
+          "payload_governor_v1": {
+            "role": "planner",
+            "was_trimmed": false,
+            "governor_version": 1,
+            "trimmed_sections": [],
+            "budget_target_chars": 180000,
+            "dropped_snippet_count": 0,
+            "dropped_reference_count": 0,
+            "final_payload_char_count": 30701,
+            "initial_payload_char_count": 30701,
+            "chars_saved_by_governor_trim": 0,
+            "dropped_observed_reference_count": 0
+          },
+          "payload_budget_notes": "governor_ok",
+          "reference_card_count": 12,
+          "rough_token_estimate": 7675,
+          "artifact_output_count": 0,
+          "artifact_first_payload": false,
+          "snippet_non_empty_count": 0,
+          "has_build_candidate_summary": false,
+          "has_build_candidate_summary_v2": false,
+          "summary_replaced_full_artifacts": false,
+          "artifact_outputs_content_omitted_count": 0,
+          "artifact_outputs_inline_content_char_count": 0
+        }
+      },
+      {
+        "role_invocation_id": "2d87e182-842d-4f6a-9a95-57230d146c09",
+        "role_type": "generator",
+        "status": "completed",
+        "iteration_index": 0,
+        "started_at": "2026-04-08T16:08:32.933611+00:00",
+        "ended_at": "2026-04-08T16:09:59.197231+00:00",
+        "provider": "openclaw",
+        "provider_config_key": "kmbl-generator",
+        "routing_hints": {
+          "kmb_routing_version": 3,
+          "generator_route_kind": "default",
+          "provider_config_key": null,
+          "openai_image_route_applied": false,
+          "budget_denial_reason": null,
+          "image_generation_intent_kind": "none",
+          "route_reason": "no_explicit_image_generation_intent",
+          "image_generation_requested": false,
+          "image_requested": false,
+          "openai_image_route_requested": false,
+          "estimated_tokens_reserved": null,
+          "budget_cap_tokens": 1500000,
+          "budget_remaining_tokens": 1500000
+        },
+        "routing_fact_source": "persisted",
+        "openclaw_transport_trace": {
+          "openclaw_transport_configured": "auto",
+          "openclaw_transport_resolved": "http",
+          "openclaw_stub_mode": false,
+          "openclaw_api_key_present": true,
+          "openclaw_auto_resolution_note": "api_key_present_selected_http",
+          "openclaw_openclaw_cli_path": null
+        },
+        "normalization_rescue": null,
+        "payload_telemetry": {
+          "role": "generator",
+          "telemetry_version": 1,
+          "payload_byte_count": 51376,
+          "payload_char_count": 51234,
+          "payload_governor_v1": {
+            "role": "generator",
+            "was_trimmed": false,
+            "governor_version": 1,
+            "trimmed_sections": [],
+            "budget_target_chars": 220000,
+            "dropped_snippet_count": 0,
+            "dropped_reference_count": 0,
+            "final_payload_char_count": 51234,
+            "initial_payload_char_count": 51234,
+            "chars_saved_by_governor_trim": 0,
+            "dropped_observed_reference_count": 0
+          },
+          "payload_budget_notes": "governor_ok",
+          "reference_card_count": 9,
+          "rough_token_estimate": 12808,
+          "artifact_output_count": 0,
+          "artifact_first_payload": false,
+          "snippet_non_empty_count": 0,
+          "has_build_candidate_summary": false,
+          "has_build_candidate_summary_v2": false,
+          "summary_replaced_full_artifacts": false,
+          "execution_contract_size_guardrails_v1": {
+            "within_budget": true,
+            "guardrail_version": 1,
+            "section_char_counts": {
+              "lane_mix": 803,
+              "canvas_system": 433,
+              "geometry_system": 1138,
+              "execution_contract": 3940,
+              "source_transformation_policy": 323
+            },
+            "over_budget_sections": [],
+            "section_char_budgets": {
+              "lane_mix": 2000,
+              "canvas_system": 3000,
+              "geometry_system": 4500,
+              "execution_contract": 14000,
+              "source_transformation_policy": 2500
+            }
+          },
+          "artifact_outputs_content_omitted_count": 0,
+          "artifact_outputs_inline_content_char_count": 0
+        }
+      },
+      {
+        "role_invocation_id": "b2597e0c-2024-421f-86c7-eade87ae9755",
+        "role_type": "evaluator",
+        "status": "completed",
+        "iteration_index": 0,
+        "started_at": "2026-04-08T16:10:03.736687+00:00",
+        "ended_at": "2026-04-08T16:10:40.841322+00:00",
+        "provider": "openclaw",
+        "provider_config_key": "kmbl-evaluator",
+        "routing_hints": null,
+        "routing_fact_source": "none",
+        "openclaw_transport_trace": {
+          "openclaw_transport_configured": "auto",
+          "openclaw_transport_resolved": "http",
+          "openclaw_stub_mode": false,
+          "openclaw_api_key_present": true,
+          "openclaw_auto_resolution_note": "api_key_present_selected_http",
+          "openclaw_openclaw_cli_path": null
+        },
+        "normalization_rescue": null,
+        "payload_telemetry": {
+          "role": "evaluator",
+          "telemetry_version": 1,
+          "payload_byte_count": 20429,
+          "payload_char_count": 20405,
+          "payload_governor_v1": {
+            "role": "evaluator",
+            "was_trimmed": false,
+            "governor_version": 1,
+            "trimmed_sections": [],
+            "budget_target_chars": 160000,
+            "dropped_snippet_count": 0,
+            "dropped_reference_count": 0,
+            "final_payload_char_count": 20405,
+            "initial_payload_char_count": 20405,
+            "chars_saved_by_governor_trim": 0,
+            "dropped_observed_reference_count": 0
+          },
+          "payload_budget_notes": "governor_ok",
+          "reference_card_count": 0,
+          "rough_token_estimate": 5101,
+          "artifact_output_count": 1,
+          "artifact_first_payload": true,
+          "snippet_non_empty_count": 1,
+          "has_build_candidate_summary": true,
+          "has_build_candidate_summary_v2": true,
+          "summary_replaced_full_artifacts": true,
+          "full_artifact_content_char_count": 12196,
+          "kmbl_evaluator_snippet_policy_v1": {
+            "reason_code": "operator_preview_not_browser_reachable_openclaw",
+            "snippets_suppressed_for_llm": false
+          },
+          "artifact_outputs_content_omitted_count": 1,
+          "artifact_outputs_inline_content_char_count": 0,
+          "estimated_content_chars_saved_vs_full_inline": 12196
+        }
+      },
+      {
+        "role_invocation_id": "15928930-f6fe-4560-9000-75b834367cdf",
+        "role_type": "generator",
+        "status": "failed",
+        "iteration_index": 1,
+        "started_at": "2026-04-08T16:10:43.575894+00:00",
+        "ended_at": "2026-04-08T16:10:47.641848+00:00",
+        "provider": "openclaw",
+        "provider_config_key": "kmbl-generator",
+        "routing_hints": {
+          "kmb_routing_version": 3,
+          "generator_route_kind": "default",
+          "provider_config_key": null,
+          "openai_image_route_applied": false,
+          "budget_denial_reason": null,
+          "image_generation_intent_kind": "none",
+          "route_reason": "no_explicit_image_generation_intent",
+          "image_generation_requested": false,
+          "image_requested": false,
+          "openai_image_route_requested": false,
+          "estimated_tokens_reserved": null,
+          "budget_cap_tokens": 1500000,
+          "budget_remaining_tokens": 1500000
+        },
+        "routing_fact_source": "persisted",
+        "openclaw_transport_trace": {
+          "openclaw_transport_configured": "auto",
+          "openclaw_transport_resolved": "http",
+          "openclaw_stub_mode": false,
+          "openclaw_api_key_present": true,
+          "openclaw_auto_resolution_note": "api_key_present_selected_http",
+          "openclaw_openclaw_cli_path": null
+        },
+        "normalization_rescue": null,
+        "payload_telemetry": {
+          "role": "generator",
+          "telemetry_version": 1,
+          "payload_byte_count": 37600,
+          "payload_char_count": 37538,
+          "payload_governor_v1": {
+            "role": "generator",
+            "was_trimmed": false,
+            "governor_version": 1,
+            "trimmed_sections": [],
+            "budget_target_chars": 220000,
+            "dropped_snippet_count": 0,
+            "dropped_reference_count": 0,
+            "final_payload_char_count": 37538,
+            "initial_payload_char_count": 37538,
+            "chars_saved_by_governor_trim": 0,
+            "dropped_observed_reference_count": 0
+          },
+          "payload_budget_notes": "governor_ok",
+          "reference_card_count": 8,
+          "rough_token_estimate": 9384,
+          "artifact_output_count": 0,
+          "artifact_first_payload": false,
+          "snippet_non_empty_count": 0,
+          "has_build_candidate_summary": false,
+          "has_build_candidate_summary_v2": false,
+          "summary_replaced_full_artifacts": false,
+          "chars_saved_from_iteration_compaction": 23841,
+          "execution_contract_size_guardrails_v1": {
+            "within_budget": true,
+            "guardrail_version": 1,
+            "section_char_counts": {
+              "lane_mix": 803,
+              "canvas_system": 433,
+              "geometry_system": 1138,
+              "execution_contract": 3940,
+              "source_transformation_policy": 323
+            },
+            "over_budget_sections": [],
+            "section_char_budgets": {
+              "lane_mix": 2000,
+              "canvas_system": 3000,
+              "geometry_system": 4500,
+              "execution_contract": 14000,
+              "source_transformation_policy": 2500
+            }
+          },
+          "artifact_outputs_content_omitted_count": 0,
+          "artifact_outputs_inline_content_char_count": 0
+        }
+      }
+    ],
+    "associated_outputs": {
+      "build_spec_id": "9091e947-0df9-4fe9-92f6-2a2d3b09df99",
+      "build_candidate_id": "ca5695e6-f5c0-4ba6-ac53-3bad9c46a38f",
+      "evaluation_report_id": "1e20df0f-d00f-4e80-9cd4-c138626eb308",
+      "staging_snapshot_id": null,
+      "publication_snapshot_id": null,
+      "alignment_score": 0.925,
+      "alignment_signals_json": {
+        "source": "orchestrator_fallback",
+        "name_present": true,
+        "palette_used": true,
+        "role_present": false,
+        "alignment_score": 0.925,
+        "structural_score": 0.5,
+        "must_mention_hits": [
+          "harvey lacsina",
+          "Work"
+        ],
+        "must_mention_misses": [],
+        "tone_reflected_rate": 1.0,
+        "palette_colors_found": [
+          "#8211",
+          "#038",
+          "#7a00df",
+          "#ddd",
+          "#007cba"
+        ],
+        "must_mention_hit_rate": 1.0
+      }
+    },
+    "timeline": [
+      {
+        "kind": "run_started",
+        "label": "Graph run started",
+        "timestamp": "2026-04-08T16:06:59.831291+00:00",
+        "related_id": null,
+        "event_type": "graph_run_started",
+        "operator_triggered": false
+      },
+      {
+        "kind": "cross_run_memory_loaded",
+        "label": "Cross-run memory loaded for planner",
+        "timestamp": "2026-04-08T16:07:03.386644+00:00",
+        "related_id": null,
+        "event_type": "cross_run_memory_loaded",
+        "operator_triggered": false
+      },
+      {
+        "kind": "cross_run_memory_updated",
+        "label": "Cross-run memory updated",
+        "timestamp": "2026-04-08T16:07:03.736291+00:00",
+        "related_id": null,
+        "event_type": "cross_run_memory_updated",
+        "operator_triggered": false
+      },
+      {
+        "kind": "event",
+        "label": "checkpoint_written",
+        "timestamp": "2026-04-08T16:07:05.672121+00:00",
+        "related_id": null,
+        "event_type": "checkpoint_written",
+        "operator_triggered": false
+      },
+      {
+        "kind": "event",
+        "label": "checkpoint_written",
+        "timestamp": "2026-04-08T16:07:06.169247+00:00",
+        "related_id": null,
+        "event_type": "checkpoint_written",
+        "operator_triggered": false
+      },
+      {
+        "kind": "planner_started",
+        "label": "Planner invocation started",
+        "timestamp": "2026-04-08T16:07:06.412486+00:00",
+        "related_id": null,
+        "event_type": "planner_invocation_started",
+        "operator_triggered": false
+      },
+      {
+        "kind": "event",
+        "label": "habitat_strategy_enforced",
+        "timestamp": "2026-04-08T16:08:29.99088+00:00",
+        "related_id": null,
+        "event_type": "habitat_strategy_enforced",
+        "operator_triggered": false
+      },
+      {
+        "kind": "event",
+        "label": "interactive_build_spec_normalized",
+        "timestamp": "2026-04-08T16:08:30.313975+00:00",
+        "related_id": null,
+        "event_type": "interactive_build_spec_normalized",
+        "operator_triggered": false
+      },
+      {
+        "kind": "event",
+        "label": "checkpoint_written",
+        "timestamp": "2026-04-08T16:08:31.227039+00:00",
+        "related_id": null,
+        "event_type": "checkpoint_written",
+        "operator_triggered": false
+      },
+      {
+        "kind": "planner_completed",
+        "label": "Planner invocation completed",
+        "timestamp": "2026-04-08T16:08:31.466555+00:00",
+        "related_id": null,
+        "event_type": "planner_invocation_completed",
+        "operator_triggered": false
+      },
+      {
+        "kind": "event",
+        "label": "planner_vertical_selected",
+        "timestamp": "2026-04-08T16:08:31.710728+00:00",
+        "related_id": null,
+        "event_type": "planner_vertical_selected",
+        "operator_triggered": false
+      },
+      {
+        "kind": "event",
+        "label": "checkpoint_written",
+        "timestamp": "2026-04-08T16:08:32.199619+00:00",
+        "related_id": null,
+        "event_type": "checkpoint_written",
+        "operator_triggered": false
+      },
+      {
+        "kind": "generator_started",
+        "label": "Generator invocation started",
+        "timestamp": "2026-04-08T16:08:32.510071+00:00",
+        "related_id": null,
+        "event_type": "generator_invocation_started",
+        "operator_triggered": false
+      },
+      {
+        "kind": "event",
+        "label": "workspace_ingest_started",
+        "timestamp": "2026-04-08T16:09:59.199641+00:00",
+        "related_id": null,
+        "event_type": "workspace_ingest_started",
+        "operator_triggered": false
+      },
+      {
+        "kind": "event",
+        "label": "workspace_ingest_completed",
+        "timestamp": "2026-04-08T16:09:59.545935+00:00",
+        "related_id": null,
+        "event_type": "workspace_ingest_completed",
+        "operator_triggered": false
+      },
+      {
+        "kind": "event",
+        "label": "checkpoint_written",
+        "timestamp": "2026-04-08T16:10:00.981888+00:00",
+        "related_id": null,
+        "event_type": "checkpoint_written",
+        "operator_triggered": false
+      },
+      {
+        "kind": "generator_completed",
+        "label": "Generator invocation completed",
+        "timestamp": "2026-04-08T16:10:01.226779+00:00",
+        "related_id": null,
+        "event_type": "generator_invocation_completed",
+        "operator_triggered": false
+      },
+      {
+        "kind": "event",
+        "label": "habitat_materialized",
+        "timestamp": "2026-04-08T16:10:01.487454+00:00",
+        "related_id": null,
+        "event_type": "habitat_materialized",
+        "operator_triggered": false
+      },
+      {
+        "kind": "event",
+        "label": "checkpoint_written",
+        "timestamp": "2026-04-08T16:10:02.398064+00:00",
+        "related_id": null,
+        "event_type": "checkpoint_written",
+        "operator_triggered": false
+      },
+      {
+        "kind": "evaluator_started",
+        "label": "Evaluator invocation started",
+        "timestamp": "2026-04-08T16:10:02.65644+00:00",
+        "related_id": null,
+        "event_type": "evaluator_invocation_started",
+        "operator_triggered": false
+      },
+      {
+        "kind": "event",
+        "label": "candidate_preview_unreachable_due_to_private_host",
+        "timestamp": "2026-04-08T16:10:03.488073+00:00",
+        "related_id": null,
+        "event_type": "candidate_preview_unreachable_due_to_private_host",
+        "operator_triggered": false
+      },
+      {
+        "kind": "event",
+        "label": "checkpoint_written",
+        "timestamp": "2026-04-08T16:10:41.486785+00:00",
+        "related_id": null,
+        "event_type": "checkpoint_written",
+        "operator_triggered": false
+      },
+      {
+        "kind": "evaluator_completed",
+        "label": "Evaluator invocation completed",
+        "timestamp": "2026-04-08T16:10:41.725136+00:00",
+        "related_id": null,
+        "event_type": "evaluator_invocation_completed",
+        "operator_triggered": false
+      },
+      {
+        "kind": "event",
+        "label": "iteration_started",
+        "timestamp": "2026-04-08T16:10:42.083134+00:00",
+        "related_id": null,
+        "event_type": "iteration_started",
+        "operator_triggered": false
+      },
+      {
+        "kind": "decision",
+        "label": "Decision recorded",
+        "timestamp": "2026-04-08T16:10:42.359977+00:00",
+        "related_id": null,
+        "event_type": "decision_made",
+        "operator_triggered": false
+      },
+      {
+        "kind": "event",
+        "label": "checkpoint_written",
+        "timestamp": "2026-04-08T16:10:42.910678+00:00",
+        "related_id": null,
+        "event_type": "checkpoint_written",
+        "operator_triggered": false
+      },
+      {
+        "kind": "generator_started",
+        "label": "Generator invocation started",
+        "timestamp": "2026-04-08T16:10:43.16488+00:00",
+        "related_id": null,
+        "event_type": "generator_invocation_started",
+        "operator_triggered": false
+      },
+      {
+        "kind": "event",
+        "label": "checkpoint_written",
+        "timestamp": "2026-04-08T16:10:48.126165+00:00",
+        "related_id": null,
+        "event_type": "checkpoint_written",
+        "operator_triggered": false
+      },
+      {
+        "kind": "run_failed",
+        "label": "Graph run failed",
+        "timestamp": "2026-04-08T16:10:48.397881+00:00",
+        "related_id": null,
+        "event_type": "graph_run_failed",
+        "operator_triggered": false
+      }
+    ],
+    "basis": "persisted_rows_only",
+    "resume_eligible": false,
+    "resume_operator_explanation": "Failed for a reason other than stale timeout \u2014 generic retry is not implemented.",
+    "retry_eligible": false,
+    "retry_deferred_note": "Generic retry for failed runs is deferred \u2014 no duplicate-run rule in this release.",
+    "scenario_tag": null,
+    "scenario_badge": null,
+    "identity_trace": {
+      "thread_identity_id": "ea29377c-e5d0-41a8-bf08-fa051b8173b9",
+      "graph_run_identity_id": "ea29377c-e5d0-41a8-bf08-fa051b8173b9",
+      "planner_identity_context": {
+        "facets_json": {
+          "image_refs": [
+            "https://harveylacsina.com/wp-content/uploads/2025/04/harvey.lacsina.png",
+            "https://harveylacsina.com/wp-content/uploads/2025/04/harvey.lacsina-white.png"
+          ],
+          "source_url": "https://harveylacsina.com/",
+          "crawled_pages": [
+            "https://harveylacsina.com/",
+            "https://harveylacsina.com/about/"
+          ],
+          "palette_hints": [
+            "#8211",
+            "#038",
+            "#7a00df",
+            "#ddd",
+            "#007cba",
+            "#006ba1"
+          ],
+          "tone_keywords": [
+            "creative"
+          ],
+          "project_evidence": [
+            "Work"
+          ],
+          "aesthetic_keywords": [
+            "personal"
+          ]
+        },
+        "identity_id": "ea29377c-e5d0-41a8-bf08-fa051b8173b9",
+        "source_count": 1,
+        "profile_summary": "harvey lacsina",
+        "open_questions_json": [],
+        "recent_source_summaries": [
+          {
+            "summary": "harvey lacsina\n\nHeadings: COLUMBIA JOURNALISM REVIEW | DOVE CAMERON | PEDIGREE | SAP | RAY-BAN STORIES",
+            "source_type": "website_scrape",
+            "identity_source_id": "6be3c314-f10a-4a26-b4ad-0333a6effbd0"
+          }
+        ]
+      }
+    },
+    "session_staging": {
+      "graph_run_id": "be6fe7b1-7ab0-41e4-b92a-0500add121d7",
+      "thread_id": "009ce8e9-a0ec-41d1-ba78-ad27200f21c1",
+      "orchestrator_staging_preview_path": "/orchestrator/runs/be6fe7b1-7ab0-41e4-b92a-0500add121d7/staging-preview",
+      "orchestrator_candidate_preview_path": "/orchestrator/runs/be6fe7b1-7ab0-41e4-b92a-0500add121d7/candidate-preview",
+      "orchestrator_working_staging_json_path": "/orchestrator/working-staging/009ce8e9-a0ec-41d1-ba78-ad27200f21c1",
+      "control_plane_staging_preview_path": "/api/runs/be6fe7b1-7ab0-41e4-b92a-0500add121d7/staging-preview",
+      "control_plane_live_habitat_path": "/habitat/live/009ce8e9-a0ec-41d1-ba78-ad27200f21c1",
+      "note": "Stable for this graph_run_id: redirects to the current working staging for the run's thread. The HTML preview updates as generator iterations apply \u2014 use it to see the latest surface without re-reading full artifact history. JSON GET returns the full working_staging payload. The control plane also exposes /habitat/live/{thread_id} for a human-visible live surface (distinct from frozen staging snapshots for review). For evaluator/browser grounding during iterate loops, prefer orchestrator_candidate_preview_url (latest build_candidate for this graph_run) over working_staging preview \u2014 see candidate-preview route.",
+      "orchestrator_staging_preview_url": "http://127.0.0.1:8010/orchestrator/runs/be6fe7b1-7ab0-41e4-b92a-0500add121d7/staging-preview",
+      "orchestrator_candidate_preview_url": "http://127.0.0.1:8010/orchestrator/runs/be6fe7b1-7ab0-41e4-b92a-0500add121d7/candidate-preview",
+      "orchestrator_working_staging_json_url": "http://127.0.0.1:8010/orchestrator/working-staging/009ce8e9-a0ec-41d1-ba78-ad27200f21c1"
+    },
+    "memory_influence": {
+      "loaded_payloads": [
+        {
+          "created_at": "2026-04-08T16:07:03.386644+00:00",
+          "payload": {
+            "categories": [],
+            "memory_keys_read": []
+          }
+        }
+      ],
+      "updated_payloads": [
+        {
+          "created_at": "2026-04-08T16:07:03.736291+00:00",
+          "payload": {
+            "phase": "identity_derived",
+            "categories": [
+              "identity_derived"
+            ],
+            "memory_keys_written": [
+              "likely_experience_mode",
+              "visual_style_hints"
+            ]
+          }
+        }
+      ],
+      "persisted_memory_keys_for_run": [
+        "visual_style_hints",
+        "likely_experience_mode"
+      ],
+      "identity_taste_summary": {
+        "favored_experience_modes": [
+          [
+            "immersive_identity_experience",
+            0.3499927787854051
+          ]
+        ],
+        "favored_themes": [
+          "editorial"
+        ],
+        "favored_tone_labels": [
+          "playful",
+          "warm"
+        ],
+        "visual_tendencies": [
+          "typography-first"
+        ],
+        "mutation_style_distribution": {},
+        "avoid_patterns": [],
+        "conflicts_resolved": [],
+        "operator_confirmed_experience_mode": null,
+        "operator_confirmed_strength": null
+      }
+    },
+    "failure_info": {
+      "failure_phase": "generator",
+      "error_kind": "contract_failure",
+      "error_message": "No new writable artifact instructions were provided beyond the existing generated preview; the current build already satisfies the referenced compliance markers and the follow-up preview verification issue is environment-blocked."
+    },
+    "last_meaningful_event": {
+      "event_type": "graph_run_failed",
+      "timestamp": "2026-04-08T16:10:48.397881+00:00",
+      "payload": {
+        "phase": "generator",
+        "error_kind": "contract_failure",
+        "message_preview": "No new writable artifact instructions were provided beyond the existing generated preview; the current build already satisfies the referenced compliance markers and the follow-up preview verification issue is environment-blocked."
+      }
+    }
+  }
+}

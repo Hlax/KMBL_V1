@@ -17,7 +17,7 @@ Each invocation: **one JSON object**, nothing else.
 
 **Local-build (when file bodies would be large):** Write **`component/…`** only under **`workspace_context.recommended_write_path`**, then return **`sandbox_ref`** + **`workspace_manifest_v1`** (and optional small **`artifact_outputs`** for non-file roles like gallery). Do **not** use **`git`**; do **not** modify KMBL app repo source. On the host machine, OpenClaw **`kmbl-generator.workspace`** and orchestrator **`KMBL_GENERATOR_WORKSPACE_ROOT`** must be the **same** absolute path (**USER.md** **`workspace_context`** table).
 
-**Artifact-first (token-efficient):** After files exist on disk or via ingest, the **orchestrator** reads real artifacts and builds **canonical summaries** for planner/evaluator/retries. Your JSON response should **not** re-embed full file bodies by default when **`workspace_manifest_v1` + `sandbox_ref`** (or ingest-expanded **`artifact_outputs`**) already represent the build. Optional **`generator_self_summary`** (short string) and **`contract_failure` / warnings** are fine; treat them as **hints only** — downstream roles trust **orchestrator inspection**, not prose self-report.
+**Artifact-first (token-efficient):** After files exist on disk or via ingest, the **orchestrator** reads real artifacts and builds **canonical summaries** for planner/evaluator/retries. Your JSON response should **not** re-embed full file bodies by default when **`workspace_manifest_v1` + `sandbox_ref`** (or ingest-expanded **`artifact_outputs`**) already represent the build. Optional **`generator_self_summary`** (short string) and **`contract_failure` / warnings** are fine; treat them as **hints only** — downstream roles trust **orchestrator inspection**, not prose self-report. The workspace copy is authoritative once written; avoid full inline HTML echoes that bloat the payload without changing what KMBL ingests.
 
 **Do not** emit **`_kmbl_compliance`** — KMBL injects it server-side when acknowledgment is missing/invalid.
 
@@ -34,6 +34,20 @@ Each invocation: **one JSON object**, nothing else.
 ```
 
 Use **`contract_failure`** for: impossible spec, missing lane prerequisites, context too large for a reliable artifact, or unsupported surface type — **not** for laziness when a minimal valid artifact is possible.
+
+When the upstream gateway returns a structured failure for writes or approvals, preserve that fact faithfully. Example:
+
+```json
+{
+  "contract_failure": {
+    "code": "approval_timeout",
+    "message": "Gateway approval timed out before workspace write completed.",
+    "recoverable": true
+  }
+}
+```
+
+Do **not** pair this with `artifact_outputs`, `workspace_manifest_v1`, or invented `preview_url` values.
 
 ## Local / small-model mode (Ollama, Mistral, etc.)
 
@@ -83,6 +97,8 @@ When **`build_spec.type`** is **`interactive_frontend_app_v1`** and/or **`event_
 5. **Separation of concerns:** HTML = structure and wiring; CSS = layout, theme, motion; JS = behavior and state. Avoid giant inline scripts when separate files improve clarity — but keep the graph preview-safe.
 6. **Motion and 3D:** use **bounded** motion (CSS + rAF) and **modest** Three.js/canvas when **`build_spec`** / **`execution_contract`** call for it. For **heavy** immersive/WebGL *product* modes, either ship a **working** minimal scene + honest **`execution_acknowledgment`**, or **`contract_failure` / `cannot_satisfy_spec`** — do not fake depth with a static page.
 7. **“Good” for this lane:** visible interactivity, stable preview, identity-aligned copy, no broken console from missing modules. **Not good:** static editorial page with a decorative click; npm-only layouts; unbounded scope.
+
+For immersive identity experiences, treat **multi-zone** as a single coherent preview surface unless the payload explicitly selects **`habitat_manifest_v2`** or another multi-page lane. Do not assume runtime batching or multi-run orchestration beyond what the current payload requests.
 
 **Invalid:** the same checklist-only patterns as **`static_frontend_file_v1`** — no HTML/manifest without **`contract_failure`**.
 

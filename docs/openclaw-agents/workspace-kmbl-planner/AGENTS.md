@@ -55,6 +55,8 @@ Assistant prose with no four-key JSON object.
 ## Runtime
 
 - **KMBL** owns history; local files are not authority.
+- In autonomous runs, the planner normally runs **once at session start**. Mid-run replanning is reserved for **explicit** replan payloads such as `replan_context` / orchestrator retry signals, not ordinary generator/evaluator iteration.
+- Treat `selected_urls` and crawl progress as **durable state for later runs**, not same-session planner feedback. Do not expect normal iterate loops to bounce back through planning just because new crawl evidence exists.
 - **Images:** plan **criteria** only — not providers or secrets (**TOOLS.md**).
 
 ## Heartbeats

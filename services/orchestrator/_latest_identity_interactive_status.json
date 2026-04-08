@@ -1,0 +1,401 @@
+{
+  "basis": "persisted_rows_only",
+  "graph_run_id": "be6fe7b1-7ab0-41e4-b92a-0500add121d7",
+  "thread_id": "009ce8e9-a0ec-41d1-ba78-ad27200f21c1",
+  "status": "failed",
+  "failure_phase": "generator",
+  "failure": {
+    "code": "cannot_satisfy_refine_request",
+    "status": "failed",
+    "details": {
+      "code": "cannot_satisfy_refine_request",
+      "contract_failure": {
+        "code": "cannot_satisfy_refine_request",
+        "message": "No new writable artifact instructions were provided beyond the existing generated preview; the current build already satisfies the referenced compliance markers and the follow-up preview verification issue is environment-blocked.",
+        "recoverable": true
+      }
+    },
+    "message": "No new writable artifact instructions were provided beyond the existing generated preview; the current build already satisfies the referenced compliance markers and the follow-up preview verification issue is environment-blocked.",
+    "error_kind": "contract_failure",
+    "recoverable": true
+  },
+  "error_kind": "role_invocation",
+  "error_message": "No new writable artifact instructions were provided beyond the existing generated preview; the current build already satisfies the referenced compliance markers and the follow-up preview verification issue is environment-blocked.",
+  "iteration_index": null,
+  "decision": null,
+  "build_spec": {
+    "build_spec_id": "9091e947-0df9-4fe9-92f6-2a2d3b09df99",
+    "status": "active",
+    "title_hint": "Harvey Lacsina Portfolio Interactive"
+  },
+  "build_candidate": {
+    "build_candidate_id": "ca5695e6-f5c0-4ba6-ac53-3bad9c46a38f",
+    "candidate_kind": "habitat",
+    "status": "generated"
+  },
+  "evaluation": {
+    "evaluation_report_id": "1e20df0f-d00f-4e80-9cd4-c138626eb308",
+    "status": "partial",
+    "summary": "The build candidate creates a preview-safe, interactive editorial portfolio for Harvey Lacsina with strong compliance on required libraries and user experience features like large portrait, oversized typography, and subtle motion. Key textual targets like 'Harvey Lacsina' and 'Project' are present in the HTML. However, the preview URL is local and inaccessible due to gateway policy, preventing live DOM inspection of all required sections including the About section and footer. Based on artifact inspection, the main hero, including branding, is present and the interactive experience cues are met. There is no direct evidence confirming the full About section content or the contact area in the footer. Partial compliance is reported to reflect this uncertainty.",
+    "evaluator_iteration_index": 0,
+    "alignment_score": 0.925,
+    "alignment_signals_json": {
+      "source": "orchestrator_fallback",
+      "name_present": true,
+      "palette_used": true,
+      "role_present": false,
+      "alignment_score": 0.925,
+      "structural_score": 0.5,
+      "must_mention_hits": [
+        "harvey lacsina",
+        "Work"
+      ],
+      "must_mention_misses": [],
+      "tone_reflected_rate": 1.0,
+      "palette_colors_found": [
+        "#8211",
+        "#038",
+        "#7a00df",
+        "#ddd",
+        "#007cba"
+      ],
+      "must_mention_hit_rate": 1.0
+    }
+  },
+  "evaluation_history": [
+    {
+      "evaluation_report_id": "1e20df0f-d00f-4e80-9cd4-c138626eb308",
+      "status": "partial",
+      "summary": "The build candidate creates a preview-safe, interactive editorial portfolio for Harvey Lacsina with strong compliance on required libraries and user experience features like large portrait, oversized typography, and subtle motion. Key textual targets like 'Harvey Lacsina' and 'Project' are present in the HTML. However, the preview URL is local and inaccessible due to gateway policy, preventing live DOM inspection of all required sections including the About section and footer. Based on artifact inspection, the main hero, including branding, is present and the interactive experience cues are met. There is no direct evidence confirming the full About section content or the contact area in the footer. Partial compliance is reported to reflect this uncertainty.",
+      "evaluator_iteration_index": 0,
+      "alignment_score": 0.925,
+      "alignment_signals_json": {
+        "source": "orchestrator_fallback",
+        "name_present": true,
+        "palette_used": true,
+        "role_present": false,
+        "alignment_score": 0.925,
+        "structural_score": 0.5,
+        "must_mention_hits": [
+          "harvey lacsina",
+          "Work"
+        ],
+        "must_mention_misses": [],
+        "tone_reflected_rate": 1.0,
+        "palette_colors_found": [
+          "#8211",
+          "#038",
+          "#7a00df",
+          "#ddd",
+          "#007cba"
+        ],
+        "must_mention_hit_rate": 1.0
+      }
+    }
+  ],
+  "snapshot": null,
+  "scenario_tag": null,
+  "run_event_input": null,
+  "outputs_substantive": true,
+  "timeline_events": [
+    {
+      "event_type": "graph_run_started",
+      "payload_json": {},
+      "created_at": "2026-04-08T16:06:59.831291+00:00"
+    },
+    {
+      "event_type": "cross_run_memory_loaded",
+      "payload_json": {
+        "categories": [],
+        "memory_keys_read": []
+      },
+      "created_at": "2026-04-08T16:07:03.386644+00:00"
+    },
+    {
+      "event_type": "cross_run_memory_updated",
+      "payload_json": {
+        "phase": "identity_derived",
+        "categories": [
+          "identity_derived"
+        ],
+        "memory_keys_written": [
+          "likely_experience_mode",
+          "visual_style_hints"
+        ]
+      },
+      "created_at": "2026-04-08T16:07:03.736291+00:00"
+    },
+    {
+      "event_type": "checkpoint_written",
+      "payload_json": {
+        "checkpoint_id": "77ed471c-50c5-41c8-bc1f-2ccc568b198f",
+        "checkpoint_kind": "pre_role"
+      },
+      "created_at": "2026-04-08T16:07:05.672121+00:00"
+    },
+    {
+      "event_type": "checkpoint_written",
+      "payload_json": {
+        "checkpoint_id": "41183de3-089f-4450-b5de-e30bb25beba1",
+        "checkpoint_kind": "pre_role"
+      },
+      "created_at": "2026-04-08T16:07:06.169247+00:00"
+    },
+    {
+      "event_type": "planner_invocation_started",
+      "payload_json": {},
+      "created_at": "2026-04-08T16:07:06.412486+00:00"
+    },
+    {
+      "event_type": "habitat_strategy_enforced",
+      "payload_json": {
+        "effective": "continue",
+        "iteration_index": 0,
+        "kmbl_habitat_session": "continue"
+      },
+      "created_at": "2026-04-08T16:08:29.99088+00:00"
+    },
+    {
+      "event_type": "interactive_build_spec_normalized",
+      "payload_json": {
+        "hardening": {
+          "fixes": [
+            "interactive_runtime_tier_defaulted",
+            "webgl_ambition_ack_defaulted",
+            "lane_escalation_hint_defaulted",
+            "required_libraries_defaulted_from_allowed",
+            "allowed_libraries_appended_wgsl_for_heavy_webgl_ambition",
+            "required_interactions_empty_weak_intent"
+          ],
+          "applied": true,
+          "validation_ok": true,
+          "ambition_profile": "heavy_webgl_ask",
+          "validation_error": null,
+          "interactive_vertical": true,
+          "out_of_scope_signals": [],
+          "fields_missing_before": {
+            "escalation_lane": true,
+            "allowed_libraries": false,
+            "required_libraries": true,
+            "webgl_ambition_ack": true,
+            "lane_escalation_hint": true,
+            "required_interactions": true,
+            "interactive_runtime_tier": true
+          },
+          "interaction_intent_weak": true
+        }
+      },
+      "created_at": "2026-04-08T16:08:30.313975+00:00"
+    },
+    {
+      "event_type": "checkpoint_written",
+      "payload_json": {
+        "checkpoint_id": "2bd52d20-87f4-4d3d-9834-ce973833b800",
+        "checkpoint_kind": "post_step"
+      },
+      "created_at": "2026-04-08T16:08:31.227039+00:00"
+    },
+    {
+      "event_type": "planner_invocation_completed",
+      "payload_json": {
+        "build_spec_id": "9091e947-0df9-4fe9-92f6-2a2d3b09df99"
+      },
+      "created_at": "2026-04-08T16:08:31.466555+00:00"
+    },
+    {
+      "event_type": "planner_vertical_selected",
+      "payload_json": {
+        "surface_type": "webgl_experience",
+        "site_archetype": "portfolio",
+        "build_spec_type": "interactive_frontend_app_v1",
+        "experience_mode": "webgl_3d_portfolio",
+        "has_creative_brief": true,
+        "experience_confidence": 0.7,
+        "experience_mode_source": "structured_identity",
+        "has_execution_contract": true,
+        "experience_mode_derived": true,
+        "kmbl_frontend_vertical_policy": "planner_choice"
+      },
+      "created_at": "2026-04-08T16:08:31.710728+00:00"
+    },
+    {
+      "event_type": "checkpoint_written",
+      "payload_json": {
+        "checkpoint_id": "ea3fdf5a-a127-44cb-ac56-dc9227c2b7c0",
+        "checkpoint_kind": "pre_role"
+      },
+      "created_at": "2026-04-08T16:08:32.199619+00:00"
+    },
+    {
+      "event_type": "generator_invocation_started",
+      "payload_json": {},
+      "created_at": "2026-04-08T16:08:32.510071+00:00"
+    },
+    {
+      "event_type": "workspace_ingest_started",
+      "payload_json": {
+        "sandbox_resolved": "C:\\Users\\guestt\\OneDrive\\Desktop\\KMBL\\KMBL_WORKSPACE\\009ce8e9-a0ec-41d1-ba78-ad27200f21c1\\be6fe7b1-7ab0-41e4-b92a-0500add121d7",
+        "manifest_file_count": 1,
+        "recommended_write_path": "C:\\Users\\guestt\\OneDrive\\Desktop\\KMBL\\KMBL_WORKSPACE\\009ce8e9-a0ec-41d1-ba78-ad27200f21c1\\be6fe7b1-7ab0-41e4-b92a-0500add121d7",
+        "workspace_root_resolved": "C:\\Users\\guestt\\OneDrive\\Desktop\\KMBL\\KMBL_WORKSPACE",
+        "manifest_paths_normalized": [
+          "component/preview/index.html"
+        ],
+        "sandbox_under_workspace_root": true,
+        "canonical_preview_entry_relative": "component/preview/index.html",
+        "sandbox_matches_recommended_write_path": true
+      },
+      "created_at": "2026-04-08T16:09:59.199641+00:00"
+    },
+    {
+      "event_type": "workspace_ingest_completed",
+      "payload_json": {
+        "file_count": 1,
+        "sandbox_ref": "C:\\Users\\guestt\\OneDrive\\Desktop\\KMBL\\KMBL_WORKSPACE\\009ce8e9-a0ec-41d1-ba78-ad27200f21c1\\be6fe7b1-7ab0-41e4-b92a-0500add121d7",
+        "total_bytes": 12202,
+        "workspace_authoritative": true
+      },
+      "created_at": "2026-04-08T16:09:59.545935+00:00"
+    },
+    {
+      "event_type": "checkpoint_written",
+      "payload_json": {
+        "checkpoint_id": "b93d0b38-29f2-40ce-adc1-b1b9b4f21da1",
+        "checkpoint_kind": "post_step"
+      },
+      "created_at": "2026-04-08T16:10:00.981888+00:00"
+    },
+    {
+      "event_type": "generator_invocation_completed",
+      "payload_json": {
+        "build_candidate_id": "ca5695e6-f5c0-4ba6-ac53-3bad9c46a38f"
+      },
+      "created_at": "2026-04-08T16:10:01.226779+00:00"
+    },
+    {
+      "event_type": "habitat_materialized",
+      "payload_json": {
+        "thread_id": "009ce8e9-a0ec-41d1-ba78-ad27200f21c1",
+        "manifest_id": "df06c490-d9f3-42b6-ba10-5cd279ed1c7f",
+        "build_candidate_id": "ca5695e6-f5c0-4ba6-ac53-3bad9c46a38f",
+        "materialization_kind": "candidate_preview"
+      },
+      "created_at": "2026-04-08T16:10:01.487454+00:00"
+    },
+    {
+      "event_type": "checkpoint_written",
+      "payload_json": {
+        "checkpoint_id": "21a49813-2010-4101-999e-5c43a6667dca",
+        "checkpoint_kind": "pre_role"
+      },
+      "created_at": "2026-04-08T16:10:02.398064+00:00"
+    },
+    {
+      "event_type": "evaluator_invocation_started",
+      "payload_json": {},
+      "created_at": "2026-04-08T16:10:02.65644+00:00"
+    },
+    {
+      "event_type": "candidate_preview_unreachable_due_to_private_host",
+      "payload_json": {
+        "kind": "preview_reachability",
+        "message": "Operator preview URL is localhost/private; OpenClaw browser MCP will not fetch it by default. Set KMBL_ORCHESTRATOR_PUBLIC_BASE_URL (tunnel / Tailscale / public base), or set KMBL_EVALUATOR_ALLOW_PRIVATE_PREVIEW_FETCH=true for local-only overrides.",
+        "operator_preview_url": "http://127.0.0.1:8010/orchestrator/runs/be6fe7b1-7ab0-41e4-b92a-0500add121d7/candidate-preview",
+        "preview_grounding_mode": "operator_local_only",
+        "preview_url_host_class": "localhost",
+        "preview_grounding_reason": "private_host_blocked_by_gateway_policy"
+      },
+      "created_at": "2026-04-08T16:10:03.488073+00:00"
+    },
+    {
+      "event_type": "checkpoint_written",
+      "payload_json": {
+        "checkpoint_id": "ccd24221-0376-4352-99f6-0f45d6c27e18",
+        "checkpoint_kind": "post_step"
+      },
+      "created_at": "2026-04-08T16:10:41.486785+00:00"
+    },
+    {
+      "event_type": "evaluator_invocation_completed",
+      "payload_json": {
+        "evaluation_report_id": "1e20df0f-d00f-4e80-9cd4-c138626eb308"
+      },
+      "created_at": "2026-04-08T16:10:41.725136+00:00"
+    },
+    {
+      "event_type": "iteration_started",
+      "payload_json": {
+        "max_iterations": 10,
+        "alignment_score": 0.925,
+        "alignment_trend": "insufficient_data",
+        "iteration_index": 1,
+        "previous_status": "partial",
+        "retry_direction": "refine"
+      },
+      "created_at": "2026-04-08T16:10:42.083134+00:00"
+    },
+    {
+      "event_type": "decision_made",
+      "payload_json": {
+        "decision": "iterate",
+        "pass_count": 0,
+        "retry_direction": "refine",
+        "interrupt_reason": null,
+        "evaluation_status": "partial",
+        "last_alignment_score": 0.925,
+        "mixed_lane_failure_policy_v1": {
+          "route": "default",
+          "matched_codes": [],
+          "pivot_required": false,
+          "policy_version": 1,
+          "at_iteration_cap": false,
+          "stagnation_count": 0
+        }
+      },
+      "created_at": "2026-04-08T16:10:42.359977+00:00"
+    },
+    {
+      "event_type": "checkpoint_written",
+      "payload_json": {
+        "checkpoint_id": "2b875735-1b8f-4b91-b826-c09091281d66",
+        "checkpoint_kind": "pre_role"
+      },
+      "created_at": "2026-04-08T16:10:42.910678+00:00"
+    },
+    {
+      "event_type": "generator_invocation_started",
+      "payload_json": {},
+      "created_at": "2026-04-08T16:10:43.16488+00:00"
+    },
+    {
+      "event_type": "checkpoint_written",
+      "payload_json": {
+        "checkpoint_id": "e2873b08-18c6-4644-9f93-1450ca30c55e",
+        "checkpoint_kind": "interrupt"
+      },
+      "created_at": "2026-04-08T16:10:48.126165+00:00"
+    },
+    {
+      "event_type": "graph_run_failed",
+      "payload_json": {
+        "phase": "generator",
+        "error_kind": "contract_failure",
+        "message_preview": "No new writable artifact instructions were provided beyond the existing generated preview; the current build already satisfies the referenced compliance markers and the follow-up preview verification issue is environment-blocked."
+      },
+      "created_at": "2026-04-08T16:10:48.397881+00:00"
+    }
+  ],
+  "session_staging": {
+    "graph_run_id": "be6fe7b1-7ab0-41e4-b92a-0500add121d7",
+    "thread_id": "009ce8e9-a0ec-41d1-ba78-ad27200f21c1",
+    "orchestrator_staging_preview_path": "/orchestrator/runs/be6fe7b1-7ab0-41e4-b92a-0500add121d7/staging-preview",
+    "orchestrator_candidate_preview_path": "/orchestrator/runs/be6fe7b1-7ab0-41e4-b92a-0500add121d7/candidate-preview",
+    "orchestrator_working_staging_json_path": "/orchestrator/working-staging/009ce8e9-a0ec-41d1-ba78-ad27200f21c1",
+    "control_plane_staging_preview_path": "/api/runs/be6fe7b1-7ab0-41e4-b92a-0500add121d7/staging-preview",
+    "control_plane_live_habitat_path": "/habitat/live/009ce8e9-a0ec-41d1-ba78-ad27200f21c1",
+    "note": "Stable for this graph_run_id: redirects to the current working staging for the run's thread. The HTML preview updates as generator iterations apply \u2014 use it to see the latest surface without re-reading full artifact history. JSON GET returns the full working_staging payload. The control plane also exposes /habitat/live/{thread_id} for a human-visible live surface (distinct from frozen staging snapshots for review). For evaluator/browser grounding during iterate loops, prefer orchestrator_candidate_preview_url (latest build_candidate for this graph_run) over working_staging preview \u2014 see candidate-preview route.",
+    "orchestrator_staging_preview_url": "http://127.0.0.1:8010/orchestrator/runs/be6fe7b1-7ab0-41e4-b92a-0500add121d7/staging-preview",
+    "orchestrator_candidate_preview_url": "http://127.0.0.1:8010/orchestrator/runs/be6fe7b1-7ab0-41e4-b92a-0500add121d7/candidate-preview",
+    "orchestrator_working_staging_json_url": "http://127.0.0.1:8010/orchestrator/working-staging/009ce8e9-a0ec-41d1-ba78-ad27200f21c1"
+  }
+}

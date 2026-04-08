@@ -97,14 +97,16 @@ class TestEvaluatorPreviewCoherence:
         )
         canon = resolve_canonical_demo_preview(s, graph_run_id=gid, thread_id=tid)
 
-        # Without candidate registered, canonical falls back to staging
+        # Canonical helper may still report staging fallback without candidate registration,
+        # but evaluator preview must stay pinned to candidate-preview for latest run output.
         expected_staging = f"http://127.0.0.1:9090/orchestrator/runs/{gid}/staging-preview"
+        expected_candidate = f"http://127.0.0.1:9090/orchestrator/runs/{gid}/candidate-preview"
         assert canon["canonical_preview_url"] == expected_staging
         assert canon["canonical_preview_fallback"] is True
-        # Evaluator now follows the same canonical staging fallback instead of a dead candidate path.
-        assert ev_res["operator_preview_url"] == expected_staging
+        # Evaluator pins to candidate-preview so generator->evaluator stays on newest output.
+        assert ev_res["operator_preview_url"] == expected_candidate
         assert ev_res["canonical_preview_url"] == expected_staging
-        assert ev_res["canonical_preview_fallback"] is True
+        assert ev_res["preview_owner"] == "candidate_preview"
         # Browser preview_url is None because localhost is not browser-reachable by default
         assert ev_res["preview_url"] is None
         assert ev_res["preview_grounding_mode"] == "operator_local_only"

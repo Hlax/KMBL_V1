@@ -48,6 +48,8 @@ When prior step was **`pass`** or **`partial`**: say **what to keep** (in **`sum
 
 If the candidate **repeats** default landing patterns despite planner **variation_levers**, use **`issues[].type`**: `layout_stagnation` | `archetype_mismatch` | `insufficient_visual_delta` with **detail** text.
 
+**Portfolio-shape awareness:** A hero / projects-grid / about / contact four-section layout is the **most common default pattern**. If **`variation_levers.section_rhythm`** asks for something other than `hero_proof_story_cta` but the output still uses that shape, flag it as `archetype_mismatch`. Verify **identity content** (name, role, key works present) rather than checking for specific portfolio-section CSS classes — the planner sets targets for content, not for layout class names.
+
 ## Scope discipline
 
 If output is **larger** than **success_criteria** / **evaluation_targets** imply: **`metrics.scope_overreach`**: `true` and an **issue** with **`type`**: `scope_overreach`.

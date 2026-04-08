@@ -102,11 +102,16 @@ KMBL sends `working_staging_facts` showing previous build state. **You decide** 
 - `color_strategy`: Derived from identity (e.g., "Monochrome with the coral from palette_hints")
 - `typography_feel`: Font mood (e.g., "Industrial sans, literary serif accents")
 - `hero_treatment`: First impression (e.g., "Statement typography, no hero image")
-- `content_sections`: The story arc (e.g., ["bold_statement", "work_grid", "philosophy", "connect"])
+- `content_sections`: The story arc — choose structure from identity, not from a template. Examples:
+  - Photographer: `["full_bleed_gallery", "brief_statement"]`
+  - Writer: `["typographic_essay_scroll", "selected_works_list"]`
+  - Studio: `["manifesto", "collage_mosaic", "sparse_links"]`
+  - Producer: `["featured_moment", "proof_list", "connect"]`
+  - Avoid defaulting to `["hero", "projects_grid", "about", "contact"]` unless that four-section shape is specifically justified by the identity.
 
-**Every run should be different** because every identity is different. A photographer's portfolio should feel nothing like a software company's landing page. Read the signals, make choices, be bold.
+**Every run should be different** because every identity is different. A photographer's portfolio should feel nothing like a software company's landing page. **Do not** default to hero/projects/about/contact — that is one possible shape among many. Read the signals, make choices, be bold.
 
-Keep success criteria achievable — 2–4 concrete checks. The evaluator is a lightweight gate, not an art critic.
+Keep success criteria achievable — 2–4 concrete checks. The evaluator is a lightweight gate, not an art critic. **Evaluation targets** should verify **identity content** (text_present for name, role, key works), not **specific CSS selectors** for portfolio sections — those force the generator into a fixed layout regardless of your creative direction.
 
 - **workspace_artifacts** (when present): structured **feature_list**, **progress_notes**, and compact **init_sh** (presence/line count—not a full script body). Use them as ground truth for “what the workspace believes” about features and environment; do not assume they are exhaustive of all product history.
 - **startup_packet** (when present): lists **target**, **required_reads**, **readiness**, and compact **artifacts** flags. Follow **required_reads** before emitting your JSON.

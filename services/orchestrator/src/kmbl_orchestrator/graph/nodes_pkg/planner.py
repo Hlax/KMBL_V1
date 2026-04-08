@@ -28,6 +28,7 @@ from kmbl_orchestrator.graph.state import GraphState
 from kmbl_orchestrator.normalize import normalize_planner_output
 from kmbl_orchestrator.normalize.planner_canonicalize import canonicalize_planner_raw
 from kmbl_orchestrator.runtime.cool_generation_lane import apply_cool_generation_lane_presets
+from kmbl_orchestrator.runtime.evaluation_target_diversity import soften_portfolio_evaluation_targets
 from kmbl_orchestrator.runtime.immersive_contract_hardening import (
     harden_immersive_planner_output,
 )
@@ -415,6 +416,20 @@ def planner_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
     raw, immersive_meta = harden_immersive_planner_output(raw, ei_habitat)
     if immersive_meta is not None:
         raw.setdefault("_kmbl_planner_metadata", {})["immersive_contract_hardening"] = immersive_meta
+
+    # Soften portfolio-shaped selector_present evaluation targets on static
+    # identity-url runs so the generator is not forced into hero/projects/about/contact
+    # CSS structure just to satisfy selector checks.
+    raw, et_diversity_fixes = soften_portfolio_evaluation_targets(raw, ei)
+    if et_diversity_fixes:
+        append_graph_run_event(
+            ctx.repo,
+            gid,
+            RunEventType.EVALUATION_TARGET_DIVERSITY_APPLIED,
+            {"fixes": et_diversity_fixes},
+            thread_id=tid,
+        )
+        raw.setdefault("_kmbl_planner_metadata", {})["evaluation_target_diversity"] = et_diversity_fixes
 
     prior_fp: str | None = None
     if effective in ("fresh_start", "rebuild_informed") and iteration_idx == 0:

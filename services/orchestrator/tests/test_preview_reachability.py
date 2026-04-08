@@ -80,6 +80,31 @@ def test_public_build_candidate_preview_used_when_no_public_orchestrator_base() 
     assert r["preview_grounding_mode"] == "browser_reachable"
 
 
+def test_derived_local_base_no_longer_autogrants_private_preview() -> None:
+    """derived_local auto-grant was removed: OpenClaw's gateway blocks web_fetch
+    to localhost regardless, so passing the URL wasted tokens on failed fetches."""
+    s = Settings(
+        orchestrator_public_base_url="",
+        kmbl_env="development",
+        orchestrator_port=8010,
+        kmbl_evaluator_allow_private_preview_fetch=False,
+    )
+    r = resolve_evaluator_preview_resolution(
+        s,
+        graph_run_id="g",
+        thread_id="t",
+        build_candidate={},
+    )
+    # preview_url should be None — localhost is blocked by gateway policy
+    assert r["preview_url"] is None
+    assert r["preview_grounding_mode"] != "browser_reachable"
+    # operator_preview_url still set for human/devtools use
+    assert r["operator_preview_url"] is not None
+    eff = r.get("kmbl_evaluator_allow_private_preview_fetch_effective") or {}
+    assert eff.get("configured") is False
+    assert eff.get("derived_local_autogrant") is False
+
+
 def test_manifest_first_grounding_offline_summary() -> None:
     pr = {"preview_url": None, "preview_url_is_absolute": False}
     bc = {

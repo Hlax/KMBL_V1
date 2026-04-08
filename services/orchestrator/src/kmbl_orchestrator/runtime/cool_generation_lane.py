@@ -36,19 +36,17 @@ _LITERAL_PREVIEW_MAX_CHARS = 120
 COOL_GENERATION_LANE_V1 = "cool_generation_v1"
 
 _DEFAULT_REFERENCE_PATTERNS: tuple[str, ...] = (
-    "portrait_led_editorial_hero",
+    "identity_led_editorial_surface",
     "oversized_typography_structure",
     "restrained_layered_depth_or_motion",
 )
 
 _DEFAULT_PATTERN_RULES: tuple[str, ...] = (
-    "Hero must use at least one real identity image at large scale (not a tiny thumbnail).",
+    "Use at least one real identity image at meaningful scale (not a tiny thumbnail).",
     "At least one display-scale headline (visual hierarchy, not body-sized only).",
     "Include one non-placeholder motion or interaction: CSS scroll-linked, reduced-motion "
     "fallback, or JS (no empty script block).",
     "Use identity palette or CSS variables derived from identity_brief.palette_hex when present.",
-    "Add class `kmbl-cool-hero` on the primary hero root element.",
-    'Include marker attribute data-kmbl-cool-lane="1" on the <body> or root layout element.',
 )
 
 
@@ -320,15 +318,10 @@ def apply_cool_generation_lane_presets(
     elif isinstance(structured_identity, dict) and not extra:
         _log.debug("cool_generation_lane: no image_refs on identity_brief; markers only")
 
-    # Grep-able obligations for each selected reference pattern (1–3).
-    spr_final = ec.get("selected_reference_patterns") or []
-    if isinstance(spr_final, list):
-        for pat in spr_final[:3]:
-            tok = reference_pattern_to_literal_token(str(pat))
-            if tok:
-                extra.append(tok)
-
-    extra.extend(['data-kmbl-cool-lane="1"', "kmbl-cool-hero"])
+    # kmbl-pattern-* tokens and data-kmbl-* markers removed from
+    # literal_success_checks: they leaked into final user-facing HTML as
+    # internal scaffolding.  Pattern selection is verified via
+    # kmbl_scene_manifest_v1 (structured, never rendered to end users).
 
     merged_lit = _dedupe_literal_needles(planner_needles, extra)
     bs["literal_success_checks"] = merged_lit[:24]

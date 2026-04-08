@@ -306,4 +306,48 @@ def assemble_static_preview_html(
         )
 
     out = _inject_css_and_js(cleaned, css_chunks, js_chunks)
+    out = _strip_internal_markers(out)
     return out, ""
+
+
+# ---------------------------------------------------------------------------
+# Strip internal KMBL markers from assembled preview HTML.
+# These are orchestrator/evaluator scaffolding that must not appear in
+# user-facing output.
+# ---------------------------------------------------------------------------
+
+# Identity/cool-lane markers to strip.  data-kmbl-injected is NOT stripped —
+# it is an assembly marker used internally by the preview pipeline.
+_IDENTITY_MARKER_ATTRS = (
+    "data-kmbl-cool-lane",
+    "data-kmbl-scene",
+    "data-kmbl-motion",
+)
+
+_INTERNAL_COMMENT_RE = re.compile(
+    r'<!--\s*kmbl-(?:scene-metaphor|motion-language|identity-grounded)[^>]*-->',
+    re.IGNORECASE,
+)
+
+_INTERNAL_CLASS_RE = re.compile(r'\bkmbl-cool-hero\b', re.IGNORECASE)
+
+
+def _strip_internal_markers(html: str) -> str:
+    """Remove identity/cool-lane data-kmbl-* attributes, kmbl-cool-hero classes, and kmbl HTML comments.
+
+    Preserves data-kmbl-injected (assembly marker used by the preview pipeline).
+    """
+    for attr in _IDENTITY_MARKER_ATTRS:
+        html = re.sub(
+            rf'\s+{re.escape(attr)}(?:="[^"]*")?',
+            "",
+            html,
+            flags=re.IGNORECASE,
+        )
+    html = _INTERNAL_COMMENT_RE.sub("", html)
+    # Strip kmbl-cool-hero from class attributes without removing the whole attribute
+    html = _INTERNAL_CLASS_RE.sub("", html)
+    # Clean up doubled spaces in class attributes left after stripping
+    html = re.sub(r'class="(\s+)', 'class="', html)
+    html = re.sub(r'(\s+)"', '"', html)
+    return html

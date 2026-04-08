@@ -61,7 +61,10 @@ from kmbl_orchestrator.runtime.generator_iteration_compact_v1 import (
     compact_previous_evaluation_report_for_llm,
     compact_structured_identity,
 )
-from kmbl_orchestrator.runtime.preview_reachability import manifest_first_evaluator_grounding_satisfied
+from kmbl_orchestrator.runtime.preview_reachability import (
+    manifest_first_evaluator_grounding_satisfied,
+    preview_host_blocked_by_openclaw_default,
+)
 from kmbl_orchestrator.runtime.session_staging_links import resolve_evaluator_preview_resolution
 from kmbl_orchestrator.runtime.static_vertical_invariants import (
     is_interactive_frontend_vertical,
@@ -374,7 +377,18 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
         if isinstance(opu_raw, str) and opu_raw.strip()
         else None
     )
-    preview_url_for_payload = preview_url or operator_preview_url
+    # Only pass a preview_url that the evaluator agent can actually reach through
+    # OpenClaw's gateway.  OpenClaw blocks web_fetch / Playwright to localhost and
+    # private IPs regardless of the orchestrator's allow_private flag.  Passing an
+    # unreachable URL wastes tokens on failed fetch attempts and false
+    # "preview_unreachable" issues.  operator_preview_url is for human operators
+    # (browser devtools), NOT for the evaluator agent.
+    # When preview_url is None the evaluator evaluates from artifact content/snippets
+    # and reconcile_evaluator_false_negatives handles residual missing-preview issues.
+    preview_url_for_payload = preview_url if (
+        preview_url
+        and not preview_host_blocked_by_openclaw_default(preview_url)
+    ) else None
     if getattr(ctx.settings, "orchestrator_smoke_contract_evaluator", False):
         _log.info(
             "evaluator smoke_contract_evaluator graph_run_id=%s — clearing preview_url "
@@ -531,10 +545,16 @@ def evaluator_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             if iter_hint > 0 and isinstance(state.get("structured_identity"), dict)
             else state.get("structured_identity")
         ),
-        # Prefer browser-reachable preview; fall back to operator-local URL to avoid false
-        # "missing_preview" judgments when artifacts and local materialization are present.
+        # Only pass a preview_url that the evaluator can actually fetch through
+        # OpenClaw's gateway.  When None the evaluator evaluates from artifact
+        # content (summary_v2 / snippets) — reconcile_evaluator_false_negatives
+        # handles residual missing-preview issues.
         "preview_url": preview_url_for_payload,
         "preview_resolution": preview_resolution,
+        # Explicit grounding mode so the evaluator knows how to inspect.
+        "evaluator_grounding_mode": (
+            "browser_preview" if preview_url_for_payload else "artifact_content"
+        ),
         "iteration_context": {
             "iteration_index": iter_hint,
             "has_previous_evaluation_report": bool(prev_ev),

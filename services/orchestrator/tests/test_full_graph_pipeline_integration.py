@@ -266,6 +266,39 @@ class TestNormalizationRescueObservability:
             f"content_enrichment should not be in rescue paths: {rescues}"
         )
 
+    def test_internal_language_scrubbed_from_frontend_artifacts(self) -> None:
+        raw = {
+            "artifact_outputs": [
+                {
+                    "role": "static_frontend_file_v1",
+                    "path": "component/preview/index.html",
+                    "language": "html",
+                    "content": (
+                        "<main><h1>A warm, playful portfolio in slow drift</h1>"
+                        "<p>identity anchor and context band</p></main>"
+                    ),
+                    "entry_for_preview": True,
+                }
+            ],
+        }
+        cand = normalize_generator_output(
+            raw,
+            thread_id=uuid4(),
+            graph_run_id=uuid4(),
+            generator_invocation_id=uuid4(),
+            build_spec_id=uuid4(),
+        )
+        artifacts = cand.artifact_refs_json or []
+        html = ""
+        for a in artifacts:
+            if isinstance(a, dict) and a.get("path") == "component/preview/index.html":
+                html = str(a.get("content") or "")
+                break
+        assert "A warm, playful portfolio in slow drift" not in html
+        assert "identity anchor" not in html.lower()
+        assert "context band" not in html.lower()
+        assert "identity-led interactive surface" in html
+
 
 # ---------------------------------------------------------------------------
 # 3. Evaluator → identity feedback loop

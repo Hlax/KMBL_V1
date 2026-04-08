@@ -121,20 +121,28 @@ def _has_scene_grammar_evidence(build_spec: dict[str, Any]) -> bool:
     return bool(cb.get("scene_metaphor") or cb.get("motion_language") or cb.get("material_hint"))
 
 
-def _detect_identity_grounding_in_artifacts(raw_text: str, build_spec: dict[str, Any]) -> bool:
+def _detect_identity_grounding_in_artifacts(
+    raw_text: str,
+    build_spec: dict[str, Any],
+    build_candidate: dict[str, Any] | None = None,
+) -> bool:
     """
-    Check whether artifacts contain evidence that identity signals shaped the output.
+    Check whether the generator produced identity-grounded output.
 
-    Returns True only when explicit identity grounding markers are present in the
-    artifact text — regardless of whether the spec contains scene grammar.
-    This ensures generic demo patterns are always flagged unless the generator
-    explicitly annotated its output with grounding evidence.
+    Primary signal: ``kmbl_scene_manifest_v1`` in the build candidate — structured,
+    never rendered to users, and the authoritative grounding proof.
 
-    Markers checked:
-      - HTML comments: <!-- kmbl-scene-metaphor: ... -->
-      - Data attributes: data-kmbl-scene, data-kmbl-motion
-      - Inline tokens: kmbl-identity-grounded, kmbl-motion-language
+    Fallback: HTML markers (legacy; generators should stop emitting these since they
+    leak into user-facing HTML).
     """
+    # Primary: scene manifest in build_candidate (structured grounding, not HTML)
+    bc = build_candidate or {}
+    sm = bc.get("kmbl_scene_manifest_v1")
+    if isinstance(sm, dict):
+        if sm.get("scene_metaphor") or sm.get("identity_signals_used"):
+            return True
+
+    # Fallback: legacy HTML markers (still accepted for backwards compat)
     marker_re = re.compile(
         r"kmbl-scene-metaphor|kmbl-motion-language|kmbl-identity-grounded|"
         r"data-kmbl-scene|data-kmbl-motion",
@@ -499,7 +507,7 @@ def apply_interactive_lane_evaluator_gate(
             # Check if creative_brief has scene_grammar evidence to justify the primitives
             has_grammar = _has_scene_grammar_evidence(build_spec)
             # Check if identity grounding markers appear in the output
-            identity_grounded = _detect_identity_grounding_in_artifacts(raw_text, build_spec)
+            identity_grounded = _detect_identity_grounding_in_artifacts(raw_text, build_spec, build_candidate)
             if not identity_grounded:
                 if not _has_code(GENERIC_DEMO_PATTERN_CODE):
                     new_issues.append(

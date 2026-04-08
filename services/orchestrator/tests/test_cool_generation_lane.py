@@ -45,9 +45,13 @@ def test_apply_presets_merges_literal_needles() -> None:
     needles = bs.get("literal_success_checks") or []
     joined = " ".join(str(x).lower() for x in needles)
     assert "https://cdn.example.com/p.jpg" in joined
-    assert 'data-kmbl-cool-lane="1"' in joined or "data-kmbl-cool-lane" in joined
-    assert "kmbl-cool-hero" in joined
-    assert "kmbl-pattern-portrait-led-editorial-hero" in joined
+    # Internal markers (data-kmbl-cool-lane, kmbl-cool-hero, kmbl-pattern-*)
+    # are no longer injected into literal_success_checks to prevent leakage
+    # into user-facing HTML.  Identity grounding is verified via
+    # kmbl_scene_manifest_v1 (structured, never rendered).
+    assert "data-kmbl-cool-lane" not in joined
+    assert "kmbl-cool-hero" not in joined
+    assert "kmbl-pattern-" not in joined
     assert isinstance(bs.get("creative_brief"), dict)
 
 

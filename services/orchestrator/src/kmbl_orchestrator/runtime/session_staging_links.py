@@ -173,7 +173,13 @@ def resolve_evaluator_preview_resolution(
         operator_preview_url = bc_preview
         operator_source = "build_candidate_preview_url"
 
-    allow_private = bool(getattr(settings, "kmbl_evaluator_allow_private_preview_fetch", False))
+    allow_private_cfg = bool(getattr(settings, "kmbl_evaluator_allow_private_preview_fetch", False))
+    # derived_local auto-grant removed: OpenClaw's gateway blocks web_fetch /
+    # Playwright to localhost/private IPs regardless of this flag.  The auto-grant
+    # caused the orchestrator to pass a localhost URL the evaluator could never
+    # reach, producing repeated "preview_unreachable" failures and wasting tokens.
+    # To explicitly allow private previews, set KMBL_EVALUATOR_ALLOW_PRIVATE_PREVIEW_FETCH=true.
+    allow_private = allow_private_cfg
 
     browser_preview_url: str | None = None
     browser_source = "none"
@@ -272,6 +278,10 @@ def resolve_evaluator_preview_resolution(
         "preview_grounding_degrade_reason": preview_grounding_degrade_reason,
         "preview_paths_present": has_candidate_path,
         "kmbl_evaluator_allow_private_preview_fetch": allow_private,
+        "kmbl_evaluator_allow_private_preview_fetch_effective": {
+            "configured": allow_private_cfg,
+            "derived_local_autogrant": False,
+        },
         "preview_owner": (
             "candidate_preview"
             if isinstance(operator_source, str) and operator_source.startswith("orchestrator_candidate_preview")

@@ -167,13 +167,7 @@ When `build_spec.type` is `interactive_frontend_app_v1` and `experience_mode` is
 - Read `kmbl_execution_contract.creative_brief_motion_language` — use that motion grammar for all transitions/animations.
 - Read `kmbl_execution_contract.creative_brief_primitive_guidance` — use those geometry recommendations, not defaults.
 
-**Identity grounding marker (required for cool lane):** Embed at least one identity grounding marker in your HTML output:
-```html
-<!-- kmbl-scene-metaphor: {scene_metaphor_value} -->
-<!-- kmbl-motion-language: {motion_language_value} -->
-```
-Or as data attributes: `data-kmbl-scene="{scene_metaphor}"` on the root canvas/scene element.
-This lets the evaluator verify identity grounding without reading the full diff.
+**Identity grounding (required for cool lane):** Emit the `kmbl_scene_manifest_v1` JSON field (see below) — this is the **primary structured signal** for identity grounding. Do **not** embed `data-kmbl-*` attributes, `kmbl-cool-hero` classes, `kmbl-pattern-*` tokens, or `<!-- kmbl-* -->` HTML comments in your output HTML. These are internal scaffolding that leaks into user-facing pages. The scene manifest is verified structurally by the evaluator without polluting the rendered DOM.
 
 **Scene topology instead of section topology:**
 - `immersive_identity_experience` → scene is an **experience**, not a page. Use depth, zones, spatial layers.
@@ -194,6 +188,7 @@ Do **not**:
 - Explain plans outside JSON.
 - Return **placeholder** body copy (“Lorem”, “Coming soon”) when real content is required.
 - Invent **`file_path`** entries you did not include.
+- Write **placeholder split files** to disk (e.g. `app.js` or `styles.css` containing only a comment like “reserved for future bundle splitting”). If CSS/JS is inline in `index.html`, do **not** create empty/stub sibling files. Only write files that contain real, functional code. Only list real files in **`workspace_manifest_v1`**.
 - Emit **both** valid artifacts and waffle that breaks parsing.
 - Expand scope beyond **build_spec** / **event_input**.
 - Pretend **`kmbl-generator`** is **`kmbl-image-gen`**.

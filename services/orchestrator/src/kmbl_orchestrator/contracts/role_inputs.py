@@ -99,7 +99,9 @@ class PlannerRoleInput(BaseModel):
             "MUST return `selected_urls` — the subset of next_urls_to_crawl URLs it actually "
             "consulted or used. Prefer exact absolute URLs from next_urls_to_crawl; relative "
             "paths (e.g. /about) are accepted and will be resolved against root_url. Do not "
-            "invent URLs not in the offered set. Return [] if no frontier URLs were used. "
+            "invent URLs not in the offered set. When next_urls_to_crawl is empty, use "
+            "grounded_reference_urls/top_identity_pages as the allowed set. Return [] if no "
+            "allowed URLs were used. "
             "This enables tier-2 evidence (selected_by_planner) for auditable crawl progression."
         ),
     )
@@ -367,6 +369,14 @@ class EvaluatorRoleInput(BaseModel):
             "preview_grounding_mode (operator_local_only | browser_reachable | unavailable), "
             "preview_url_host_class, preview_grounding_reason, preview_url_browser_reachable_expected, "
             "and related flags."
+        ),
+    )
+    evaluator_grounding_mode: str | None = Field(
+        default=None,
+        description=(
+            "How the evaluator should inspect the build: 'browser_preview' when a reachable preview_url "
+            "is available, 'artifact_content' when the evaluator must evaluate from artifact "
+            "content/snippets (preview_url is null, e.g. localhost blocked by gateway)."
         ),
     )
     iteration_context: dict[str, Any] | None = Field(

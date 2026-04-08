@@ -250,6 +250,11 @@ def ingest_workspace_manifest_if_present(
             text = data.decode("utf-8")
         except UnicodeDecodeError as e:
             raise WorkspaceIngestError(f"non-utf8 file: {path}") from e
+        # Skip placeholder-only files (e.g. "/* reserved for future bundle splitting */")
+        stripped = text.strip()
+        if stripped.startswith("/*") and stripped.endswith("*/") and "\n" not in stripped:
+            _log.info("workspace_ingest skipping placeholder file: %s", path)
+            continue
         lang = _infer_language(path)
         ingested.append(
             {

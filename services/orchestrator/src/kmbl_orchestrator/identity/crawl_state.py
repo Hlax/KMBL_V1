@@ -387,14 +387,16 @@ def seed_external_inspiration(
 _SELECTED_URLS_CONTRACT: dict[str, Any] = {
     "instruction": (
         "You MUST return `selected_urls` in your output — a list of the URLs "
-        "from `next_urls_to_crawl` that you actually consulted or whose content "
-        "influenced your plan.  Rules:\n"
-        "1. ONLY include URLs from `next_urls_to_crawl` or explicitly allowed "
+        "from `next_urls_to_crawl` (or, when frontier is exhausted, from "
+        "`grounded_reference_urls` / `top_identity_pages`) that you actually "
+        "consulted or whose content influenced your plan.  Rules:\n"
+        "1. ONLY include URLs from `next_urls_to_crawl`, or when it is empty, from "
+        "`grounded_reference_urls` / `top_identity_pages`, or explicitly allowed "
         "external inspiration URLs. Do NOT invent URLs.\n"
         "2. Prefer the exact absolute URL as listed in `next_urls_to_crawl`.\n"
         "3. Relative paths (e.g. /about, ./contact) are accepted but absolute "
         "URLs are preferred.\n"
-        "4. If you did not consult any frontier URL, return `selected_urls: []`.\n"
+        "4. If you did not consult any allowed URL from those sets, return `selected_urls: []`.\n"
         "5. Do NOT omit the field — always include it."
     ),
     "examples": [
@@ -434,7 +436,8 @@ _SELECTED_URLS_CONTRACT: dict[str, Any] = {
         },
     ],
     "forbidden": (
-        "Do NOT include URLs that are not in `next_urls_to_crawl` or "
+        "Do NOT include URLs that are not in `next_urls_to_crawl` (or when exhausted, "
+        "`grounded_reference_urls` / `top_identity_pages`) or "
         "the allowed external inspiration set.  Invented URLs are discarded "
         "by the orchestrator."
     ),

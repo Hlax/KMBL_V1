@@ -28,6 +28,45 @@ from kmbl_orchestrator.runtime.generator_wire_compact_v1 import (
 
 _log = logging.getLogger(__name__)
 
+_INTERNAL_LEAK_REPLACEMENTS: tuple[tuple[str, str], ...] = (
+    (r"(?i)\ba warm,\s*playful portfolio in slow drift\b", "an identity-led interactive surface"),
+    (r"(?i)\bidentity\s+anchor\b", "identity signal"),
+    (r"(?i)\bcontext\s+band\b", "context strip"),
+    (r"(?i)\babout\s+and\s+philosophy\b", "about"),
+    (r"(?i)\bidentity-anchor\b", "identity-signal"),
+    (r"(?i)\bcontext-band\b", "context-strip"),
+    (r"(?i)\babout-philosophy\b", "about"),
+)
+
+
+def _sanitize_internal_language_leaks(artifacts: list[Any]) -> tuple[list[Any], int]:
+    """Remove known internal planning/pattern phrasing from user-facing frontend artifacts."""
+    out: list[Any] = []
+    changed = 0
+    for item in artifacts:
+        if not isinstance(item, dict):
+            out.append(item)
+            continue
+        if not is_frontend_file_artifact_role(item.get("role")):
+            out.append(item)
+            continue
+        content = item.get("content")
+        if not isinstance(content, str) or not content.strip():
+            out.append(item)
+            continue
+
+        updated = content
+        for pattern, repl in _INTERNAL_LEAK_REPLACEMENTS:
+            updated = re.sub(pattern, repl, updated)
+        if updated != content:
+            changed += 1
+            new_item = dict(item)
+            new_item["content"] = updated
+            out.append(new_item)
+        else:
+            out.append(item)
+    return out, changed
+
 
 def _default_promotion_role(raw: dict[str, Any]) -> str:
     """Orchestrator may set ``_kmbl_frontend_artifact_role`` after workspace ingest."""
@@ -484,6 +523,10 @@ def normalize_generator_output(
     enriched_count = content_after - content_before
     if enriched_count > 0:
         enrichment_paths.append(f"content_enrichment:{enriched_count}")
+
+    artifacts, leak_scrubbed = _sanitize_internal_language_leaks(artifacts)
+    if leak_scrubbed > 0:
+        enrichment_paths.append(f"internal_language_scrub:{leak_scrubbed}")
 
     try:
         artifacts = normalize_combined_artifact_outputs_list(artifacts)

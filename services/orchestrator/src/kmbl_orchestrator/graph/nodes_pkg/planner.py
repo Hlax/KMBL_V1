@@ -378,9 +378,18 @@ def planner_node(ctx: "GraphContext", state: GraphState) -> dict[str, Any]:
             settings=ctx.settings,
         )
         if bias_mode and bias_mode != derived_mode:
-            bs["experience_mode"] = bias_mode
-            md["experience_mode_source"] = "structured_identity_with_cross_run_memory_bias"
-            md["experience_mode_memory_bias"] = {"to": bias_mode, "reason": bias_reason}
+            site_arch = str(bs.get("site_archetype") or "").strip().lower()
+            # Never let memory bias force portfolio IA unless planner/archetype explicitly asks for it.
+            if bias_mode == "webgl_3d_portfolio" and site_arch != "portfolio":
+                md["experience_mode_memory_bias_blocked"] = {
+                    "from": derived_mode,
+                    "attempted": bias_mode,
+                    "reason": "portfolio_bias_without_explicit_portfolio_archetype",
+                }
+            else:
+                bs["experience_mode"] = bias_mode
+                md["experience_mode_source"] = "structured_identity_with_cross_run_memory_bias"
+                md["experience_mode_memory_bias"] = {"to": bias_mode, "reason": bias_reason}
         _log.info(
             "graph_run graph_run_id=%s experience_mode derived=%s confidence=%.2f archetype=%s",
             gid, bs.get("experience_mode"), mode_result["experience_confidence"], bs.get("site_archetype"),
@@ -642,28 +651,40 @@ def _backfill_selected_urls_from_crawl_context(
         return None
 
     offered_raw = cc.get("next_urls_to_crawl")
-    if not isinstance(offered_raw, list):
-        return None
-    offered = [u for u in offered_raw if isinstance(u, str) and u.strip()]
-    if not offered:
+    offered = [u for u in offered_raw if isinstance(u, str) and u.strip()] if isinstance(offered_raw, list) else []
+
+    grounded_urls: list[str] = []
+    grounded_raw = cc.get("grounded_reference_urls")
+    if isinstance(grounded_raw, list):
+        grounded_urls.extend([u for u in grounded_raw if isinstance(u, str) and u.strip()])
+    top_identity = cc.get("top_identity_pages")
+    if isinstance(top_identity, list):
+        for item in top_identity:
+            if isinstance(item, dict):
+                u = item.get("url")
+                if isinstance(u, str) and u.strip():
+                    grounded_urls.append(u.strip())
+
+    candidate_pool = offered or grounded_urls
+    if not candidate_pool:
         return None
 
     referenced_urls = extract_urls_from_build_spec(bs)
-    matched = match_planner_selections_to_offered(referenced_urls, offered)
+    matched = match_planner_selections_to_offered(referenced_urls, candidate_pool)
     if matched:
         bs["selected_urls"] = matched
         return {
             "applied": True,
-            "source": "build_spec_referenced",
+            "source": "build_spec_referenced" if offered else "grounded_reference_referenced",
             "count": len(matched),
         }
 
-    default_pick = offered[:1]
+    default_pick = candidate_pool[:1]
     if not default_pick:
         return None
     bs["selected_urls"] = default_pick
     return {
         "applied": True,
-        "source": "frontier_default",
+        "source": "frontier_default" if offered else "grounded_reference_default",
         "count": len(default_pick),
     }

@@ -16,16 +16,18 @@ Put **explicit, generator-usable** controls in **`constraints.variation_levers`*
 
 | Key | Purpose | Example values |
 |-----|---------|----------------|
-| **layout_mode** | Page structure grammar | `stacked_sections`, `editorial_split`, `single_hero_proof`, `asymmetric_grid` |
+| **layout_mode** | Page structure grammar | `stacked_sections`, `editorial_split`, `single_hero_proof`, `asymmetric_grid`, `single_scroll_narrative`, `featured_statement`, `collage_mosaic`, `typographic_canvas` |
 | **visual_density** | Whitespace vs information | `low`, `medium`, `high` |
 | **tone_axis** | Voice | `restrained_confident`, `warm_direct`, `minimal_clinical` |
 | **content_emphasis** | Story order | `proof_before_story`, `story_first`, `cta_first` |
-| **section_rhythm** | Section order label | `hero_proof_story_cta`, `minimal_single_surface` |
+| **section_rhythm** | Section order label | `hero_proof_story_cta`, `minimal_single_surface`, `statement_then_proof`, `narrative_scroll`, `featured_moment_plus_links`, `visual_essay`, `single_canvas` |
 | **cta_style** | CTA shape | `understated`, `primary_button`, `text_link` |
 | **motion_appetite** | Motion budget | `none`, `low`, `medium` |
 | **surface_bias** | Delivery shape | `static_bundle`, `interactive_bundle`, `habitat_manifest`, `composable_ui` |
 
 The **generator** must be able to implement these **without guessing**. If you use a creative phrase in **`design_direction`**, mirror it with a **matching** `variation_levers` entry.
+
+**Structural diversity (identity-url static runs):** When the vertical is **`static_frontend_file_v1`** and the identity source is a URL, **do not** default to **hero / projects / about / contact** four-section portfolio structure. The identity's own content, tone, and emphasis should drive section choices. A photographer might get a single full-bleed gallery statement; a writer might get a typographic essay scroll; a studio might get an asymmetric collage. Use **`section_rhythm`** values beyond `hero_proof_story_cta` — e.g. `statement_then_proof`, `narrative_scroll`, `featured_moment_plus_links`, `visual_essay`, `single_canvas`. Portfolio-shaped sections are **one valid option**, not the default.
 
 ## Incremental scope
 
@@ -56,6 +58,8 @@ If **`user_interrupts`** present: merge into **`design_direction`** / **`constra
 | **constraints** | Scope caps, **variation_levers**, **canonical_vertical** when static (`static_frontend_file_v1`), interactive bundle (`interactive_frontend_app_v1`), or habitat (`habitat_manifest_v2`). |
 | **success_criteria** | 2–4 **testable** strings where possible. |
 | **evaluation_targets** | Checklist items **`kmbl-evaluator`** can verify (selectors, text_present, artifact roles). |
+
+**Evaluation target discipline:** Use **`text_present`** targets for identity-grounded content (display name, role, key works). Use **`selector_present`** targets **sparingly** and only for functional structure (e.g. `nav`, `main`, `[data-kmbl-*]` markers), **not** for section-specific CSS classes like `section.projects-grid` or `section.about-career` — those lock the generator into a fixed structural shape regardless of creative direction. The generator should be free to choose how to structure the page; the evaluator should verify **content and quality**, not **CSS class names**.
 
 **Thin payload:** still valid JSON; use `{}` / `[]` where needed — **do not** fabricate product facts.
 

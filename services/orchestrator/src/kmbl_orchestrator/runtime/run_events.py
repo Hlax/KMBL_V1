@@ -110,6 +110,9 @@ class RunEventType:
     # Decision router: weakly-grounded retry cap reached — iterate rerouted to stage.
     WEAKLY_GROUNDED_RETRY_CAP = "weakly_grounded_retry_cap"
 
+    # Evaluation target diversity: portfolio-shaped selector_present targets softened.
+    EVALUATION_TARGET_DIVERSITY_APPLIED = "evaluation_target_diversity_applied"
+
     # Habitat materialization lifecycle (local workspace as evictable cache layer)
     HABITAT_MATERIALIZED = "habitat_materialized"
     HABITAT_MATERIALIZATION_FAILED = "habitat_materialization_failed"
